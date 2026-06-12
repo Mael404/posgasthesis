@@ -15,11 +15,7 @@ class DashboardController extends Controller
 
     public function admin(): View
     {
-        return $this->dashboard(
-            'VP Admin Dashboard',
-            'VP Admin',
-            'Full administrative access for executive monitoring, user oversight, and reports.'
-        );
+        return view('pages.admin.admindashboard', ['title' => 'VP Admin Dashboard']);
     }
 
     public function semiAdmin(): View
@@ -33,11 +29,7 @@ class DashboardController extends Controller
 
     public function staff(): View
     {
-        return $this->dashboard(
-            'Staff Dashboard',
-            'Staff',
-            'Staff workspace for daily activities, profile access, forms, and assigned records.'
-        );
+        return view('pages.staff.staffdashboard', ['title' => 'Staff Dashboard']);
     }
 
     private function dashboard(string $title, string $roleName, string $roleDescription): View

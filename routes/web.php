@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthenticatedSessionController;
+use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Facades\Route;
 
@@ -14,7 +15,7 @@ Route::middleware('auth')->group(function () {
     // dashboard pages
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
-    Route::get('/admin/dashboard', [DashboardController::class, 'admin'])
+    Route::get('/admin/dashboard', [AdminDashboardController::class, 'dashboard'])
         ->middleware('role:vp_admin')
         ->name('dashboard.admin');
 
@@ -25,6 +26,54 @@ Route::middleware('auth')->group(function () {
     Route::get('/staff/dashboard', [DashboardController::class, 'staff'])
         ->middleware('role:staff')
         ->name('dashboard.staff');
+
+    Route::middleware('role:vp_admin')->group(function () {
+        Route::get('/api/dashboard-data', [AdminDashboardController::class, 'getDashboardData'])
+            ->name('dashboard.admin.data');
+
+        Route::get('/admin/backup/database', [AdminDashboardController::class, 'backupDatabase'])
+            ->name('admin.backup.db');
+
+        Route::get('/admin/sales-monitoring', function () {
+            return view('pages.admin.transactionlogs', ['title' => 'Transaction Logs']);
+        })->name('admin.sales.index');
+
+        Route::prefix('admin/reconciliation')->name('admin.reconcile.')->group(function () {
+            Route::get('/', function () {
+                return view('pages.admin.shiftreconciliation', ['title' => 'Shift Reconciliation']);
+            })->name('index');
+        });
+
+        Route::get('/inventory', function () {
+            return view('pages.admin.inventoryandtanks', ['title' => 'Inventory & Tanks']);
+        })->name('inventory.index');
+
+        Route::get('/customers', function () {
+            return view('pages.admin.customersandcredit', ['title' => 'Customers & Credit']);
+        })->name('customers.index');
+
+        Route::get('/admin/billing', function () {
+            return view('pages.admin.billingandinvoices', ['title' => 'Billing & Invoices']);
+        })->name('admin.billing.index');
+
+        Route::get('/staffs', function () {
+            return view('pages.admin.managestaffs', ['title' => 'Manage Staffs']);
+        })->name('staffs.index');
+    });
+
+    Route::middleware('role:staff')->group(function () {
+        Route::get('/staff/pump', function () {
+            return view('pages.staff.pumpstation', ['title' => 'Pump Station']);
+        })->name('staff.pump.index');
+
+        Route::get('/staff/readings', function () {
+            return view('pages.staff.shiftreadings', ['title' => 'Shift Readings']);
+        })->name('staff.readings.index');
+
+        Route::get('/staff/sales/history', function () {
+            return view('pages.staff.transactionhistory', ['title' => 'Transaction History']);
+        })->name('staff.sales.history');
+    });
 
     // calender pages
     Route::get('/calendar', function () {
@@ -90,8 +139,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
 
 
 
