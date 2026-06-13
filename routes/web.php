@@ -3,7 +3,10 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\DashboardController;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 
 Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
 Route::get('/signin', [AuthenticatedSessionController::class, 'create'])->name('signin');
@@ -43,6 +46,62 @@ Route::middleware('auth')->group(function () {
                 return view('pages.admin.shiftreconciliation', ['title' => 'Shift Reconciliation']);
             })->name('index');
         });
+
+        Route::get('/admin/shift-readings/notifications', function () {
+            try {
+                if (! Schema::hasTable('shift_readings') || ! Schema::hasTable('users')) {
+                    return response()->json([
+                        'notifications' => [],
+                        'unread_count' => 0,
+                    ]);
+                }
+
+                $notifications = DB::table('shift_readings')
+                    ->join('users', 'shift_readings.user_id', '=', 'users.id')
+                    ->select(
+                        'shift_readings.id',
+                        'shift_readings.period_from',
+                        'shift_readings.period_to',
+                        'shift_readings.status',
+                        'shift_readings.created_at',
+                        'users.name as staff_name'
+                    )
+                    ->where('shift_readings.status', 'Pending')
+                    ->orderByDesc('shift_readings.created_at')
+                    ->limit(10)
+                    ->get()
+                    ->map(function ($reading) {
+                        $from = $reading->period_from
+                            ? Carbon::parse($reading->period_from)->format('M d, Y')
+                            : null;
+                        $to = $reading->period_to
+                            ? Carbon::parse($reading->period_to)->format('M d, Y')
+                            : $from;
+
+                        return [
+                            'id' => (int) $reading->id,
+                            'staffName' => $reading->staff_name ?: 'Staff',
+                            'period' => $from && $from !== $to ? "{$from} - {$to}" : ($from ?: 'No period selected'),
+                            'status' => 'Pending Verification',
+                            'time' => $reading->created_at
+                                ? Carbon::parse($reading->created_at)->diffForHumans()
+                                : '',
+                            'url' => route('admin.reconcile.index', [], false),
+                        ];
+                    })
+                    ->values();
+
+                return response()->json([
+                    'notifications' => $notifications,
+                    'unread_count' => $notifications->count(),
+                ]);
+            } catch (\Throwable) {
+                return response()->json([
+                    'notifications' => [],
+                    'unread_count' => 0,
+                ]);
+            }
+        })->name('admin.shift-readings.notifications');
 
         Route::get('/inventory', function () {
             return view('pages.admin.inventoryandtanks', ['title' => 'Inventory & Tanks']);
@@ -139,8 +198,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
 
 
 

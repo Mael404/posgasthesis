@@ -93,7 +93,7 @@ class MenuHelper
     public static function getRoleLabel(?string $role = null): string
     {
         return match ($role ?? Auth::user()?->role) {
-            'vp_admin' => 'VP Admin',
+            'vp_admin' => 'Admin',
             'semiadmin' => 'Semi Admin',
             'staff' => 'Staff',
             default => 'Menu',

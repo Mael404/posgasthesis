@@ -6,10 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>{{ $title ?? 'Dashboard' }} | TailAdmin - Laravel Tailwind CSS Admin Dashboard Template</title>
+    <title>{{ $title ?? 'Dashboard' }} | JRM Fuel Station</title>
 
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @livewireStyles
 
     <!-- Alpine.js -->
     {{-- <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script> --}}
@@ -125,14 +126,19 @@
             @include('layouts.app-header')
             <!-- app header end -->
             <div class="min-w-0 p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
-                @yield('content')
+                @isset($slot)
+                    {{ $slot }}
+                @else
+                    @yield('content')
+                @endisset
             </div>
         </div>
 
     </div>
 
-</body>
+    @stack('scripts')
+    @livewireScriptConfig
 
-@stack('scripts')
+</body>
 
 </html>

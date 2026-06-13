@@ -92,7 +92,7 @@ class User extends Authenticatable
     public function roleLabel(): string
     {
         return match ($this->role) {
-            self::ROLE_VP_ADMIN => 'VP Admin',
+            self::ROLE_VP_ADMIN => 'Admin',
             self::ROLE_SEMI_ADMIN => 'Semi Admin',
             self::ROLE_STAFF => 'Staff',
             default => 'Unknown Role',

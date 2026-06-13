@@ -15,7 +15,7 @@ class DashboardController extends Controller
 
     public function admin(): View
     {
-        return view('pages.admin.admindashboard', ['title' => 'VP Admin Dashboard']);
+        return view('pages.admin.admindashboard', ['title' => 'Admin Dashboard']);
     }
 
     public function semiAdmin(): View

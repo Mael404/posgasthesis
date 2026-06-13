@@ -30,7 +30,7 @@ class AdminDashboardController extends Controller
         $payload = $this->dashboardPayload($request);
 
         return view('pages.admin.admindashboard', array_merge($payload, [
-            'title' => 'VP Admin Dashboard',
+            'title' => 'Admin Dashboard',
         ]));
     }
 

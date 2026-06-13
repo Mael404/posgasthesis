@@ -90,7 +90,7 @@
                     <div class="flex max-w-xs flex-col items-center">
                         <img src="./images/logo/auth-logo.svg" alt="Logo" class="mb-4" />
                         <p class="text-center text-gray-400 dark:text-white/60">
-                            Role-based access for VP Admin, Semi Admin, and Staff users.
+                            Role-based access for Admin, Semi Admin, and Staff users.
                         </p>
                     </div>
                 </div>

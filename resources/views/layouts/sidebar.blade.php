@@ -8,7 +8,7 @@
 @endphp
 
 <aside id="sidebar"
-    class="fixed flex flex-col mt-0 top-0 px-5 left-0 bg-white dark:bg-gray-900 dark:border-gray-800 text-gray-900 h-screen transition-all duration-300 ease-in-out z-99999 border-r border-gray-200"
+    class="fixed left-0 top-0 z-[100000] mt-0 flex h-screen flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900"
     x-data="{
         openSubmenus: {},
         init() {
@@ -52,22 +52,19 @@
     @mouseenter="if (!$store.sidebar.isExpanded) $store.sidebar.setHovered(true)"
     @mouseleave="$store.sidebar.setHovered(false)">
     <!-- Logo Section -->
-    <div class="pt-8 pb-7 flex"
+    <div class="pt-6 pb-5 flex"
         :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
         'xl:justify-center' :
         'justify-start'">
-        <a href="/">
+        <a href="/" class="inline-flex items-center justify-center transition-all duration-300">
             <img x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen"
-                class="dark:hidden" src="/images/logo/logo.svg" alt="Logo" width="150" height="40" />
-            <img x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen"
-                class="hidden dark:block" src="/images/logo/logo-dark.svg" alt="Logo" width="150"
-                height="40" />
+                class="h-auto w-[215px] max-w-full object-contain" src="{{ asset('images/jrs.png') }}"
+                alt="JRM Fuel Station Logo" />
             <img x-show="!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen"
-                src="/images/logo/logo-icon.svg" alt="Logo" width="32" height="32" />
-
+                class="h-8 w-10 object-contain" src="{{ asset('images/jrs.png') }}"
+                alt="JRM Fuel Station Logo" />
         </a>
     </div>
-
     <!-- Navigation Menu -->
     <div class="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar">
         <nav class="mb-6">
@@ -236,7 +233,3 @@
 
     </div>
 </aside>
-
-<!-- Mobile Overlay -->
-<div x-show="$store.sidebar.isMobileOpen" @click="$store.sidebar.setMobileOpen(false)"
-    class="fixed z-50 h-screen w-full bg-gray-900/50"></div>

@@ -12,16 +12,16 @@
             this.dropdownOpen = false;
         }
     }" @click.away="closeDropdown()">
-        <button class="flex items-center text-gray-700 dark:text-gray-400" @click.prevent="toggleDropdown()" type="button">
-            <span class="mr-3 flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-brand-50 text-sm font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
+        <button class="flex min-w-0 items-center text-gray-700 dark:text-gray-400" @click.prevent="toggleDropdown()" type="button">
+            <span class="mr-3 flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-50 text-sm font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
                 {{ strtoupper(substr($user->name ?? $user->email, 0, 1)) }}
             </span>
 
-            <span class="block max-w-[120px] truncate mr-1 font-medium text-theme-sm">
+            <span class="mr-1 hidden max-w-[120px] truncate font-medium text-theme-sm sm:block">
                 {{ $user->name }}
             </span>
 
-            <svg class="w-5 h-5 transition-transform duration-200" :class="{ 'rotate-180': dropdownOpen }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="h-5 w-5 shrink-0 transition-transform duration-200" :class="{ 'rotate-180': dropdownOpen }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
             </svg>
         </button>

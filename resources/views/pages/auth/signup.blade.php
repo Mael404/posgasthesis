@@ -158,7 +158,7 @@
                             <img src="./images/logo/auth-logo.svg" alt="Logo" />
                         </a>
                         <p class="text-center text-gray-400 dark:text-white/60">
-                            Free and Open-Source Tailwind CSS Admin Dashboard Template
+                            JRM Fuel Station operations platform
                         </p>
                     </div>
                 </div>
