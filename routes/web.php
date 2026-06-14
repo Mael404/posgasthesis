@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -47,13 +48,11 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/admin/backup-database', [AdminDashboardController::class, 'backupDatabase']);
 
-        Route::get('/admin/sales-monitoring', function () {
-            return view('pages.admin.transactionlogs', ['title' => 'Transaction Logs']);
-        })->name('admin.sales.index');
+        Route::get('/admin/sales-monitoring', [AdminReportController::class, 'index'])
+            ->name('admin.sales.index');
 
-        Route::get('/admin/sales/print', function () {
-            return view('pages.admin.transactionlogs', ['title' => 'Print Transaction Logs']);
-        })->name('admin.sales.print');
+        Route::get('/admin/sales/print', [AdminReportController::class, 'print'])
+            ->name('admin.sales.print');
 
         Route::prefix('admin/reconciliation')->name('admin.reconcile.')->group(function () {
             Route::get('/', function () {
@@ -351,7 +350,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
 
 
 
