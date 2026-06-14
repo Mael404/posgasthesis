@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ShiftReconciliationController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -55,28 +56,14 @@ Route::middleware('auth')->group(function () {
             ->name('admin.sales.print');
 
         Route::prefix('admin/reconciliation')->name('admin.reconcile.')->group(function () {
-            Route::get('/', function () {
-                return view('pages.admin.shiftreconciliation', ['title' => 'Shift Reconciliation']);
-            })->name('index');
-
-            Route::get('/details/{id}', function ($id) {
-                return response()->json([
-                    'message' => 'Shift reconciliation details are not connected yet.',
-                    'id' => $id,
-                ], 501);
-            })->name('details');
-
-            Route::post('/approve', function () {
-                return back()->with('status', 'Shift reconciliation approval is not connected yet.');
-            })->name('approve');
-
-            Route::post('/reject', function () {
-                return back()->with('status', 'Shift reconciliation rejection is not connected yet.');
-            })->name('reject');
-
-            Route::post('/remarks', function () {
-                return back()->with('status', 'Shift reconciliation remarks are not connected yet.');
-            })->name('remarks');
+            Route::get('/', [ShiftReconciliationController::class, 'index'])->name('index');
+            Route::get('/details/{id}', [ShiftReconciliationController::class, 'getDetails'])->name('details');
+            Route::get('/images/{reading}/{dispenser}/{type}', [ShiftReconciliationController::class, 'image'])
+                ->where(['dispenser' => '[1-3]', 'type' => 'liters|sales'])
+                ->name('image');
+            Route::post('/approve', [ShiftReconciliationController::class, 'approve'])->name('approve');
+            Route::post('/reject', [ShiftReconciliationController::class, 'reject'])->name('reject');
+            Route::post('/remarks', [ShiftReconciliationController::class, 'saveRemarks'])->name('remarks');
         });
 
         Route::prefix('admin/printed-transactions')->name('admin.printed-transactions.')->group(function () {
@@ -350,7 +337,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
 
 
 
