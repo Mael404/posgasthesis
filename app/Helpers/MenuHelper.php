@@ -195,6 +195,12 @@ class MenuHelper
                 'activePatterns' => ['/customers', '/customers/*'],
             ],
             [
+                'icon' => 'print',
+                'name' => 'Printed Transactions',
+                'path' => self::routePath('admin.printed-transactions.index', '/admin/printed-transactions'),
+                'activePatterns' => ['/admin/printed-transactions', '/admin/printed-transactions/*'],
+            ],
+            [
                 'icon' => 'forms',
                 'name' => 'Billing & Invoices',
                 'path' => self::routePath('admin.billing.index', '/admin/billing'),
@@ -241,20 +247,26 @@ class MenuHelper
             [
                 'icon' => 'ecommerce',
                 'name' => 'Pump Station',
-                'path' => self::routePath('staff.pump.index', '/staff/pump'),
-                'activePatterns' => ['/staff/pump', '/staff/pump/*'],
+                'path' => self::routePath('staff.pump.index', '/staff/pump-station'),
+                'activePatterns' => ['/staff/pump-station', '/staff/pump-station/*', '/staff/pump', '/staff/pump/*'],
             ],
             [
                 'icon' => 'task',
                 'name' => 'Shift Readings',
-                'path' => self::routePath('staff.readings.index', '/staff/readings'),
-                'activePatterns' => ['/staff/readings', '/staff/readings/*'],
+                'path' => self::routePath('staff.readings.index', '/staff/shift-readings'),
+                'activePatterns' => ['/staff/shift-readings', '/staff/shift-readings/*', '/staff/readings', '/staff/readings/*'],
             ],
             [
                 'icon' => 'tables',
                 'name' => 'Transaction History',
-                'path' => self::routePath('staff.sales.history', '/staff/sales/history'),
-                'activePatterns' => ['/staff/sales/history', '/staff/sales/history/*'],
+                'path' => self::routePath('staff.sales.history', '/staff/sales-history'),
+                'activePatterns' => ['/staff/sales-history', '/staff/sales-history/*', '/staff/sales/history', '/staff/sales/history/*'],
+            ],
+            [
+                'icon' => 'print',
+                'name' => 'Printed Transactions',
+                'path' => self::routePath('staff.printed-transactions.index', '/staff/printed-transactions'),
+                'activePatterns' => ['/staff/printed-transactions', '/staff/printed-transactions/*'],
             ],
         ];
     }
@@ -309,6 +321,8 @@ class MenuHelper
             'forms' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M5.5 3.25C4.25736 3.25 3.25 4.25736 3.25 5.5V18.5C3.25 19.7426 4.25736 20.75 5.5 20.75H18.5001C19.7427 20.75 20.7501 19.7426 20.7501 18.5V5.5C20.7501 4.25736 19.7427 3.25 18.5001 3.25H5.5ZM4.75 5.5C4.75 5.08579 5.08579 4.75 5.5 4.75H18.5001C18.9143 4.75 19.2501 5.08579 19.2501 5.5V18.5C19.2501 18.9142 18.9143 19.25 18.5001 19.25H5.5C5.08579 19.25 4.75 18.9142 4.75 18.5V5.5ZM6.25005 9.7143C6.25005 9.30008 6.58583 8.9643 7.00005 8.9643L17 8.96429C17.4143 8.96429 17.75 9.30008 17.75 9.71429C17.75 10.1285 17.4143 10.4643 17 10.4643L7.00005 10.4643C6.58583 10.4643 6.25005 10.1285 6.25005 9.7143ZM6.25005 14.2857C6.25005 13.8715 6.58583 13.5357 7.00005 13.5357H17C17.4143 13.5357 17.75 13.8715 17.75 14.2857C17.75 14.6999 17.4143 15.0357 17 15.0357H7.00005C6.58583 15.0357 6.25005 14.6999 6.25005 14.2857Z" fill="currentColor"></path></svg>',
 
             'tables' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.25 5.5C3.25 4.25736 4.25736 3.25 5.5 3.25H18.5C19.7426 3.25 20.75 4.25736 20.75 5.5V18.5C20.75 19.7426 19.7426 20.75 18.5 20.75H5.5C4.25736 20.75 3.25 19.7426 3.25 18.5V5.5ZM5.5 4.75C5.08579 4.75 4.75 5.08579 4.75 5.5V8.58325L19.25 8.58325V5.5C19.25 5.08579 18.9142 4.75 18.5 4.75H5.5ZM19.25 10.0833H15.416V13.9165H19.25V10.0833ZM13.916 10.0833L10.083 10.0833V13.9165L13.916 13.9165V10.0833ZM8.58301 10.0833H4.75V13.9165H8.58301V10.0833ZM4.75 18.5V15.4165H8.58301V19.25H5.5C5.08579 19.25 4.75 18.9142 4.75 18.5ZM10.083 19.25V15.4165L13.916 15.4165V19.25H10.083ZM15.416 19.25V15.4165H19.25V18.5C19.25 18.9142 18.9142 19.25 18.5 19.25H15.416Z" fill="currentColor"></path></svg>',
+
+            'print' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.5 3.25C6.25736 3.25 5.25 4.25736 5.25 5.5V7.25H5C3.48122 7.25 2.25 8.48122 2.25 10V15C2.25 16.5188 3.48122 17.75 5 17.75H5.25V18.5C5.25 19.7426 6.25736 20.75 7.5 20.75H16.5C17.7426 20.75 18.75 19.7426 18.75 18.5V17.75H19C20.5188 17.75 21.75 16.5188 21.75 15V10C21.75 8.48122 20.5188 7.25 19 7.25H18.75V5.5C18.75 4.25736 17.7426 3.25 16.5 3.25H7.5ZM17.25 7.25V5.5C17.25 5.08579 16.9142 4.75 16.5 4.75H7.5C7.08579 4.75 6.75 5.08579 6.75 5.5V7.25H17.25ZM6.75 16.25V18.5C6.75 18.9142 7.08579 19.25 7.5 19.25H16.5C16.9142 19.25 17.25 18.9142 17.25 18.5V16.25H6.75ZM18 14.75H6C5.58579 14.75 5.25 15.0858 5.25 15.5V16.25H5C4.30964 16.25 3.75 15.6904 3.75 15V10C3.75 9.30964 4.30964 8.75 5 8.75H19C19.6904 8.75 20.25 9.30964 20.25 10V15C20.25 15.6904 19.6904 16.25 19 16.25H18.75V15.5C18.75 15.0858 18.4142 14.75 18 14.75ZM16.5 10.75C16.0858 10.75 15.75 11.0858 15.75 11.5C15.75 11.9142 16.0858 12.25 16.5 12.25H18C18.4142 12.25 18.75 11.9142 18.75 11.5C18.75 11.0858 18.4142 10.75 18 10.75H16.5Z" fill="currentColor"></path></svg>',
 
             'pages' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8.50391 4.25C8.50391 3.83579 8.83969 3.5 9.25391 3.5H15.2777C15.4766 3.5 15.6674 3.57902 15.8081 3.71967L18.2807 6.19234C18.4214 6.333 18.5004 6.52376 18.5004 6.72268V16.75C18.5004 17.1642 18.1646 17.5 17.7504 17.5H16.248V17.4993H14.748V17.5H9.25391C8.83969 17.5 8.50391 17.1642 8.50391 16.75V4.25ZM14.748 19H9.25391C8.01126 19 7.00391 17.9926 7.00391 16.75V6.49854H6.24805C5.83383 6.49854 5.49805 6.83432 5.49805 7.24854V19.75C5.49805 20.1642 5.83383 20.5 6.24805 20.5H13.998C14.4123 20.5 14.748 20.1642 14.748 19.75L14.748 19ZM7.00391 4.99854V4.25C7.00391 3.00736 8.01127 2 9.25391 2H15.2777C15.8745 2 16.4468 2.23705 16.8687 2.659L19.3414 5.13168C19.7634 5.55364 20.0004 6.12594 20.0004 6.72268V16.75C20.0004 17.9926 18.9931 19 17.7504 19H16.248L16.248 19.75C16.248 20.9926 15.2407 22 13.998 22H6.24805C5.00541 22 3.99805 20.9926 3.99805 19.75V7.24854C3.99805 6.00589 5.00541 4.99854 6.24805 4.99854H7.00391Z" fill="currentColor"></path></svg>',
 
