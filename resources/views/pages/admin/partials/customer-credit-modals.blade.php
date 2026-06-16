@@ -1,5 +1,5 @@
-<div x-show="modal === 'view'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/40" x-on:click="closeModal()"></div>
+<div x-show="modal === 'view'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
+    <div class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" x-on:click="closeModal()"></div>
     <div class="relative w-full max-w-3xl rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
         <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -55,8 +55,8 @@
     </div>
 </div>
 
-<div x-show="modal === 'customer-form'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/40" x-on:click="closeModal()"></div>
+<div x-show="modal === 'customer-form'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
+    <div class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" x-on:click="closeModal()"></div>
     <div class="relative w-full max-w-4xl rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
         <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -126,8 +126,8 @@
     </div>
 </div>
 
-<div x-show="modal === 'payment'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/40" x-on:click="closeModal()"></div>
+<div x-show="modal === 'payment'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
+    <div class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" x-on:click="closeModal()"></div>
     <div class="relative w-full max-w-4xl rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
         <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -229,8 +229,8 @@
     </div>
 </div>
 
-<div x-show="modal === 'inactive'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/40" x-on:click="closeModal()"></div>
+<div x-show="modal === 'inactive'" x-cloak x-on:keydown.escape.window="closeModal()" class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
+    <div class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" x-on:click="closeModal()"></div>
     <div class="relative w-full max-w-6xl rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
         <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>

@@ -142,12 +142,12 @@
 
         <section class="{{ $cardClass }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-                <div>
-                    <p class="{{ $labelClass }}">Admin Credit</p>
-                    <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Customers & Credit Management</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Credit customers, balances, ledgers, invoice payments, and inactive accounts.</p>
+                <div class="min-w-0">
+                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Customers & Credit</h1>
+                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Manage customer profiles, credit limits, ledger activity, payments, and account balances.</p>
                 </div>
-                <div class="flex flex-wrap gap-2">
+
+                <div class="flex flex-wrap gap-2 xl:justify-end">
                     <button type="button" x-on:click="openInactive()" class="{{ $secondaryButtonClass }}">
                         Inactive Customers
                         <span class="rounded-full bg-gray-100 px-2 py-0.5 text-theme-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">{{ $inactiveCustomers->count() }}</span>
@@ -161,37 +161,6 @@
                 </div>
             </div>
         </section>
-
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <article class="{{ $cardClass }} flex min-h-[150px] flex-col justify-between">
-                <p class="{{ $labelClass }}">Active Customers</p>
-                <div>
-                    <p class="text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($summary['active_count']) }}</p>
-                    <p class="mt-1 {{ $captionClass }}">{{ number_format($summary['inactive_count']) }} inactive</p>
-                </div>
-            </article>
-            <article class="{{ $cardClass }} flex min-h-[150px] flex-col justify-between">
-                <p class="{{ $labelClass }}">Credit Exposure</p>
-                <div>
-                    <p class="text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($summary['credit_limit'], 2) }}</p>
-                    <p class="mt-1 {{ $captionClass }}">Total approved limit</p>
-                </div>
-            </article>
-            <article class="{{ $cardClass }} flex min-h-[150px] flex-col justify-between">
-                <p class="{{ $labelClass }}">Receivables</p>
-                <div>
-                    <p class="text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($summary['receivables'], 2) }}</p>
-                    <p class="mt-1 {{ $captionClass }}">{{ number_format($summary['over_limit_count']) }} over limit</p>
-                </div>
-            </article>
-            <article class="{{ $cardClass }} flex min-h-[150px] flex-col justify-between">
-                <p class="{{ $labelClass }}">Advance Credits</p>
-                <div>
-                    <p class="text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($summary['advance_balance'], 2) }}</p>
-                    <p class="mt-1 {{ $captionClass }}">Customer overpayments</p>
-                </div>
-            </article>
-        </div>
 
         <section class="{{ $cardClass }} p-2 md:p-2">
             <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
