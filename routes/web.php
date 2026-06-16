@@ -3,7 +3,9 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminReportController;
+use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\ShiftReconciliationController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -160,13 +162,20 @@ Route::middleware('auth')->group(function () {
             }
         })->name('admin.shift-readings.notifications');
 
-        Route::get('/inventory', function () {
-            return view('pages.admin.inventoryandtanks', ['title' => 'Inventory & Tanks']);
-        })->name('inventory.index');
+        Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
+        Route::post('/inventory/stock-in', [InventoryController::class, 'stockIn'])->name('inventory.stockIn');
+        Route::post('/inventory/prices', [InventoryController::class, 'updatePrice'])->name('inventory.updatePrice');
 
-        Route::get('/customers', function () {
-            return view('pages.admin.customersandcredit', ['title' => 'Customers & Credit']);
-        })->name('customers.index');
+        Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+        Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
+        Route::post('/customers/update', [CustomerController::class, 'update'])->name('customers.update');
+        Route::get('/customers/ledger/{id}', [CustomerController::class, 'getLedger'])->name('customers.ledger');
+        Route::get('/customers/print-ledger/{id}', [CustomerController::class, 'printLedger'])->name('customers.printLedger');
+        Route::get('/customers/soa', [CustomerController::class, 'generateSOA'])->name('customers.soa');
+        Route::get('/customers/{customerId}/unpaid-invoices', [CustomerController::class, 'getUnpaidInvoices'])->name('customers.unpaidInvoices');
+        Route::post('/customers/payment', [CustomerController::class, 'addPayment'])->name('customers.pay');
+        Route::post('/customers/payment/void', [CustomerController::class, 'voidPayment'])->name('customers.voidPayment');
+        Route::post('/customers/status', [CustomerController::class, 'toggleStatus'])->name('customers.toggleStatus');
 
         Route::get('/admin/billing', function () {
             return view('pages.admin.billingandinvoices', ['title' => 'Billing & Invoices']);
@@ -337,8 +346,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
 
 
 
