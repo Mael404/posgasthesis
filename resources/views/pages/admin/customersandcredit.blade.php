@@ -94,6 +94,9 @@
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $dangerButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600 disabled:cursor-not-allowed disabled:opacity-60';
         $iconButtonClass = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
+        $viewIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15';
+        $editIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-warning-200 bg-warning-50 text-warning-700 shadow-theme-xs transition hover:border-warning-300 hover:bg-warning-100 dark:border-warning-500/25 dark:bg-warning-500/10 dark:text-warning-400 dark:hover:bg-warning-500/15';
+        $deactivateIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-600 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
@@ -130,15 +133,25 @@
             </div>
         @endif
 
-        <template x-if="notice.message">
-            <div
-                class="rounded-xl border p-4 text-theme-sm"
-                :class="notice.type === 'success'
-                    ? 'border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400'
-                    : 'border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300'">
-                <span x-text="notice.message"></span>
+        <div
+            x-show="toast.open"
+            x-cloak
+            class="fixed right-4 top-4 z-[100040] w-[calc(100%-2rem)] max-w-sm rounded-xl border border-success-200 bg-white p-4 shadow-theme-lg dark:border-success-500/30 dark:bg-gray-900 sm:right-6 sm:top-6"
+            role="status"
+            aria-live="polite">
+            <div class="flex items-start gap-3">
+                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6.75 12.25 3.25 3.25 7.25-7.25" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                </span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Success</p>
+                    <p class="mt-1 text-theme-sm text-gray-600 dark:text-gray-400" x-text="toast.message"></p>
+                </div>
+                <button type="button" x-on:click="closeToast()" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close success message">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
             </div>
-        </template>
+        </div>
 
         <section class="{{ $cardClass }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
@@ -198,11 +211,11 @@
                     <table class="min-w-[1040px] w-full table-fixed">
                         <colgroup>
                             <col class="w-[24%]">
-                            <col class="w-[22%]">
-                            <col class="w-[15%]">
+                            <col class="w-[17%]">
+                            <col class="w-[13%]">
                             <col class="w-[17%]">
                             <col class="w-[10%]">
-                            <col class="w-[12%]">
+                            <col class="w-[19%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
@@ -231,16 +244,16 @@
                                         <span class="inline-flex rounded-full px-2.5 py-0.5 text-theme-xs font-medium {{ $balance['badge'] }}">{{ $balance['status'] }}</span>
                                     </td>
                                     <td class="{{ $tdClass }}">
-                                        <div class="flex items-center gap-2">
-                                            <button type="button" x-on:click="openCustomer('{{ $customer->id }}', 'view')" class="{{ $iconButtonClass }}" title="View Details">
-                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
+                                        <div class="flex min-w-[9.5rem] items-center gap-3">
+                                            <button type="button" x-on:click="openCustomer('{{ $customer->id }}', 'view')" class="{{ $viewIconButtonClass }}" title="View Details" aria-label="View customer details">
+                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
                                             </button>
                                             @if ($canManageCredit)
-                                                <button type="button" x-on:click="openForm('edit', '{{ $customer->id }}')" class="{{ $iconButtonClass }}" title="Edit Profile">
-                                                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14.25 5.25 4.5 4.5M4 20h4.5L19.25 9.25a3.18 3.18 0 0 0-4.5-4.5L4 15.5V20Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                                <button type="button" x-on:click="openForm('edit', '{{ $customer->id }}')" class="{{ $editIconButtonClass }}" title="Edit Profile" aria-label="Edit customer profile">
+                                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14.25 5.25 4.5 4.5M4 20h4.5L19.25 9.25a3.18 3.18 0 0 0-4.5-4.5L4 15.5V20Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                                 </button>
-                                                <button type="button" x-on:click="toggleStatus('{{ $customer->id }}', 'Inactive')" class="{{ $iconButtonClass }} hover:text-error-600" title="Deactivate Account">
-                                                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM17 8l5 5M22 8l-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                                <button type="button" x-on:click="toggleStatus('{{ $customer->id }}', 'Inactive')" class="{{ $deactivateIconButtonClass }}" title="Deactivate Account" aria-label="Deactivate customer account">
+                                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM17 8l5 5M22 8l-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                                 </button>
                                             @endif
                                         </div>
@@ -430,7 +443,20 @@
                 modal: null,
                 formMode: 'add',
                 selectedCustomer: null,
-                notice: { type: '', message: '' },
+                toast: { open: false, message: '', timer: null },
+                messageDialog: { open: false, type: 'error', title: '', message: '' },
+                confirmation: {
+                    open: false,
+                    title: '',
+                    message: '',
+                    details: '',
+                    confirmText: 'Confirm',
+                    cancelText: 'Cancel',
+                    tone: 'brand',
+                    resolver: null
+                },
+                reloadTimer: null,
+                feedbackClosing: false,
                 savingCustomer: false,
                 savingPayment: false,
                 ledger: { customerId: '', fromDate: '', toDate: '', rows: [], loading: false, error: '' },
@@ -523,6 +549,8 @@
                 },
 
                 closeModal() {
+                    if (this.confirmation.open || this.messageDialog.open || this.feedbackClosing) return;
+
                     this.modal = null;
                     this.invoiceLoading = false;
                 },
@@ -564,8 +592,13 @@
 
                     const isEdit = this.formMode === 'edit';
                     const url = isEdit ? config.updateUrl : config.storeUrl;
-                    const question = isEdit ? 'Update this customer profile?' : 'Save this new credit customer?';
-                    if (!window.confirm(question)) return;
+                    const confirmed = await this.askConfirmation({
+                        title: isEdit ? 'Update Customer Profile' : 'Save Credit Customer',
+                        message: isEdit ? 'Update this customer profile?' : 'Save this new credit customer?',
+                        confirmText: isEdit ? 'Update Profile' : 'Save Customer',
+                        tone: 'brand'
+                    });
+                    if (!confirmed) return;
 
                     this.savingCustomer = true;
                     const data = await this.postJson(url, this.customerForm);
@@ -577,12 +610,18 @@
                     }
 
                     this.showNotice('success', data.message || 'Customer saved.');
-                    window.setTimeout(() => window.location.reload(), 700);
+                    this.scheduleReload();
                 },
 
                 async toggleStatus(id, status) {
                     const action = status === 'Inactive' ? 'deactivate' : 'reactivate';
-                    if (!window.confirm('Do you want to ' + action + ' this customer?')) return;
+                    const confirmed = await this.askConfirmation({
+                        title: status === 'Inactive' ? 'Deactivate Customer' : 'Reactivate Customer',
+                        message: 'Do you want to ' + action + ' this customer?',
+                        confirmText: status === 'Inactive' ? 'Deactivate' : 'Reactivate',
+                        tone: status === 'Inactive' ? 'danger' : 'success'
+                    });
+                    if (!confirmed) return;
 
                     const data = await this.postJson(config.toggleStatusUrl, { id, status });
 
@@ -592,7 +631,7 @@
                     }
 
                     this.showNotice('success', data.message || 'Customer status updated.');
-                    window.setTimeout(() => window.location.reload(), 700);
+                    this.scheduleReload();
                 },
 
                 async fetchLedger() {
@@ -745,8 +784,14 @@
                     }
 
                     const advance = this.paymentAdvanceAmount();
-                    const suffix = advance > 0 ? ' This includes advance credit of ' + this.formatMoney(advance) + '.' : '';
-                    if (!window.confirm('Confirm payment of ' + this.formatMoney(amount) + '?' + suffix)) return;
+                    const confirmed = await this.askConfirmation({
+                        title: 'Confirm Payment',
+                        message: 'Record payment of ' + this.formatMoney(amount) + '?',
+                        details: advance > 0 ? 'This includes advance credit of ' + this.formatMoney(advance) + '.' : '',
+                        confirmText: 'Record Payment',
+                        tone: 'success'
+                    });
+                    if (!confirmed) return;
 
                     this.savingPayment = true;
                     const data = await this.postJson(config.payUrl, this.paymentForm);
@@ -758,11 +803,17 @@
                     }
 
                     this.showNotice('success', data.message || 'Payment recorded.');
-                    window.setTimeout(() => window.location.reload(), 700);
+                    this.scheduleReload();
                 },
 
                 async voidPayment(ledgerId) {
-                    if (!window.confirm('Void this payment and restore the customer balance?')) return;
+                    const confirmed = await this.askConfirmation({
+                        title: 'Void Payment',
+                        message: 'Void this payment and restore the customer balance?',
+                        confirmText: 'Void Payment',
+                        tone: 'danger'
+                    });
+                    if (!confirmed) return;
 
                     const data = await this.postJson(config.voidPaymentUrl, { ledger_id: ledgerId });
 
@@ -772,7 +823,7 @@
                     }
 
                     this.showNotice('success', data.message || 'Payment voided.');
-                    window.setTimeout(() => window.location.reload(), 700);
+                    this.scheduleReload();
                 },
 
                 async postJson(url, payload) {
@@ -800,8 +851,90 @@
                 },
 
                 showNotice(type, message) {
-                    this.notice = { type, message };
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    if (type === 'success') {
+                        this.showToast(message);
+                        return;
+                    }
+
+                    this.showMessage(type, message);
+                },
+
+                showToast(message) {
+                    this.closeToast();
+                    this.toast.message = message;
+                    this.toast.open = true;
+                    this.toast.timer = window.setTimeout(() => this.closeToast(), 3000);
+                },
+
+                closeToast() {
+                    if (this.toast.timer) {
+                        window.clearTimeout(this.toast.timer);
+                    }
+
+                    this.toast = { open: false, message: '', timer: null };
+                },
+
+                showMessage(type, message, title = '') {
+                    const dialogType = type === 'info' ? 'info' : 'error';
+                    this.messageDialog = {
+                        open: true,
+                        type: dialogType,
+                        title: title || (dialogType === 'info' ? 'Information' : 'Unable to Continue'),
+                        message
+                    };
+                },
+
+                closeMessageDialog() {
+                    this.feedbackClosing = true;
+                    this.messageDialog.open = false;
+
+                    this.$nextTick(() => {
+                        this.feedbackClosing = false;
+                    });
+                },
+
+                askConfirmation(options = {}) {
+                    return new Promise(resolve => {
+                        this.confirmation = {
+                            open: true,
+                            title: options.title || 'Confirm Action',
+                            message: options.message || 'Please confirm this action.',
+                            details: options.details || '',
+                            confirmText: options.confirmText || 'Confirm',
+                            cancelText: options.cancelText || 'Cancel',
+                            tone: options.tone || 'brand',
+                            resolver: resolve
+                        };
+
+                        this.$nextTick(() => {
+                            if (this.$refs.confirmPrimary) {
+                                this.$refs.confirmPrimary.focus();
+                            }
+                        });
+                    });
+                },
+
+                resolveConfirmation(confirmed) {
+                    const resolver = this.confirmation.resolver;
+                    this.feedbackClosing = true;
+                    this.confirmation.open = false;
+                    this.confirmation.resolver = null;
+
+                    if (resolver) {
+                        resolver(confirmed);
+                    }
+
+                    this.$nextTick(() => {
+                        this.feedbackClosing = false;
+                    });
+                },
+
+                scheduleReload(delay = 3200) {
+                    if (this.reloadTimer) {
+                        window.clearTimeout(this.reloadTimer);
+                    }
+
+                    this.reloadTimer = window.setTimeout(() => window.location.reload(), delay);
                 },
 
                 formatMoney(value) {

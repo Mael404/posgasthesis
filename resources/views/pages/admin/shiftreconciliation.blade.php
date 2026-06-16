@@ -18,9 +18,10 @@
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $buttonClass = 'inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-theme-xs font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
-        $iconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
-        $primaryIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white shadow-theme-xs transition hover:bg-brand-600';
-        $dangerIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-error-500 text-white shadow-theme-xs transition hover:bg-error-600';
+        $viewIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15';
+        $remarksIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-warning-200 bg-warning-50 text-warning-700 shadow-theme-xs transition hover:border-warning-300 hover:bg-warning-100 dark:border-warning-500/25 dark:bg-warning-500/10 dark:text-warning-400 dark:hover:bg-warning-500/15';
+        $approveIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-success-200 bg-success-50 text-success-600 shadow-theme-xs transition hover:border-success-300 hover:bg-success-100 dark:border-success-500/25 dark:bg-success-500/10 dark:text-success-500 dark:hover:bg-success-500/15';
+        $rejectIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-600 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
         $primaryButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-brand-600';
         $dangerButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-error-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-error-600';
         $eyeIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -208,20 +209,20 @@
                                 </td>
                                 <td class="{{ $tdClass }}">
                                     <div class="flex flex-nowrap items-center gap-1.5">
-                                        <button type="button" class="{{ $iconButtonClass }}" onclick="viewDetails({{ (int) $reading->id }}, this)" title="View details" aria-label="View details">
+                                        <button type="button" class="{{ $viewIconButtonClass }}" onclick="viewDetails({{ (int) $reading->id }}, this)" title="View details" aria-label="View details">
                                             {!! $eyeIcon !!}
                                             <span class="sr-only">View details</span>
                                         </button>
-                                        <button type="button" class="{{ $iconButtonClass }}" onclick="openRemarksModal({{ (int) $reading->id }})" title="Remarks" aria-label="Remarks">
+                                        <button type="button" class="{{ $remarksIconButtonClass }}" onclick="openRemarksModal({{ (int) $reading->id }})" title="Remarks" aria-label="Remarks">
                                             {!! $messageIcon !!}
                                             <span class="sr-only">Remarks</span>
                                         </button>
                                         @if ($isPending)
-                                            <button type="button" class="{{ $primaryIconButtonClass }}" onclick="openApproveModal({{ (int) $reading->id }})" title="Approve" aria-label="Approve">
+                                            <button type="button" class="{{ $approveIconButtonClass }}" onclick="openApproveModal({{ (int) $reading->id }})" title="Approve" aria-label="Approve">
                                                 {!! $checkIcon !!}
                                                 <span class="sr-only">Approve</span>
                                             </button>
-                                            <button type="button" class="{{ $dangerIconButtonClass }}" onclick="openRejectModal({{ (int) $reading->id }})" title="Reject" aria-label="Reject">
+                                            <button type="button" class="{{ $rejectIconButtonClass }}" onclick="openRejectModal({{ (int) $reading->id }})" title="Reject" aria-label="Reject">
                                                 {!! $xIcon !!}
                                                 <span class="sr-only">Reject</span>
                                             </button>
