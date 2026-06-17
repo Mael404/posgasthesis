@@ -136,18 +136,25 @@
         <div
             x-show="toast.open"
             x-cloak
-            class="fixed right-4 top-4 z-[100040] w-[calc(100%-2rem)] max-w-sm rounded-xl border border-success-200 bg-white p-4 shadow-theme-lg dark:border-success-500/30 dark:bg-gray-900 sm:right-6 sm:top-6"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0 translate-y-2 scale-95"
+            x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+            x-transition:leave="transition ease-in duration-200"
+            x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+            x-transition:leave-end="opacity-0 translate-y-2 scale-95"
+            class="fixed right-4 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-white/10 p-4 text-white shadow-theme-lg sm:right-6"
+            style="top: 5.5rem; z-index: 100300; background-color: #047857;"
             role="status"
             aria-live="polite">
             <div class="flex items-start gap-3">
-                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500">
+                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6.75 12.25 3.25 3.25 7.25-7.25" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
                 </span>
                 <div class="min-w-0 flex-1">
-                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Success</p>
-                    <p class="mt-1 text-theme-sm text-gray-600 dark:text-gray-400" x-text="toast.message"></p>
+                    <p class="text-theme-sm font-semibold text-white">Success</p>
+                    <p class="mt-1 text-theme-sm text-white/90" x-text="toast.message"></p>
                 </div>
-                <button type="button" x-on:click="closeToast()" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close success message">
+                <button type="button" x-on:click="closeToast()" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 hover:text-white" aria-label="Close success message">
                     <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
             </div>
@@ -472,6 +479,7 @@
                     this.resetCustomerForm();
                     this.resetPaymentForm();
                     this.initDatePickers();
+                    this.showStoredToast();
                 },
 
                 initDatePickers() {
@@ -609,8 +617,7 @@
                         return;
                     }
 
-                    this.showNotice('success', data.message || 'Customer saved.');
-                    this.scheduleReload();
+                    this.reloadWithToast(data.message || 'Customer saved.');
                 },
 
                 async toggleStatus(id, status) {
@@ -630,8 +637,7 @@
                         return;
                     }
 
-                    this.showNotice('success', data.message || 'Customer status updated.');
-                    this.scheduleReload();
+                    this.reloadWithToast(data.message || 'Customer status updated.');
                 },
 
                 async fetchLedger() {
@@ -802,8 +808,7 @@
                         return;
                     }
 
-                    this.showNotice('success', data.message || 'Payment recorded.');
-                    this.scheduleReload();
+                    this.reloadWithToast(data.message || 'Payment recorded.');
                 },
 
                 async voidPayment(ledgerId) {
@@ -822,8 +827,7 @@
                         return;
                     }
 
-                    this.showNotice('success', data.message || 'Payment voided.');
-                    this.scheduleReload();
+                    this.reloadWithToast(data.message || 'Payment voided.');
                 },
 
                 async postJson(url, payload) {
@@ -872,6 +876,21 @@
                     }
 
                     this.toast = { open: false, message: '', timer: null };
+                },
+
+                showStoredToast() {
+                    let message = '';
+
+                    try {
+                        message = window.sessionStorage.getItem('customer-credit-toast') || '';
+                        window.sessionStorage.removeItem('customer-credit-toast');
+                    } catch (error) {
+                        message = '';
+                    }
+
+                    if (message) {
+                        this.$nextTick(() => this.showToast(message));
+                    }
                 },
 
                 showMessage(type, message, title = '') {
@@ -929,9 +948,24 @@
                     });
                 },
 
-                scheduleReload(delay = 3200) {
+                reloadWithToast(message) {
+                    try {
+                        window.sessionStorage.setItem('customer-credit-toast', message);
+                    } catch (error) {
+                        this.showToast(message);
+                    }
+
+                    this.scheduleReload();
+                },
+
+                scheduleReload(delay = 0) {
                     if (this.reloadTimer) {
                         window.clearTimeout(this.reloadTimer);
+                    }
+
+                    if (delay <= 0) {
+                        window.location.reload();
+                        return;
                     }
 
                     this.reloadTimer = window.setTimeout(() => window.location.reload(), delay);

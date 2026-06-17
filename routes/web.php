@@ -3,10 +3,13 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminReportController;
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
+use App\Http\Controllers\PrintedTransactionController;
 use App\Http\Controllers\ShiftReconciliationController;
+use App\Http\Controllers\StaffController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -69,20 +72,9 @@ Route::middleware('auth')->group(function () {
         });
 
         Route::prefix('admin/printed-transactions')->name('admin.printed-transactions.')->group(function () {
-            Route::get('/', function () {
-                return view('pages.admin.printedtransactions', ['title' => 'Printed Transactions']);
-            })->name('index');
-
-            Route::get('/{batch}/print', function ($batch) {
-                return view('pages.admin.printedtransactions', [
-                    'title' => 'Print Transaction Batch',
-                    'batch' => $batch,
-                ]);
-            })->name('print');
-
-            Route::post('/{batch}/mark', function ($batch) {
-                return back()->with('status', "Printed transaction batch {$batch} is not connected yet.");
-            })->name('mark');
+            Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');
+            Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
+            Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
         });
 
         Route::prefix('sales')->name('sales.')->group(function () {
@@ -177,13 +169,27 @@ Route::middleware('auth')->group(function () {
         Route::post('/customers/payment/void', [CustomerController::class, 'voidPayment'])->name('customers.voidPayment');
         Route::post('/customers/status', [CustomerController::class, 'toggleStatus'])->name('customers.toggleStatus');
 
-        Route::get('/admin/billing', function () {
-            return view('pages.admin.billingandinvoices', ['title' => 'Billing & Invoices']);
-        })->name('admin.billing.index');
+        Route::prefix('admin/billing')->name('admin.billing.')->group(function () {
+            Route::get('/', [BillingController::class, 'index'])->name('index');
+            Route::post('/generate', [BillingController::class, 'generate'])->name('generate');
+            Route::post('/mark-paid', [BillingController::class, 'markPaid'])->name('markPaid');
+            Route::post('/destroy', [BillingController::class, 'destroy'])->name('destroy');
+            Route::get('/{id}/print', [BillingController::class, 'printInvoice'])->name('print');
+            Route::post('/{id}/print/signatories', [BillingController::class, 'savePrintInvoiceSignatories'])->name('print.signatories');
+            Route::post('/{id}/rows', [BillingController::class, 'updateInvoiceRows'])->name('updateRows');
+            Route::post('/{id}/rows/delete', [BillingController::class, 'deleteInvoiceRow'])->name('deleteRow');
+            Route::get('/{id}/acknowledgement-receipt', [BillingController::class, 'printAcknowledgementReceipt'])->name('acknowledgementReceipt');
+            Route::get('/{id}/acknowledgement-receipt/{paymentId}', [BillingController::class, 'printAcknowledgementReceipt'])->name('acknowledgementReceipt.payment');
+            Route::post('/{id}/acknowledgement-receipt/signatories', [BillingController::class, 'saveAcknowledgementReceiptSignatories'])->name('acknowledgementReceipt.signatories');
+            Route::post('/{id}/acknowledgement-receipt/{paymentId}/signatories', [BillingController::class, 'saveAcknowledgementReceiptSignatories'])->name('acknowledgementReceipt.signatories.payment');
+            Route::post('/{id}/acknowledgement-receipt/issued', [BillingController::class, 'updateAcknowledgementReceiptIssued'])->name('acknowledgementReceipt.issued');
+            Route::post('/{id}/acknowledgement-receipt/{paymentId}/issued', [BillingController::class, 'updateAcknowledgementReceiptIssued'])->name('acknowledgementReceipt.issued.payment');
+        });
 
-        Route::get('/staffs', function () {
-            return view('pages.admin.managestaffs', ['title' => 'Manage Staffs']);
-        })->name('staffs.index');
+        Route::get('/staffs', [StaffController::class, 'index'])->name('staffs.index');
+        Route::post('/staffs', [StaffController::class, 'store'])->name('staffs.store');
+        Route::post('/staffs/status', [StaffController::class, 'toggleStatus'])->name('staffs.toggleStatus');
+        Route::post('/staffs/password', [StaffController::class, 'resetPassword'])->name('staffs.resetPassword');
     });
 
     Route::middleware('role:staff')->group(function () {
@@ -211,9 +217,8 @@ Route::middleware('auth')->group(function () {
             return back()->with('status', "Pump station update {$id} is not connected yet.");
         })->name('staff.pump.update');
 
-        Route::get('/staff/pump-station/print-selected', function () {
-            return redirect()->route('staff.printed-transactions.index');
-        })->name('staff.pump.printSelected');
+        Route::match(['get', 'post'], '/staff/pump-station/print-selected', [PrintedTransactionController::class, 'printSelected'])
+            ->name('staff.pump.printSelected');
 
         Route::get('/staff/shift-readings', function () {
             return view('pages.staff.shiftreadings', ['title' => 'Shift Readings']);
@@ -245,24 +250,10 @@ Route::middleware('auth')->group(function () {
         })->name('staff.sales.print');
 
         Route::prefix('staff/printed-transactions')->name('staff.printed-transactions.')->group(function () {
-            Route::get('/', function () {
-                return view('pages.staff.printedtransactions', ['title' => 'Printed Transactions']);
-            })->name('index');
-
-            Route::post('/', function () {
-                return back()->with('status', 'Printed transaction saving is not connected yet.');
-            })->name('store');
-
-            Route::get('/{batch}/print', function ($batch) {
-                return view('pages.staff.printedtransactions', [
-                    'title' => 'Print Transaction Batch',
-                    'batch' => $batch,
-                ]);
-            })->name('print');
-
-            Route::post('/{batch}/mark', function ($batch) {
-                return back()->with('status', "Printed transaction batch {$batch} is not connected yet.");
-            })->name('mark');
+            Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');
+            Route::post('/', [PrintedTransactionController::class, 'storeSelected'])->name('store');
+            Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
+            Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
         });
 
         Route::post('/staff/pump/void', function () {
@@ -346,9 +337,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
-
 
 
 

@@ -97,8 +97,19 @@
     </div>
 </div>
 
-<div x-show="messageDialog.open" x-cloak x-on:keydown.escape.window="closeMessageDialog()" class="fixed inset-0 z-[100030] flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/45 backdrop-blur-sm" x-on:click="closeMessageDialog()"></div>
+<div
+    x-show="messageDialog.open"
+    x-cloak
+    x-on:keydown.escape.window="closeMessageDialog()"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+    style="z-index: 100250;">
+    <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeMessageDialog()"></div>
     <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
         <button type="button" x-on:click="closeMessageDialog()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close message">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -126,8 +137,19 @@
     </div>
 </div>
 
-<div x-show="confirmation.open" x-cloak x-on:keydown.escape.window="resolveConfirmation(false)" class="fixed inset-0 z-[100040] flex items-center justify-center overflow-y-auto p-4">
-    <div class="fixed inset-0 bg-gray-900/45 backdrop-blur-sm" x-on:click="resolveConfirmation(false)"></div>
+<div
+    x-show="confirmation.open"
+    x-cloak
+    x-on:keydown.escape.window="resolveConfirmation(false)"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+    style="z-index: 100260;">
+    <div class="fixed inset-0 bg-gray-950/85 backdrop-blur-md" x-on:click="resolveConfirmation(false)"></div>
     <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
         <div class="p-6">
             <div class="flex items-start gap-4">
