@@ -67,6 +67,7 @@ Route::middleware('auth')->group(function () {
                 ->where(['dispenser' => '[1-3]', 'type' => 'liters|sales'])
                 ->name('image');
             Route::post('/approve', [ShiftReconciliationController::class, 'approve'])->name('approve');
+            Route::post('/void-approval', [ShiftReconciliationController::class, 'voidApproval'])->name('voidApproval');
             Route::post('/reject', [ShiftReconciliationController::class, 'reject'])->name('reject');
             Route::post('/remarks', [ShiftReconciliationController::class, 'saveRemarks'])->name('remarks');
         });
@@ -337,7 +338,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
 
 
 

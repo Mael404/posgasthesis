@@ -7,6 +7,7 @@
             'pending' => 0,
             'verified' => 0,
             'rejected' => 0,
+            'voided' => 0,
         ], $summary ?? []);
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]';
@@ -22,12 +23,34 @@
         $remarksIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-warning-200 bg-warning-50 text-warning-700 shadow-theme-xs transition hover:border-warning-300 hover:bg-warning-100 dark:border-warning-500/25 dark:bg-warning-500/10 dark:text-warning-400 dark:hover:bg-warning-500/15';
         $approveIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-success-200 bg-success-50 text-success-600 shadow-theme-xs transition hover:border-success-300 hover:bg-success-100 dark:border-success-500/25 dark:bg-success-500/10 dark:text-success-500 dark:hover:bg-success-500/15';
         $rejectIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-600 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
+        $undoIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-600 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
         $primaryButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-brand-600';
         $dangerButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-error-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-error-600';
         $eyeIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $messageIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $checkIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $xIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        $undoIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 14 4 9l5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h10.5a5.5 5.5 0 1 1 0 11H11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        $dipstickValue = function ($reading, array $fields) {
+            foreach ($fields as $field) {
+                $value = data_get($reading, $field);
+
+                if ($value !== null && $value !== '') {
+                    return (float) $value;
+                }
+            }
+
+            return 0.0;
+        };
+
+        $dipstickSummary = function ($reading) use ($dipstickValue) {
+            return [
+                'P' => $dipstickValue($reading, ['dipstick_premium', 'premium_dipstick', 'premium_dipstick_reading']),
+                'R' => $dipstickValue($reading, ['dipstick_regular', 'dipstick_unleaded', 'regular_dipstick', 'unleaded_dipstick', 'regular_dipstick_reading', 'unleaded_dipstick_reading']),
+                'D' => $dipstickValue($reading, ['dipstick_diesel', 'diesel_dipstick', 'diesel_dipstick_reading']),
+            ];
+        };
 
         $periodLabel = function ($reading) {
             try {
@@ -66,6 +89,13 @@
                 return [
                     'label' => 'Rejected',
                     'class' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-500',
+                ];
+            }
+
+            if (str_contains($status, 'void')) {
+                return [
+                    'label' => 'Voided',
+                    'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
                 ];
             }
 
@@ -118,13 +148,13 @@
 
     <div class="space-y-6">
         <section class="{{ $cardClass }} p-5 lg:p-6">
-            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,560px)] xl:items-end">
+            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,680px)] xl:items-end">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Shift Reconciliation</h1>
                     <p class="mt-1 {{ $captionClass }}">Review remittances, pump readings, collections, discounts, and settlement variances.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
                     <div class="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
                         <p class="{{ $labelClass }}">Total</p>
                         <p class="mt-1 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($summary['total']) }}</p>
@@ -140,6 +170,10 @@
                     <div class="rounded-xl border border-error-100 bg-error-50/50 p-3 dark:border-error-500/20 dark:bg-error-500/10">
                         <p class="{{ $labelClass }}">Rejected</p>
                         <p class="mt-1 text-lg font-semibold tabular-nums text-error-700 dark:text-error-500">{{ number_format($summary['rejected']) }}</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                        <p class="{{ $labelClass }}">Voided</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-gray-700 dark:text-gray-300">{{ number_format($summary['voided']) }}</p>
                     </div>
                 </div>
             </div>
@@ -186,11 +220,22 @@
                             @php
                                 $status = $statusMeta($reading->status ?? 'Pending');
                                 $variance = $varianceMeta($reading->cash_variance ?? 0);
-                                $isPending = str_contains(strtolower((string) ($reading->status ?? 'Pending')), 'pending');
+                                $statusValue = strtolower((string) ($reading->status ?? 'Pending'));
+                                $isPending = str_contains($statusValue, 'pending');
+                                $isVerified = str_contains($statusValue, 'verified') || str_contains($statusValue, 'approved');
+                                $dipsticks = $dipstickSummary($reading);
                             @endphp
                             <tr id="row-{{ $reading->id }}" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                                 <td class="{{ $tdPrimaryClass }}" data-order="{{ $periodSort($reading) }}">
                                     <span class="block truncate">{{ $periodLabel($reading) }}</span>
+                                    <span class="mt-1 block text-theme-xs font-normal text-gray-500 dark:text-gray-400">
+                                        Dipstick:
+                                        P {{ number_format($dipsticks['P'], 2) }} L
+                                        <span class="mx-1 text-gray-300 dark:text-gray-700">|</span>
+                                        R {{ number_format($dipsticks['R'], 2) }} L
+                                        <span class="mx-1 text-gray-300 dark:text-gray-700">|</span>
+                                        D {{ number_format($dipsticks['D'], 2) }} L
+                                    </span>
                                 </td>
                                 <td class="{{ $tdPrimaryClass }}">
                                     <span class="block truncate">{{ ucwords(strtolower($reading->staff_name ?? 'Staff')) }}</span>
@@ -225,6 +270,11 @@
                                             <button type="button" class="{{ $rejectIconButtonClass }}" onclick="openRejectModal({{ (int) $reading->id }})" title="Reject" aria-label="Reject">
                                                 {!! $xIcon !!}
                                                 <span class="sr-only">Reject</span>
+                                            </button>
+                                        @elseif ($isVerified)
+                                            <button type="button" class="{{ $undoIconButtonClass }}" onclick="openVoidApprovalModal({{ (int) $reading->id }})" title="Undo approval" aria-label="Undo approval">
+                                                {!! $undoIcon !!}
+                                                <span class="sr-only">Undo approval</span>
                                             </button>
                                         @endif
                                     </div>
@@ -312,6 +362,7 @@
                                     </div>
                                 </div>
                                 <div id="pumpCardsContainer" class="grid grid-cols-1 gap-3 lg:grid-cols-3"></div>
+                                <div id="dipstickSummaryContainer" class="mt-3"></div>
                             </section>
 
                             <aside class="min-w-0 space-y-4">
@@ -398,6 +449,32 @@
             </form>
         </div>
     </div>
+
+    <div id="voidApprovalModal" data-reconciliation-modal class="fixed inset-0 z-[100200] hidden items-center justify-center overflow-y-auto bg-gray-900/50 p-4 backdrop-blur-sm">
+        <div class="w-full max-w-lg rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+            <form id="voidApprovalForm">
+                <input type="hidden" id="voidApprovalReadingId">
+                <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Undo Approved Settlement?</h2>
+                    <p id="voidApprovalSettlementMeta" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400"></p>
+                </div>
+                <div class="space-y-4 p-5">
+                    <div class="rounded-xl border border-error-100 bg-error-50 p-4 text-theme-sm text-error-700 dark:border-error-500/20 dark:bg-error-500/10 dark:text-error-300">
+                        This will restore deducted tank inventory, reverse shift-applied account payments, unlock the transactions, and mark this settlement as voided.
+                    </div>
+                    <label class="block">
+                        <span class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">Reason for undo / void</span>
+                        <textarea id="voidApprovalReason" maxlength="2000" rows="5" class="mt-2 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" placeholder="Type the reason for undoing this approval."></textarea>
+                    </label>
+                    <p id="voidApprovalReasonError" class="hidden text-theme-xs font-medium text-error-600 dark:text-error-500">A reason is required.</p>
+                </div>
+                <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
+                    <button type="button" class="{{ $buttonClass }} h-11 text-theme-sm" data-close-modal="#voidApprovalModal">Cancel</button>
+                    <button type="submit" class="{{ $dangerButtonClass }} h-11 text-theme-sm" id="btnVoidApproval">Undo Approval</button>
+                </div>
+            </form>
+        </div>
+    </div>
 @endsection
 
 @push('scripts')
@@ -406,6 +483,7 @@
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || @json(csrf_token());
         const detailsUrl = @json(url('/admin/reconciliation/details'));
         const approveUrl = @json(route('admin.reconcile.approve'));
+        const voidApprovalUrl = @json(route('admin.reconcile.voidApproval'));
         const rejectUrl = @json(route('admin.reconcile.reject'));
         const remarksUrl = @json(route('admin.reconcile.remarks'));
         const moneyFormatter = new Intl.NumberFormat('en-PH', {
@@ -499,6 +577,39 @@
             showToast.timer = window.setTimeout(() => toast.classList.add('hidden'), 3200);
         }
 
+        function queueToastAfterReload(message, type = 'success') {
+            try {
+                window.sessionStorage.setItem('reconciliation-toast', JSON.stringify({
+                    message,
+                    type
+                }));
+            } catch (error) {
+                showToast(message, type);
+            }
+        }
+
+        function showQueuedToast() {
+            let payload = null;
+
+            try {
+                payload = window.sessionStorage.getItem('reconciliation-toast');
+                window.sessionStorage.removeItem('reconciliation-toast');
+            } catch (error) {
+                payload = null;
+            }
+
+            if (!payload) {
+                return;
+            }
+
+            try {
+                const toast = JSON.parse(payload);
+                showToast(toast.message || 'Action completed.', toast.type || 'success');
+            } catch (error) {
+                showToast(payload);
+            }
+        }
+
         function setButtonLoading(button, isLoading, loadingText = 'Saving...') {
             if (!button) {
                 return;
@@ -556,7 +667,41 @@
                 return 'Rejected';
             }
 
+            if (value.includes('void')) {
+                return 'Voided';
+            }
+
             return 'Pending Verification';
+        }
+
+        function dipstickValue(reading, fields) {
+            for (const field of fields) {
+                if (reading[field] !== undefined && reading[field] !== null && reading[field] !== '') {
+                    return Number(reading[field]) || 0;
+                }
+            }
+
+            return 0;
+        }
+
+        function dipstickReadings(reading) {
+            return [
+                {
+                    label: 'Premium',
+                    shortLabel: 'P',
+                    value: dipstickValue(reading, ['dipstick_premium', 'premium_dipstick', 'premium_dipstick_reading'])
+                },
+                {
+                    label: 'Regular',
+                    shortLabel: 'R',
+                    value: dipstickValue(reading, ['dipstick_regular', 'dipstick_unleaded', 'regular_dipstick', 'unleaded_dipstick', 'regular_dipstick_reading', 'unleaded_dipstick_reading'])
+                },
+                {
+                    label: 'Diesel',
+                    shortLabel: 'D',
+                    value: dipstickValue(reading, ['dipstick_diesel', 'diesel_dipstick', 'diesel_dipstick_reading'])
+                }
+            ];
         }
 
         function dateLabel(reading) {
@@ -690,6 +835,28 @@
             }
 
             return html;
+        }
+
+        function renderDipstickSummary(reading) {
+            const items = dipstickReadings(reading);
+            const total = items.reduce((sum, item) => sum + item.value, 0);
+
+            return `
+                <div class="rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                    <div class="mb-3 flex items-center justify-between gap-3">
+                        <h4 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dipstick Reading</h4>
+                        <span class="text-theme-xs font-medium tabular-nums text-gray-500 dark:text-gray-400">${fnum(total)} L total</span>
+                    </div>
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        ${items.map((item) => `
+                            <div class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                                <p class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">${esc(item.label)}</p>
+                                <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">${fnum(item.value)} L</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
         }
 
         function saleReference(item) {
@@ -868,6 +1035,7 @@
             }
 
             document.getElementById('pumpCardsContainer').innerHTML = renderPumpCards(reading, images);
+            document.getElementById('dipstickSummaryContainer').innerHTML = renderDipstickSummary(reading);
             document.getElementById('financialCalcBody').innerHTML = renderFinancialRows(reading, breakdowns);
             showDetailsContent();
         }
@@ -929,6 +1097,15 @@
             setTimeout(() => document.getElementById('rejectionReason').focus(), 50);
         }
 
+        function openVoidApprovalModal(id) {
+            document.getElementById('voidApprovalReadingId').value = id;
+            document.getElementById('voidApprovalSettlementMeta').textContent = settlementMeta(id);
+            document.getElementById('voidApprovalReason').value = '';
+            document.getElementById('voidApprovalReasonError').classList.add('hidden');
+            openModal('#voidApprovalModal');
+            setTimeout(() => document.getElementById('voidApprovalReason').focus(), 50);
+        }
+
         function submitAction(url, payload, button, loadingText) {
             setButtonLoading(button, true, loadingText);
 
@@ -942,6 +1119,8 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            showQueuedToast();
+
             document.querySelectorAll('[data-close-modal]').forEach((button) => {
                 button.addEventListener('click', () => closeModal(button.dataset.closeModal));
             });
@@ -971,8 +1150,8 @@
                 submitAction(approveUrl, { id }, document.getElementById('btnApprove'), 'Approving')
                     .then((data) => {
                         closeModal('#approveModal');
-                        showToast(data.message || 'Settlement approved.');
-                        setTimeout(() => window.location.reload(), 850);
+                        queueToastAfterReload(data.message || 'Settlement approved.');
+                        window.location.reload();
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });
@@ -993,8 +1172,30 @@
                 }, document.getElementById('btnReject'), 'Rejecting')
                     .then((data) => {
                         closeModal('#rejectModal');
-                        showToast(data.message || 'Settlement rejected.');
-                        setTimeout(() => window.location.reload(), 850);
+                        queueToastAfterReload(data.message || 'Settlement rejected.');
+                        window.location.reload();
+                    })
+                    .catch((error) => showToast(error.message, 'error'));
+            });
+
+            document.getElementById('voidApprovalForm')?.addEventListener('submit', function(event) {
+                event.preventDefault();
+                const id = Number(document.getElementById('voidApprovalReadingId').value);
+                const reason = document.getElementById('voidApprovalReason').value.trim();
+
+                if (!reason) {
+                    document.getElementById('voidApprovalReasonError').classList.remove('hidden');
+                    return;
+                }
+
+                submitAction(voidApprovalUrl, {
+                    id,
+                    void_reason: reason
+                }, document.getElementById('btnVoidApproval'), 'Undoing')
+                    .then((data) => {
+                        closeModal('#voidApprovalModal');
+                        queueToastAfterReload(data.message || 'Approval undone.');
+                        window.location.reload();
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });
@@ -1004,7 +1205,7 @@
                     return;
                 }
 
-                ['#lightboxModal', '#detailsModal', '#remarksModal', '#approveModal', '#rejectModal'].forEach(closeModal);
+                ['#lightboxModal', '#detailsModal', '#remarksModal', '#approveModal', '#rejectModal', '#voidApprovalModal'].forEach(closeModal);
             });
         });
     </script>

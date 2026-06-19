@@ -209,6 +209,45 @@ class ShiftReconciliationController extends Controller
         }
     }
 
+    public function voidApproval(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'id' => ['required', 'integer'],
+            'void_reason' => ['required', 'string', 'max:2000'],
+        ]);
+
+        try {
+            $reversedCollections = 0;
+
+            DB::transaction(function () use ($validated, &$reversedCollections) {
+                $reading = $this->findReadingForAction((int) $validated['id'], true);
+
+                if (! $reading) {
+                    throw new \RuntimeException('Shift reading not found.');
+                }
+
+                if ($this->hasColumn('shift_readings', 'status') && strtolower((string) $reading->status) !== 'verified') {
+                    throw new \RuntimeException('Only verified settlements can have their approval undone.');
+                }
+
+                $this->applyTankInventoryForReading($reading, 'add');
+                $reversedCollections = $this->reverseShiftApprovalCollections($reading);
+                $this->unlockSalesForReading($reading);
+                $this->updateShiftReading((int) $reading->id, $this->voidUpdatePayload($validated['void_reason']));
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => "Approval undone. Inventory was restored, {$reversedCollections} collection payment(s) were reset, and the settlement transactions were unlocked.",
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function saveRemarks(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -255,13 +294,19 @@ class ShiftReconciliationController extends Controller
         return $query->select($selects);
     }
 
-    private function findReadingForAction(int $id)
+    private function findReadingForAction(int $id, bool $lockForUpdate = false)
     {
         if (! $this->hasTable('shift_readings') || ! $this->hasColumn('shift_readings', 'id')) {
             return null;
         }
 
-        return DB::table('shift_readings')->where('id', $id)->first();
+        $query = DB::table('shift_readings')->where('id', $id);
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
     }
 
     private function calculateReadingData(object $reading): void
@@ -323,6 +368,24 @@ class ShiftReconciliationController extends Controller
         $reading->cash_denominations = $this->decodeJsonDetails($reading->cash_denominations ?? null);
         $reading->gcash_entries = $this->decodeJsonDetails($reading->gcash_entries ?? null);
         $reading->cheque_entries = $this->decodeJsonDetails($reading->cheque_entries ?? null);
+        $reading->dipstick_premium = $this->liters($this->firstReadingNumber($reading, [
+            'dipstick_premium',
+            'premium_dipstick',
+            'premium_dipstick_reading',
+        ]));
+        $reading->dipstick_regular = $this->liters($this->firstReadingNumber($reading, [
+            'dipstick_regular',
+            'dipstick_unleaded',
+            'regular_dipstick',
+            'unleaded_dipstick',
+            'regular_dipstick_reading',
+            'unleaded_dipstick_reading',
+        ]));
+        $reading->dipstick_diesel = $this->liters($this->firstReadingNumber($reading, [
+            'dipstick_diesel',
+            'diesel_dipstick',
+            'diesel_dipstick_reading',
+        ]));
     }
 
     private function getReadingPeriodContext(object $reading): array
@@ -587,6 +650,10 @@ class ShiftReconciliationController extends Controller
 
     private function scopeSalesToReading($query, object $reading, Carbon $periodStart, Carbon $periodEnd)
     {
+        if (strtolower((string) ($reading->status ?? '')) === 'voided') {
+            return $query->whereRaw('1 = 0');
+        }
+
         if ($this->readingHasLockedSales($reading)) {
             return $query->where('sales.locked_by_shift_reading_id', $reading->id);
         }
@@ -652,8 +719,21 @@ class ShiftReconciliationController extends Controller
 
     private function deductTankInventory(object $reading, $lastVerified): void
     {
+        $this->applyTankInventoryForReading($reading, 'deduct', $lastVerified);
+    }
+
+    private function applyTankInventoryForReading(object $reading, string $action, $lastVerified = null): void
+    {
         if (! $this->hasTable('tanks') || ! $this->hasColumn('tanks', 'current_volume')) {
             return;
+        }
+
+        if (! in_array($action, ['deduct', 'add'], true)) {
+            throw new \InvalidArgumentException('Invalid tank inventory action.');
+        }
+
+        if (! $lastVerified) {
+            [$lastVerified] = $this->getReadingPeriodContext($reading);
         }
 
         for ($pump = 1; $pump <= self::PUMP_COUNT; $pump++) {
@@ -664,9 +744,32 @@ class ShiftReconciliationController extends Controller
             $dispensed = $end - $start;
 
             if ($dispensed > 0) {
-                $this->updateTankVolume($pump, self::PUMP_FUEL_TYPES[$pump], $dispensed, 'deduct');
+                $this->updateTankVolume($pump, self::PUMP_FUEL_TYPES[$pump], $dispensed, $action);
             }
         }
+    }
+
+    private function unlockSalesForReading(object $reading): void
+    {
+        if (
+            ! $this->hasTable('sales')
+            || ! $this->hasColumn('sales', 'locked_by_shift_reading_id')
+            || ! isset($reading->id)
+        ) {
+            return;
+        }
+
+        $updates = ['locked_by_shift_reading_id' => null];
+
+        if ($this->hasColumn('sales', 'locked_at')) {
+            $updates['locked_at'] = null;
+        }
+
+        DB::table('sales')
+            ->where('locked_by_shift_reading_id', (int) $reading->id)
+            ->update($updates);
+
+        unset($this->lockedSalesPresence[(int) $reading->id]);
     }
 
     private function updateTankVolume(int $pumpId, string $fuelType, float $liters, string $action): void
@@ -851,6 +954,231 @@ class ShiftReconciliationController extends Controller
         DB::table('invoices')->where('id', $collection->invoice_id)->update($updates);
     }
 
+    private function reverseShiftApprovalCollections(object $reading): int
+    {
+        if (
+            ! $this->hasTable('sales')
+            || ! $this->hasColumn('sales', 'locked_by_shift_reading_id')
+            || ! $this->hasColumn('sales', 'payment_type')
+        ) {
+            return 0;
+        }
+
+        $query = DB::table('sales')
+            ->where('locked_by_shift_reading_id', (int) $reading->id)
+            ->whereRaw("LOWER(payment_type) = 'collection'");
+
+        if ($this->hasColumn('sales', 'customer_payment_posted_at')) {
+            $query->whereNotNull('customer_payment_posted_at');
+        }
+
+        $collections = $query->lockForUpdate()->get();
+        $reversed = 0;
+
+        foreach ($collections as $collection) {
+            $ledger = $this->findShiftApprovalPaymentLedger($reading, $collection);
+
+            if (! $ledger) {
+                continue;
+            }
+
+            $voidLedgers = $this->findShiftApprovalVoidPaymentLedgers($collection);
+            $wasAlreadyVoided = ! empty($collection->customer_payment_voided_at);
+
+            if (! $wasAlreadyVoided) {
+                $this->reverseLedgerPaymentImpact($ledger);
+            }
+
+            $this->deleteCustomerLedger($ledger);
+
+            foreach ($voidLedgers as $voidLedger) {
+                $this->deleteCustomerLedger($voidLedger);
+            }
+
+            $this->updateSale((int) $collection->id, [
+                'posted_customer_id' => null,
+                'customer_name' => null,
+                'customer_payment_posted_at' => null,
+                'customer_payment_posted_by' => null,
+                'customer_payment_authorized_by' => null,
+                'customer_payment_voided_at' => null,
+                'customer_payment_voided_by' => null,
+                'customer_payment_void_authorized_by' => null,
+                'updated_at' => now(),
+            ]);
+
+            $reversed++;
+        }
+
+        return $reversed;
+    }
+
+    private function findShiftApprovalPaymentLedger(object $reading, object $collection)
+    {
+        if (! $this->hasTable('customer_ledgers')) {
+            return null;
+        }
+
+        $query = DB::table('customer_ledgers');
+
+        if ($this->hasColumn('customer_ledgers', 'type')) {
+            $query->where('type', 'Payment');
+        }
+
+        if ($this->hasColumn('customer_ledgers', 'description')) {
+            $query->where('description', 'LIKE', '%Verified from Shift #' . (int) $reading->id . '%');
+        }
+
+        if ($this->hasColumn('customer_ledgers', 'credit')) {
+            $query->where('credit', '>', 0);
+        }
+
+        $customerId = $collection->posted_customer_id ?? ($collection->customer_id ?? null);
+
+        if (! empty($customerId) && $this->hasColumn('customer_ledgers', 'customer_id')) {
+            $query->where('customer_id', $customerId);
+        }
+
+        $referenceNo = trim((string) ($collection->reference_no ?? ''));
+
+        if ($referenceNo !== '' && $this->hasColumn('customer_ledgers', 'reference_no')) {
+            $query->where('reference_no', $referenceNo);
+        } elseif (
+            $this->hasColumn('customer_ledgers', 'transaction_date')
+            && $this->hasColumn('customer_ledgers', 'credit')
+            && isset($collection->created_at)
+        ) {
+            $query->where('transaction_date', $collection->created_at)
+                ->where('credit', (float) ($collection->amount ?? 0));
+        }
+
+        $orNumber = trim((string) ($collection->or_number ?? ''));
+
+        if ($orNumber !== '' && $this->hasColumn('customer_ledgers', 'or_number')) {
+            $query->where(function ($orQuery) use ($orNumber) {
+                $orQuery->where('or_number', $orNumber)
+                    ->orWhereNull('or_number');
+            });
+        }
+
+        return $query
+            ->when($this->hasColumn('customer_ledgers', 'id'), fn ($query) => $query->orderByDesc('id'))
+            ->lockForUpdate()
+            ->first();
+    }
+
+    private function findShiftApprovalVoidPaymentLedgers(object $collection)
+    {
+        if (
+            ! $this->hasTable('customer_ledgers')
+            || ! $this->hasColumn('customer_ledgers', 'type')
+            || ! $this->hasColumn('customer_ledgers', 'reference_no')
+        ) {
+            return collect();
+        }
+
+        return DB::table('customer_ledgers')
+            ->where('type', 'Void Payment')
+            ->where('reference_no', 'VOID-' . (int) ($collection->id ?? 0))
+            ->lockForUpdate()
+            ->get();
+    }
+
+    private function reverseLedgerPaymentImpact(object $ledger): void
+    {
+        $amount = $this->money($ledger->credit ?? 0);
+
+        if ($amount <= 0) {
+            return;
+        }
+
+        if (
+            $this->hasTable('customers')
+            && $this->hasColumn('customers', 'id')
+            && $this->hasColumn('customers', 'current_balance')
+            && ! empty($ledger->customer_id)
+        ) {
+            $customer = DB::table('customers')
+                ->where('id', $ledger->customer_id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($customer) {
+                $this->updateCustomerBalance((int) $customer->id, $this->money(($customer->current_balance ?? 0) + $amount));
+            }
+        }
+
+        if (
+            empty($ledger->invoice_id)
+            || ! $this->hasTable('invoices')
+            || ! $this->hasColumn('invoices', 'id')
+            || ! $this->hasColumn('invoices', 'payments_received')
+        ) {
+            return;
+        }
+
+        $invoice = DB::table('invoices')
+            ->where('id', $ledger->invoice_id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $invoice) {
+            return;
+        }
+
+        $newPaymentsReceived = max(0, $this->money(($invoice->payments_received ?? 0) - $amount));
+        $updates = ['payments_received' => $newPaymentsReceived];
+
+        if ($this->hasColumn('invoices', 'status')) {
+            $updates['status'] = $this->invoiceStatusForPaymentsReceived($invoice, $newPaymentsReceived);
+        }
+
+        if ($this->hasColumn('invoices', 'updated_at')) {
+            $updates['updated_at'] = now();
+        }
+
+        DB::table('invoices')->where('id', $invoice->id)->update($updates);
+    }
+
+    private function deleteCustomerLedger(object $ledger): void
+    {
+        if (! $this->hasTable('customer_ledgers') || ! $this->hasColumn('customer_ledgers', 'id') || empty($ledger->id)) {
+            return;
+        }
+
+        DB::table('customer_ledgers')->where('id', $ledger->id)->delete();
+    }
+
+    private function voidUpdatePayload(string $reason): array
+    {
+        return [
+            'status' => 'Voided',
+            'voided_at' => now(),
+            'voided_by' => auth()->id(),
+            'void_reason' => trim($reason),
+            'updated_at' => now(),
+        ];
+    }
+
+    private function invoiceStatusForPaymentsReceived(object $invoice, float $paymentsReceived): string
+    {
+        if (($invoice->status ?? null) === 'Rolled Over') {
+            return (string) $invoice->status;
+        }
+
+        if ($paymentsReceived <= 0) {
+            return 'Unpaid';
+        }
+
+        if (! $this->hasColumn('invoices', 'total_amount_due')) {
+            return (string) ($invoice->status ?? 'Partial');
+        }
+
+        return $paymentsReceived < (float) ($invoice->total_amount_due ?? 0)
+            ? 'Partial'
+            : 'Paid';
+    }
+
     private function updateReadingStatus(int $id, string $status): void
     {
         if (! $this->hasColumn('shift_readings', 'status')) {
@@ -969,6 +1297,8 @@ class ShiftReconciliationController extends Controller
                     $summary['verified'] += $count;
                 } elseif (str_contains($status, 'reject')) {
                     $summary['rejected'] += $count;
+                } elseif (str_contains($status, 'void')) {
+                    $summary['voided'] += $count;
                 } else {
                     $summary['pending'] += $count;
                 }
@@ -984,6 +1314,7 @@ class ShiftReconciliationController extends Controller
             'pending' => 0,
             'verified' => 0,
             'rejected' => 0,
+            'voided' => 0,
         ];
     }
 
@@ -1022,6 +1353,17 @@ class ShiftReconciliationController extends Controller
         $decoded = json_decode((string) $value, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function firstReadingNumber(object $reading, array $fields): float
+    {
+        foreach ($fields as $field) {
+            if (property_exists($reading, $field) && $reading->$field !== null && $reading->$field !== '') {
+                return $this->number($reading->$field);
+            }
+        }
+
+        return 0.0;
     }
 
     private function hasTable(string $table): bool
