@@ -906,13 +906,14 @@ class BillingController extends Controller
 
         $invoiceRows = $invoiceRows ?? $this->billingRowsForInvoice($invoice);
         $currentCharges = $this->moneyValue($invoiceRows->filter(fn ($row) => $this->isBillableChargeRow($row))->sum('debit'));
-        $paymentsReceived = $this->moneyValue($invoiceRows->filter(fn ($row) => $this->isPaymentAppliedToInvoice($row, $invoice))->sum('credit'));
+        $paymentsReceived = $this->netPaymentsReceivedForInvoice($invoiceRows, $invoice);
         $totalDiscounts = $this->moneyValue($invoiceRows->filter(fn ($row) => $this->isBillableChargeRow($row))->sum('discount'));
         $totalAmountDue = $this->moneyValue((float) $invoice->previous_balance + $currentCharges);
         $remainingDue = $totalAmountDue - $paymentsReceived;
         $status = $invoice->status;
+        $hasPaymentReversal = $invoiceRows->contains(fn ($row) => $this->isPaymentReversalAppliedToInvoice($row, $invoice));
 
-        if ($status !== 'Rolled Over' && ! ($preservePaidStatus && $status === 'Paid')) {
+        if ($status !== 'Rolled Over' && ! ($preservePaidStatus && $status === 'Paid' && ! $hasPaymentReversal)) {
             if ($remainingDue <= 0.004) {
                 $status = 'Paid';
             } elseif ($paymentsReceived > 0) {
@@ -1176,11 +1177,47 @@ class BillingController extends Controller
         return Carbon::parse($ledger->created_at)->greaterThanOrEqualTo(Carbon::parse($invoice->created_at));
     }
 
+    private function isPaymentReversalAppliedToInvoice($ledger, $invoice): bool
+    {
+        if ((float) ($ledger->debit ?? 0) <= 0 || ($ledger->type ?? null) !== 'Void Payment') {
+            return false;
+        }
+
+        if ((int) ($ledger->invoice_id ?? 0) === (int) ($invoice->id ?? 0)) {
+            return true;
+        }
+
+        $invoiceNumber = trim((string) ($invoice->invoice_number ?? ''));
+        $referenceNo = trim((string) ($ledger->reference_no ?? ''));
+        $orNumber = trim((string) ($ledger->or_number ?? ''));
+        $description = (string) ($ledger->description ?? '');
+
+        return $invoiceNumber !== ''
+            && (
+                strcasecmp($referenceNo, $invoiceNumber) === 0
+                || strcasecmp($orNumber, $invoiceNumber) === 0
+                || stripos($description, $invoiceNumber) !== false
+            );
+    }
+
+    private function netPaymentsReceivedForInvoice($invoiceRows, $invoice): float
+    {
+        $paymentCredits = $invoiceRows
+            ->filter(fn ($row) => $this->isPaymentAppliedToInvoice($row, $invoice))
+            ->sum('credit');
+
+        $voidDebits = $invoiceRows
+            ->filter(fn ($row) => $this->isPaymentReversalAppliedToInvoice($row, $invoice))
+            ->sum('debit');
+
+        return $this->moneyValue(max(0, (float) $paymentCredits - (float) $voidDebits));
+    }
+
     private function isBillableChargeRow($ledger): bool
     {
         return (float) ($ledger->debit ?? 0) > 0
             && (float) ($ledger->credit ?? 0) <= 0
-            && ($ledger->type ?? null) !== 'Payment';
+            && ! in_array($ledger->type ?? null, ['Payment', 'Void Payment'], true);
     }
 
     private function ledgerRowsWithoutReversedCharges($ledgerRows)

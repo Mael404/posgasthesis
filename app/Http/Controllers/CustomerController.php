@@ -152,6 +152,7 @@ class CustomerController extends Controller
             ->when($request->filled('from_date'), fn ($query) => $query->whereDate('transaction_date', '>=', $request->from_date))
             ->when($request->filled('to_date'), fn ($query) => $query->whereDate('transaction_date', '<=', $request->to_date))
             ->orderByDesc('transaction_date')
+            ->when($this->hasColumn('customer_ledgers', 'created_at'), fn ($query) => $query->orderByDesc('created_at'))
             ->orderByDesc('id')
             ->get()
             ->map(fn ($entry) => $this->ledgerPayload($entry))
@@ -468,10 +469,29 @@ class CustomerController extends Controller
 
     private function ledgerPayload($entry): array
     {
+        $transactionDate = $entry->transaction_date ? Carbon::parse($entry->transaction_date) : null;
+        $transactionDateTime = 'N/A';
+
+        if ($transactionDate) {
+            $hasTransactionTime = $transactionDate->format('H:i:s') !== '00:00:00';
+
+            if (! $hasTransactionTime && ! empty($entry->created_at)) {
+                $createdAt = Carbon::parse($entry->created_at);
+                $transactionDate = $transactionDate->setTime(
+                    (int) $createdAt->format('H'),
+                    (int) $createdAt->format('i'),
+                    (int) $createdAt->format('s')
+                );
+            }
+
+            $transactionDateTime = $transactionDate->format('M d, Y - h:i A');
+        }
+
         return [
             'id' => (int) $entry->id,
             'transaction_date' => $entry->transaction_date,
-            'date_display' => $entry->transaction_date ? Carbon::parse($entry->transaction_date)->format('M d, Y') : 'N/A',
+            'transaction_datetime' => $transactionDateTime,
+            'date_display' => $transactionDateTime,
             'type' => $entry->type ?? 'Ledger',
             'reference_no' => $entry->reference_no,
             'or_number' => $entry->or_number ?? null,

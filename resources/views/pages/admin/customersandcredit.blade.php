@@ -317,13 +317,13 @@
                 <div class="max-h-[620px] max-w-full overflow-auto custom-scrollbar">
                     <table class="min-w-[980px] w-full table-fixed">
                         <colgroup>
-                            <col class="w-[12%]">
-                            <col class="w-[11%]">
+                            <col class="w-[17%]">
+                            <col class="w-[10%]">
                             <col class="w-[13%]">
-                            <col class="w-[31%]">
-                            <col class="w-[11%]">
-                            <col class="w-[11%]">
-                            <col class="w-[11%]">
+                            <col class="w-[28%]">
+                            <col class="w-[10%]">
+                            <col class="w-[10%]">
+                            <col class="w-[12%]">
                         </colgroup>
                         <thead class="sticky top-0 z-1 border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
                             <tr>
@@ -351,7 +351,7 @@
                             </template>
                             <template x-for="entry in ledger.rows" :key="entry.id">
                                 <tr>
-                                    <td class="{{ $tdClass }}" x-text="entry.date_display"></td>
+                                    <td class="{{ $tdClass }}" x-text="entry.transaction_datetime || entry.date_display"></td>
                                     <td class="{{ $tdClass }}">
                                         <span class="inline-flex rounded-full px-2.5 py-0.5 text-theme-xs font-medium"
                                             :class="entry.type === 'Payment' ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'"

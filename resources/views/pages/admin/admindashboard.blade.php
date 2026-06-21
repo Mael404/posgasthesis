@@ -36,6 +36,7 @@
         $creditPaymentsStats = $metricStats('credit-payments');
         $advanceReceivablesStats = $metricStats('advance-receivables');
         $totalExcessStats = $metricStats('total-excess');
+        $litersMovementStats = $metricStats('liters-movement');
         $cardClass = 'min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
         $cardHeaderClass = 'mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between';
         $cardTitleClass = 'text-lg font-semibold text-gray-800 dark:text-white/90';
@@ -285,6 +286,88 @@
                         <div class="{{ $metaClass }}" id="totalExcessMeta">{{ $metricPeriodLabel('total-excess') }}</div>
                     </article>
 
+                    <article class="{{ $cardClass }} col-span-12">
+                        <div class="{{ $cardHeaderClass }}">
+                            <div class="min-w-0">
+                                <h2 class="{{ $cardTitleClass }}">Liters Movement</h2>
+                                <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Shift-reading pump liters by status, tank, and pump.</p>
+                            </div>
+                            <div class="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:items-end">
+                                <div class="{{ $segmentGroupClass }}" aria-label="Liters movement status">
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-liters-status="verified">Verified</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-liters-status="unverified">Unverified</button>
+                                </div>
+                                <div class="{{ $segmentGroupClass }}" aria-label="Liters movement period">
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="liters-movement" data-period="today">Today</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="liters-movement" data-period="weekly">Week</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="liters-movement" data-period="monthly">Month</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="liters-movement" data-period="custom">Custom</button>
+                                </div>
+                            </div>
+                        </div>
+                        @php($litersMovementFilter = $metricFilter('liters-movement'))
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                            <label class="{{ $dateLabelClass }}">
+                                <span>From</span>
+                                <span class="relative block custom-datepicker">
+                                    <input type="text" class="{{ $dateInputClass }}" name="{{ $litersMovementFilter['prefix'] }}_from" value="{{ $litersMovementFilter['from'] ?? request($litersMovementFilter['prefix'] . '_from') }}" placeholder="Select date" autocomplete="off" data-dashboard-datepicker>
+                                    {!! $dateIcon !!}
+                                </span>
+                            </label>
+                            <label class="{{ $dateLabelClass }}">
+                                <span>To</span>
+                                <span class="relative block custom-datepicker">
+                                    <input type="text" class="{{ $dateInputClass }}" name="{{ $litersMovementFilter['prefix'] }}_to" value="{{ $litersMovementFilter['to'] ?? request($litersMovementFilter['prefix'] . '_to') }}" placeholder="Select date" autocomplete="off" data-dashboard-datepicker>
+                                    {!! $dateIcon !!}
+                                </span>
+                            </label>
+                            <div class="{{ $dateActionClass }} 2xl:col-span-1">
+                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
+                                <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $litersMovementFilter['prefix'] }}">Clear</button>
+                            </div>
+                        </form>
+                        <div class="{{ $metricValueClass }}" id="litersMovementValue">
+                            {{ number_format($litersMovementStats['shift_reading_verified_liters'] ?? 0, 2) }} L
+                        </div>
+                        <p class="{{ $captionClass }}" id="litersMovementCaption">Verified shift readings pump liters</p>
+                        <div class="{{ $metaClass }}" id="litersMovementMeta">
+                            {{ $litersMovementStats['shift_reading_verified_liters_count'] ?? 0 }} verified reading(s) | {{ $metricPeriodLabel('liters-movement') }}
+                        </div>
+                        <div class="mt-5 grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
+                            <div class="min-w-0">
+                                <h3 class="mb-3 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Per Tank</h3>
+                                <div class="min-w-0 max-w-full overflow-x-auto custom-scrollbar">
+                                    <table class="{{ $tableClass }}">
+                                        <thead>
+                                            <tr class="border-y border-gray-100 dark:border-gray-800">
+                                                <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Tank</p></th>
+                                                <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Fuel</p></th>
+                                                <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Pumps</p></th>
+                                                <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Liters</p></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="litersMovementTankRows"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="min-w-0">
+                                <h3 class="mb-3 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Per Pump</h3>
+                                <div class="min-w-0 max-w-full overflow-x-auto custom-scrollbar">
+                                    <table class="{{ $tableClass }}">
+                                        <thead>
+                                            <tr class="border-y border-gray-100 dark:border-gray-800">
+                                                <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Pump</p></th>
+                                                <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Fuel</p></th>
+                                                <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Liters</p></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="litersMovementPumpRows"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+
                     <section class="{{ $cardClass }} col-span-12">
                         <div class="{{ $cardHeaderClass }}">
                             <h2 class="{{ $cardTitleClass }}">Inventory Movement Per Tank</h2>
@@ -362,6 +445,8 @@
             creditPaymentsPeriod: cardDefaultPeriods['credit-payments'] || 'today',
             advanceReceivablesPeriod: cardDefaultPeriods['advance-receivables'] || 'today',
             totalExcessPeriod: cardDefaultPeriods['total-excess'] || 'today',
+            litersMovementStatus: 'verified',
+            litersMovementPeriod: cardDefaultPeriods['liters-movement'] || 'today',
             tankMovementsPeriod: 'today',
             pumpSalesPeriod: 'today'
         };
@@ -372,6 +457,7 @@
             'credit-payments': 'creditPaymentsPeriod',
             'advance-receivables': 'advanceReceivablesPeriod',
             'total-excess': 'totalExcessPeriod',
+            'liters-movement': 'litersMovementPeriod',
             'tank-movements': 'tankMovementsPeriod',
             'pump-sales': 'pumpSalesPeriod'
         };
@@ -581,6 +667,26 @@
             const excessStats = currentStats('total-excess', dashboardState.totalExcessPeriod);
             setText('totalExcessValue', money(excessStats.total_excess));
             setText('totalExcessMeta', periodLabel('total-excess', dashboardState.totalExcessPeriod));
+
+            const litersStats = currentStats('liters-movement', dashboardState.litersMovementPeriod);
+            const litersStatus = dashboardState.litersMovementStatus;
+            const litersKey = litersStatus === 'verified'
+                ? 'shift_reading_verified_liters'
+                : 'shift_reading_unverified_liters';
+            const litersCountKey = litersStatus === 'verified'
+                ? 'shift_reading_verified_liters_count'
+                : 'shift_reading_unverified_liters_count';
+            const litersCount = Number(litersStats[litersCountKey]) || 0;
+            const litersLabel = litersStatus === 'verified' ? 'Verified' : 'Unverified';
+
+            setText('litersMovementValue', liters(litersStats[litersKey]));
+            setText('litersMovementCaption', litersLabel + ' shift readings pump liters');
+            setText(
+                'litersMovementMeta',
+                integerFormatter.format(litersCount) + ' ' + litersStatus + ' reading' + (litersCount === 1 ? '' : 's') +
+                    ' | ' + periodLabel('liters-movement', dashboardState.litersMovementPeriod)
+            );
+            renderLitersMovementBreakdowns(litersStats, litersStatus);
         }
 
         function updateButtonStates() {
@@ -601,6 +707,72 @@
             document.querySelectorAll('[data-net-credit-mode]').forEach(function(button) {
                 setSegmentButtonState(button, button.dataset.netCreditMode === dashboardState.netSalesCreditMode);
             });
+
+            document.querySelectorAll('[data-liters-status]').forEach(function(button) {
+                setSegmentButtonState(button, button.dataset.litersStatus === dashboardState.litersMovementStatus);
+            });
+        }
+
+        function renderLitersMovementBreakdowns(stats, status) {
+            const tankRows = status === 'verified'
+                ? (stats.shift_reading_verified_tanks || [])
+                : (stats.shift_reading_unverified_tanks || []);
+            const pumpRows = status === 'verified'
+                ? (stats.shift_reading_verified_pumps || [])
+                : (stats.shift_reading_unverified_pumps || []);
+            const tankBody = document.getElementById('litersMovementTankRows');
+            const pumpBody = document.getElementById('litersMovementPumpRows');
+
+            if (tankBody) {
+                if (!tankRows.length) {
+                    tankBody.innerHTML = `<tr><td class="${emptyCellClass}" colspan="4">No tank liters found.</td></tr>`;
+                } else {
+                    tankBody.innerHTML = tankRows.map(function(row) {
+                        const fuelColorClasses = fuelClasses(row.fuel_type);
+
+                        return `
+                            <tr class="${rowClass}">
+                                <td class="${primaryCellClass}">
+                                    <span class="block text-theme-sm font-medium text-gray-800 dark:text-white/90">${escapeHtml(row.name)}</span>
+                                </td>
+                                <td class="${primaryCellClass}" data-label="Fuel">
+                                    <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-theme-xs font-medium ${fuelColorClasses.badge}">
+                                        <span class="h-1.5 w-1.5 rounded-full ${fuelColorClasses.dot}"></span>
+                                        ${escapeHtml(row.fuel_type)}
+                                    </span>
+                                </td>
+                                <td class="${primaryCellClass}" data-label="Pumps">${escapeHtml(row.connected_pumps_display)}</td>
+                                <td class="${numberCellClass}" data-label="Liters">${liters(row.liters)}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            }
+
+            if (pumpBody) {
+                if (!pumpRows.length) {
+                    pumpBody.innerHTML = `<tr><td class="${emptyCellClass}" colspan="3">No pump liters found.</td></tr>`;
+                } else {
+                    pumpBody.innerHTML = pumpRows.map(function(row) {
+                        const fuelColorClasses = fuelClasses(row.fuel_type);
+
+                        return `
+                            <tr class="${rowClass}">
+                                <td class="${primaryCellClass}">
+                                    <span class="block text-theme-sm font-medium text-gray-800 dark:text-white/90">${escapeHtml(row.pump_label)}</span>
+                                </td>
+                                <td class="${primaryCellClass}" data-label="Fuel">
+                                    <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-theme-xs font-medium ${fuelColorClasses.badge}">
+                                        <span class="h-1.5 w-1.5 rounded-full ${fuelColorClasses.dot}"></span>
+                                        ${escapeHtml(row.fuel_type)}
+                                    </span>
+                                </td>
+                                <td class="${numberCellClass}" data-label="Liters">${liters(row.liters)}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            }
         }
 
         function renderTankMovements() {
@@ -704,6 +876,13 @@
         document.querySelectorAll('[data-net-credit-mode]').forEach(function(button) {
             button.addEventListener('click', function() {
                 dashboardState.netSalesCreditMode = button.dataset.netCreditMode;
+                updateAll();
+            });
+        });
+
+        document.querySelectorAll('[data-liters-status]').forEach(function(button) {
+            button.addEventListener('click', function() {
+                dashboardState.litersMovementStatus = button.dataset.litersStatus;
                 updateAll();
             });
         });

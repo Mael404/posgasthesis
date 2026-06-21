@@ -3,6 +3,7 @@
     $prints = $prints ?? collect();
     $staffList = collect($staffList ?? []);
     $sessionMessage = session('success') ?: session('status');
+    $sessionError = session('error');
     $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
     $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
     $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
@@ -11,9 +12,11 @@
     $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
     $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
     $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
+    $dangerButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600 disabled:cursor-not-allowed disabled:opacity-60';
     $viewIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15';
     $markIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-success-200 bg-success-50 text-success-700 shadow-theme-xs transition hover:border-success-300 hover:bg-success-100 dark:border-success-500/25 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/15';
     $unmarkIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-warning-200 bg-warning-50 text-warning-700 shadow-theme-xs transition hover:border-warning-300 hover:bg-warning-100 dark:border-warning-500/25 dark:bg-warning-500/10 dark:text-warning-400 dark:hover:bg-warning-500/15';
+    $deleteIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-700 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
     $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
     $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
     $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
@@ -28,8 +31,12 @@
     x-data="printedTransactionsModule({
         csrfToken: @js(csrf_token()),
         markUrl: @js(route($routeBase . '.mark', ['batch' => '__BATCH__'])),
+        destroyUrl: @js($adminView ? route('admin.printed-transactions.destroy', ['batch' => '__BATCH__']) : null),
+        bulkMarkUrl: @js($adminView ? route('admin.printed-transactions.bulk-mark') : null),
+        bulkDeleteUrl: @js($adminView ? route('admin.printed-transactions.bulk-destroy') : null),
         storedToastKey: 'printed-transactions-toast',
-        sessionMessage: @js($sessionMessage)
+        sessionMessage: @js($sessionMessage),
+        sessionError: @js($sessionError)
     })"
     x-init="init()"
     class="space-y-6">
@@ -145,24 +152,44 @@
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Print Tracking Log</h2>
                 <p class="mt-1 {{ $captionClass }}">{{ $prints->total() }} batch{{ $prints->total() === 1 ? '' : 'es' }} found.</p>
             </div>
+            @if ($adminView)
+                <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button type="button" x-on:click="confirmBulkMark()" :disabled="selectedBatches.length === 0" class="{{ $secondaryButtonClass }}">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.25 4.25L19 7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Mark Selected
+                    </button>
+                    <button type="button" x-on:click="confirmBulkDelete()" :disabled="selectedBatches.length === 0" class="{{ $dangerButtonClass }}">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.75 9.75v6.5M14.25 9.75v6.5M5.75 6.75h12.5M10 4.75h4M7 6.75l.55 12.1A1.5 1.5 0 0 0 9.05 20.25h5.9a1.5 1.5 0 0 0 1.5-1.4L17 6.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Delete Selected
+                    </button>
+                </div>
+            @endif
         </div>
 
         <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
             <div class="max-w-full overflow-x-auto">
-                <table class="min-w-[900px] w-full table-fixed">
+                <table class="{{ $adminView ? 'min-w-[1100px]' : 'min-w-[900px]' }} w-full table-fixed">
                     <colgroup>
+                        @if ($adminView)
+                            <col class="w-[5%]">
+                        @endif
                         <col class="w-[12%]">
-                        <col class="w-[20%]">
+                        <col class="{{ $adminView ? 'w-[19%]' : 'w-[20%]' }}">
                         @if ($adminView)
                             <col class="w-[8%]">
                         @endif
-                        <col class="{{ $adminView ? 'w-[23%]' : 'w-[31%]' }}">
-                        <col class="w-[11%]">
-                        <col class="w-[13%]">
-                        <col class="w-[13%]">
+                        <col class="{{ $adminView ? 'w-[20%]' : 'w-[31%]' }}">
+                        <col class="{{ $adminView ? 'w-[10%]' : 'w-[11%]' }}">
+                        <col class="{{ $adminView ? 'w-[12%]' : 'w-[13%]' }}">
+                        <col class="{{ $adminView ? 'w-[14%]' : 'w-[13%]' }}">
                     </colgroup>
                     <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                         <tr>
+                            @if ($adminView)
+                                <th class="{{ $thClass }}">
+                                    <input type="checkbox" class="size-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900" x-bind:checked="allVisibleSelected()" x-on:change="toggleAllVisible($event.target.checked)" aria-label="Select all visible batches">
+                                </th>
+                            @endif
                             <th class="{{ $thClass }}">Printed At</th>
                             <th class="{{ $thClass }}">Customer</th>
                             @if ($adminView)
@@ -182,6 +209,11 @@
                                 $printedAt = $print->printed_at ? \Carbon\Carbon::parse($print->printed_at) : null;
                             @endphp
                             <tr>
+                                @if ($adminView)
+                                    <td class="{{ $tdClass }}">
+                                        <input type="checkbox" class="size-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900" value="{{ $print->id }}" x-model="selectedBatches" aria-label="Select batch {{ $print->batch_no ?: $print->id }}">
+                                    </td>
+                                @endif
                                 <td class="{{ $tdClass }}">
                                     <div class="font-medium text-gray-800 dark:text-white/90">{{ $printedAt ? $printedAt->format('M d, Y') : 'N/A' }}</div>
                                     <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $printedAt ? $printedAt->format('h:i A') : '' }}</div>
@@ -248,12 +280,22 @@
                                                 <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.25 4.25L19 7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                             @endif
                                         </button>
+                                        @if ($adminView)
+                                            <button
+                                                type="button"
+                                                x-on:click="confirmDelete({{ $print->id }})"
+                                                class="{{ $deleteIconButtonClass }}"
+                                                title="Delete batch"
+                                                aria-label="Delete batch">
+                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.75 9.75v6.5M14.25 9.75v6.5M5.75 6.75h12.5M10 4.75h4M7 6.75l.55 12.1A1.5 1.5 0 0 0 9.05 20.25h5.9a1.5 1.5 0 0 0 1.5-1.4L17 6.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            </button>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="{{ $adminView ? 7 : 6 }}" class="px-5 py-10 text-center">
+                                <td colspan="{{ $adminView ? 8 : 6 }}" class="px-5 py-10 text-center">
                                     <div class="mx-auto flex max-w-sm flex-col items-center">
                                         <span class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                             <svg class="size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8V4h10v4M7 17H5.75A2.75 2.75 0 0 1 3 14.25v-3.5A2.75 2.75 0 0 1 5.75 8h12.5A2.75 2.75 0 0 1 21 10.75v3.5A2.75 2.75 0 0 1 18.25 17H17M7 14h10v6H7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -288,7 +330,7 @@
             class="relative w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
             <div class="flex items-start gap-4">
                 <span class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-                    :class="confirmation.isMarked ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400' : 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400'">
+                    :class="confirmation.tone === 'danger' ? 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400' : (confirmation.tone === 'warning' ? 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400' : 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400')">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.25 4.25L19 7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </span>
                 <div class="min-w-0 flex-1">
@@ -298,8 +340,8 @@
             </div>
             <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button type="button" x-on:click="closeConfirmation()" class="{{ $secondaryButtonClass }}" :disabled="confirmation.loading">Cancel</button>
-                <button type="button" x-on:click="submitMark()" class="{{ $primaryButtonClass }}" :disabled="confirmation.loading">
-                    <span x-show="!confirmation.loading" x-text="confirmation.isMarked ? 'Mark Batch' : 'Return to Pending'"></span>
+                <button type="button" x-on:click="submitConfirmation()" :class="confirmation.tone === 'danger' ? @js($dangerButtonClass) : @js($primaryButtonClass)" :disabled="confirmation.loading">
+                    <span x-show="!confirmation.loading" x-text="confirmation.confirmText"></span>
                     <span x-show="confirmation.loading">Saving...</span>
                 </button>
             </div>
@@ -338,12 +380,17 @@
         function printedTransactionsModule(config) {
             return {
                 toast: { open: false, message: '', timer: null },
+                selectedBatches: [],
                 confirmation: {
                     open: false,
+                    action: 'mark',
                     id: null,
+                    ids: [],
                     isMarked: true,
                     title: '',
                     message: '',
+                    confirmText: 'Continue',
+                    tone: 'success',
                     loading: false
                 },
                 messageDialog: {
@@ -358,6 +405,10 @@
 
                     if (config.sessionMessage) {
                         this.$nextTick(() => this.showToast(config.sessionMessage));
+                    }
+
+                    if (config.sessionError) {
+                        this.$nextTick(() => this.showMessage(config.sessionError));
                     }
                 },
 
@@ -381,10 +432,75 @@
                 confirmMark(id, isMarked, title, message) {
                     this.confirmation = {
                         open: true,
+                        action: 'mark',
                         id,
+                        ids: [],
                         isMarked,
                         title,
                         message,
+                        confirmText: isMarked ? 'Mark Batch' : 'Return to Pending',
+                        tone: isMarked ? 'success' : 'warning',
+                        loading: false
+                    };
+                },
+
+                confirmDelete(id) {
+                    if (!config.destroyUrl) return;
+
+                    this.confirmation = {
+                        open: true,
+                        action: 'delete',
+                        id,
+                        ids: [],
+                        isMarked: false,
+                        title: 'Delete Batch',
+                        message: 'Delete this printed transaction batch permanently?',
+                        confirmText: 'Delete Batch',
+                        tone: 'danger',
+                        loading: false
+                    };
+                },
+
+                confirmBulkMark() {
+                    const ids = this.selectedIds();
+
+                    if (!ids.length) {
+                        this.showMessage('Select at least one printed transaction batch first.');
+                        return;
+                    }
+
+                    this.confirmation = {
+                        open: true,
+                        action: 'bulk-mark',
+                        id: null,
+                        ids,
+                        isMarked: true,
+                        title: 'Mark Selected',
+                        message: 'Mark ' + ids.length + ' selected printed transaction batch' + (ids.length === 1 ? '' : 'es') + '?',
+                        confirmText: 'Mark Selected',
+                        tone: 'success',
+                        loading: false
+                    };
+                },
+
+                confirmBulkDelete() {
+                    const ids = this.selectedIds();
+
+                    if (!ids.length) {
+                        this.showMessage('Select at least one printed transaction batch first.');
+                        return;
+                    }
+
+                    this.confirmation = {
+                        open: true,
+                        action: 'bulk-delete',
+                        id: null,
+                        ids,
+                        isMarked: false,
+                        title: 'Delete Selected',
+                        message: 'Delete ' + ids.length + ' selected printed transaction batch' + (ids.length === 1 ? '' : 'es') + ' permanently?',
+                        confirmText: 'Delete Selected',
+                        tone: 'danger',
                         loading: false
                     };
                 },
@@ -395,34 +511,105 @@
                     this.confirmation.open = false;
                 },
 
-                async submitMark() {
-                    if (!this.confirmation.id || this.confirmation.loading) return;
+                async submitConfirmation() {
+                    if (this.confirmation.loading) return;
 
                     this.confirmation.loading = true;
+                    let url = '';
+                    let method = 'POST';
+                    let payload = {};
 
+                    if (this.confirmation.action === 'mark') {
+                        if (!this.confirmation.id) return;
+                        url = config.markUrl.replace('__BATCH__', this.confirmation.id);
+                        payload = { is_marked: this.confirmation.isMarked };
+                    } else if (this.confirmation.action === 'delete') {
+                        if (!this.confirmation.id || !config.destroyUrl) return;
+                        url = config.destroyUrl.replace('__BATCH__', this.confirmation.id);
+                        method = 'DELETE';
+                    } else if (this.confirmation.action === 'bulk-mark') {
+                        if (!config.bulkMarkUrl) return;
+                        url = config.bulkMarkUrl;
+                        payload = { batch_ids: this.confirmation.ids };
+                    } else if (this.confirmation.action === 'bulk-delete') {
+                        if (!config.bulkDeleteUrl) return;
+                        url = config.bulkDeleteUrl;
+                        method = 'DELETE';
+                        payload = { batch_ids: this.confirmation.ids };
+                    }
+
+                    const data = await this.requestJson(url, method, payload);
+
+                    if (!data.success) {
+                        this.confirmation.loading = false;
+                        this.showMessage(data.message || 'Unable to update printed transactions.');
+                        return;
+                    }
+
+                    this.reloadWithToast(data.message || 'Printed transaction log updated.');
+                },
+
+                selectedIds() {
+                    return this.selectedBatches
+                        .map((id) => Number(id))
+                        .filter((id) => Number.isInteger(id) && id > 0);
+                },
+
+                visibleIds() {
+                    return Array.from(document.querySelectorAll('input[x-model="selectedBatches"][value]'))
+                        .map((input) => Number(input.value))
+                        .filter((id) => Number.isInteger(id) && id > 0);
+                },
+
+                allVisibleSelected() {
+                    const visible = this.visibleIds();
+                    const selected = this.selectedIds();
+
+                    return visible.length > 0 && visible.every((id) => selected.includes(id));
+                },
+
+                toggleAllVisible(checked) {
+                    const visible = this.visibleIds();
+                    const selected = new Set(this.selectedIds());
+
+                    visible.forEach((id) => {
+                        if (checked) {
+                            selected.add(id);
+                        } else {
+                            selected.delete(id);
+                        }
+                    });
+
+                    this.selectedBatches = Array.from(selected).map((id) => String(id));
+                },
+
+                async requestJson(url, method, payload = {}) {
                     try {
-                        const response = await fetch(config.markUrl.replace('__BATCH__', this.confirmation.id), {
-                            method: 'POST',
+                        const options = {
+                            method,
                             headers: {
                                 'Content-Type': 'application/json',
                                 'X-CSRF-TOKEN': config.csrfToken,
                                 'Accept': 'application/json'
-                            },
-                            body: JSON.stringify({ is_marked: this.confirmation.isMarked })
-                        });
-                        const data = await response.json().catch(() => ({}));
+                            }
+                        };
 
-                        if (!response.ok || data.success === false) {
-                            const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
-                            this.confirmation.loading = false;
-                            this.showMessage(data.message || firstError || 'Unable to update this print batch.');
-                            return;
+                        if (method !== 'GET') {
+                            options.body = JSON.stringify(payload);
                         }
 
-                        this.reloadWithToast(data.message || 'Printed transaction batch updated.');
+                        const response = await fetch(url, options);
+                        const data = await response.json().catch(() => ({}));
+
+                        if (response.ok && data.success !== false) {
+                            return { success: true, message: data.message || '' };
+                        }
+
+                        const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
+
+                        return { success: false, message: data.message || firstError || 'Request failed.' };
                     } catch (error) {
-                        this.confirmation.loading = false;
-                        this.showMessage('Could not update this print batch.');
+                        return { success: false, message: 'Could not update printed transactions.' };
                     }
                 },
 

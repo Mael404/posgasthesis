@@ -304,6 +304,69 @@
         $hasDiscountColumn = $totalSavingsApplied > 0;
         $displayPaymentsReceived = $invoicePaymentsReceived ?? $invoice->payments_received;
         $remainingBalance = (float) $invoice->total_amount_due - (float) $displayPaymentsReceived;
+        $editedSaleIds = $chargeTransactions
+            ->map(function ($row) {
+                $referenceNo = trim((string) ($row->reference_no ?? ''));
+
+                return preg_match('/^EDIT-(\d+)$/i', $referenceNo, $matches)
+                    ? (int) $matches[1]
+                    : null;
+            })
+            ->filter()
+            ->unique()
+            ->values();
+        $chargeSaleLookupKeys = $chargeTransactions
+            ->flatMap(function ($row) {
+                return [
+                    trim((string) ($row->reference_no ?? '')),
+                    trim((string) ($row->or_number ?? '')),
+                ];
+            })
+            ->filter()
+            ->unique()
+            ->values();
+        $salesOrNumbersByEditedId = [];
+        $salesOrNumbersByLookupKey = [];
+
+        if ($editedSaleIds->isNotEmpty() || $chargeSaleLookupKeys->isNotEmpty()) {
+            $matchingSales = \Illuminate\Support\Facades\DB::table('sales')
+                ->select('id', 'reference_no', 'or_number')
+                ->where(function ($query) use ($invoice) {
+                    $query->where('customer_id', $invoice->customer_id)
+                        ->orWhere('posted_customer_id', $invoice->customer_id);
+                })
+                ->where(function ($query) use ($editedSaleIds, $chargeSaleLookupKeys) {
+                    if ($editedSaleIds->isNotEmpty()) {
+                        $query->whereIn('id', $editedSaleIds);
+                    }
+
+                    if ($chargeSaleLookupKeys->isNotEmpty()) {
+                        $query->orWhere(function ($query) use ($chargeSaleLookupKeys) {
+                            $query->whereIn('reference_no', $chargeSaleLookupKeys)
+                                ->orWhereIn('or_number', $chargeSaleLookupKeys);
+                        });
+                    }
+                })
+                ->get();
+
+            foreach ($matchingSales as $saleRow) {
+                $saleOrNumber = trim((string) ($saleRow->or_number ?? ''));
+
+                if ($saleOrNumber === '') {
+                    continue;
+                }
+
+                $salesOrNumbersByEditedId[(int) $saleRow->id] = $saleOrNumber;
+
+                $saleReferenceNo = trim((string) ($saleRow->reference_no ?? ''));
+
+                if ($saleReferenceNo !== '') {
+                    $salesOrNumbersByLookupKey[$saleReferenceNo] = $saleOrNumber;
+                }
+
+                $salesOrNumbersByLookupKey[$saleOrNumber] = $saleOrNumber;
+            }
+        }
     @endphp
 
     <div class="no-print">
@@ -405,14 +468,51 @@
                 <tbody>
                     @forelse ($chargeTransactions as $row)
                         @php
+                            $ref = trim((string) ($row->reference_no ?? ''));
                             $description = trim((string) ($row->description ?? ''));
+                            $editedSaleId = null;
+                            $isEditedReference = preg_match('/^EDIT-(\d+)$/i', $ref, $editReferenceMatches);
+
+                            if ($isEditedReference) {
+                                $editedSaleId = (int) $editReferenceMatches[1];
+                            }
+
+                            $ledgerOrNumber = trim((string) ($row->or_number ?? ''));
+                            $reference = $ref !== '' ? ($salesOrNumbersByLookupKey[$ref] ?? '') : '';
+
+                            if ($isEditedReference) {
+                                $reference = $salesOrNumbersByEditedId[$editedSaleId] ?? '';
+                            }
+
+                            if ($reference === '' && $ledgerOrNumber !== '') {
+                                $reference = $salesOrNumbersByLookupKey[$ledgerOrNumber] ?? $ledgerOrNumber;
+                            }
+
+                            if ($reference === '') {
+                                $reference = 'N/A';
+                            }
+
+                            $discountAmount = (float) ($row->discount_amount ?? $row->discount ?? 0);
+                            $excessAmount = 0;
+
+                            if ($discountAmount == 0 && preg_match('/\((?:Total )?Discount:\s*[^\d]*([\d,.]+)\)/i', $description, $discountMatches)) {
+                                $discountAmount = (float) str_replace(',', '', $discountMatches[1]);
+                            }
+
+                            if (preg_match('/\((?:Total )?Excess:\s*[^\d]*([\d,.]+)\)/i', $description, $excessMatches)) {
+                                $excessAmount = (float) str_replace(',', '', $excessMatches[1]);
+                            }
+
                             $description = trim(preg_replace('/\((?:Total )?(?:Discount|Excess):\s*[^\d]*[\d,.]+\)/i', '', $description));
                             $description = preg_replace('/\s+/', ' ', $description);
-                            $reference = trim((string) ($row->or_number ?? ''));
-                            if ($reference === '') {
-                                $reference = trim((string) ($row->reference_no ?? ''));
+
+                            if ($isEditedReference) {
+                                $description = trim(preg_replace('/\s+from\s+\S+$/i', '', $description));
                             }
-                            $discountAmount = (float) ($row->discount_amount ?? $row->discount ?? 0);
+
+                            if ($excessAmount > 0) {
+                                $description .= ' (+)';
+                            }
                         @endphp
                         <tr class="editable-ledger-row" data-ledger-id="{{ $row->id }}">
                             <td>
@@ -421,7 +521,7 @@
                             </td>
                             <td>
                                 <span class="display-value">{{ $reference !== '' ? $reference : 'N/A' }}</span>
-                                <input class="edit-input edit-or-number" type="text" value="{{ $reference }}">
+                                <input class="edit-input edit-or-number" type="text" value="{{ $reference !== 'N/A' ? $reference : '' }}">
                             </td>
                             <td>
                                 <span class="display-value">{{ $description !== '' ? $description : 'Credit Charge' }}</span>
@@ -517,7 +617,7 @@
         <section class="bottom-section">
             <div class="instructions">
                 <p><strong>Note:</strong> All transactions stated above are acknowledged as true and correct. Please notify us immediately if there are discrepancies.</p>
-                <p>Payment is expected upon receipt of this statement.</p>
+                <p>Payment is expected promptly upon receipt of this statement. Failure to settle may result in account restrictions.</p>
             </div>
 
             <div class="signatures">

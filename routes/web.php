@@ -74,8 +74,11 @@ Route::middleware('auth')->group(function () {
 
         Route::prefix('admin/printed-transactions')->name('admin.printed-transactions.')->group(function () {
             Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');
+            Route::post('/bulk-mark', [PrintedTransactionController::class, 'bulkMark'])->name('bulk-mark');
+            Route::delete('/bulk-delete', [PrintedTransactionController::class, 'bulkDestroy'])->name('bulk-destroy');
             Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
+            Route::delete('/{batch}', [PrintedTransactionController::class, 'destroy'])->name('destroy');
         });
 
         Route::prefix('sales')->name('sales.')->group(function () {
@@ -338,7 +341,6 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
 
 
 

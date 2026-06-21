@@ -207,6 +207,7 @@ class AdminDashboardController extends Controller
         $hasSales = $this->hasTable('sales');
         $fuelSales = $hasSales ? $this->fuelSalesQuery($start, $end) : null;
         $shiftReadingNetSales = $this->shiftReadingNetSales($start, $end);
+        $shiftReadingLitersMovement = $this->shiftReadingLitersMovement($start, $end);
 
         $paymentRows = $this->creditPaymentRows($start, $end);
 
@@ -227,6 +228,14 @@ class AdminDashboardController extends Controller
             'total_excess' => $hasSales && $this->hasColumn('sales', 'surcharge')
                 ? $this->money((clone $fuelSales)->sum('surcharge'))
                 : 0,
+            'shift_reading_verified_liters' => $shiftReadingLitersMovement['verified_liters'],
+            'shift_reading_verified_liters_count' => $shiftReadingLitersMovement['verified_count'],
+            'shift_reading_unverified_liters' => $shiftReadingLitersMovement['unverified_liters'],
+            'shift_reading_unverified_liters_count' => $shiftReadingLitersMovement['unverified_count'],
+            'shift_reading_verified_pumps' => $shiftReadingLitersMovement['verified_pumps'],
+            'shift_reading_verified_tanks' => $shiftReadingLitersMovement['verified_tanks'],
+            'shift_reading_unverified_pumps' => $shiftReadingLitersMovement['unverified_pumps'],
+            'shift_reading_unverified_tanks' => $shiftReadingLitersMovement['unverified_tanks'],
         ];
     }
 
@@ -501,11 +510,9 @@ class AdminDashboardController extends Controller
 
     private function shiftReadingNetSales(Carbon $start, Carbon $end): array
     {
-        if (
-            ! $this->hasTable('shift_readings')
-            || ! $this->hasColumn('shift_readings', 'period_from')
-            || ! $this->hasColumn('shift_readings', 'period_to')
-        ) {
+        $query = $this->shiftReadingsForRange($start, $end);
+
+        if (! $query) {
             return [
                 'with_credit' => 0,
                 'without_credit' => 0,
@@ -513,11 +520,10 @@ class AdminDashboardController extends Controller
             ];
         }
 
-        $readings = DB::table('shift_readings')
-            ->whereDate('period_from', '<=', $end->toDateString())
-            ->whereDate('period_to', '>=', $start->toDateString())
+        $readings = $query
             ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', 'Verified'))
             ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
+            ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
             ->get();
 
         $withCredit = 0;
@@ -542,6 +548,94 @@ class AdminDashboardController extends Controller
         ];
     }
 
+    private function shiftReadingLitersMovement(Carbon $start, Carbon $end): array
+    {
+        $emptyPumpLiters = $this->formatPumpLiters($this->emptyPumpLiters());
+        $emptyTankLiters = $this->tankLitersFromPumps([]);
+        $empty = [
+            'verified_liters' => 0,
+            'verified_count' => 0,
+            'unverified_liters' => 0,
+            'unverified_count' => 0,
+            'verified_pumps' => $emptyPumpLiters,
+            'verified_tanks' => $emptyTankLiters,
+            'unverified_pumps' => $emptyPumpLiters,
+            'unverified_tanks' => $emptyTankLiters,
+        ];
+
+        $query = $this->shiftReadingsForRange($start, $end);
+
+        if (! $query) {
+            return $empty;
+        }
+
+        $readings = $query
+            ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', '<>', 'Voided'))
+            ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
+            ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
+            ->get();
+
+        $verifiedLiters = 0;
+        $unverifiedLiters = 0;
+        $verifiedCount = 0;
+        $unverifiedCount = 0;
+        $verifiedPumps = $this->emptyPumpLiters();
+        $unverifiedPumps = $this->emptyPumpLiters();
+
+        foreach ($readings as $reading) {
+            $lastVerified = $this->previousVerifiedReading($reading);
+            $pumpLiters = $this->readingPumpLitersByPump($reading, $lastVerified);
+            $liters = array_sum($pumpLiters);
+
+            if (($reading->status ?? null) === 'Verified') {
+                $verifiedLiters += $liters;
+                $verifiedCount++;
+                $this->addPumpLiters($verifiedPumps, $pumpLiters);
+                continue;
+            }
+
+            $unverifiedLiters += $liters;
+            $unverifiedCount++;
+            $this->addPumpLiters($unverifiedPumps, $pumpLiters);
+        }
+
+        return [
+            'verified_liters' => $this->liters($verifiedLiters),
+            'verified_count' => $verifiedCount,
+            'unverified_liters' => $this->liters($unverifiedLiters),
+            'unverified_count' => $unverifiedCount,
+            'verified_pumps' => $this->formatPumpLiters($verifiedPumps),
+            'verified_tanks' => $this->tankLitersFromPumps($verifiedPumps),
+            'unverified_pumps' => $this->formatPumpLiters($unverifiedPumps),
+            'unverified_tanks' => $this->tankLitersFromPumps($unverifiedPumps),
+        ];
+    }
+
+    private function shiftReadingsForRange(Carbon $start, Carbon $end)
+    {
+        if (
+            ! $this->hasTable('shift_readings')
+            || ! $this->hasColumn('shift_readings', 'period_from')
+        ) {
+            return null;
+        }
+
+        $query = DB::table('shift_readings')
+            ->whereDate('period_from', '<=', $end->toDateString());
+
+        if ($this->hasColumn('shift_readings', 'period_to')) {
+            return $query->where(function ($query) use ($start) {
+                $query->whereDate('period_to', '>=', $start->toDateString())
+                    ->orWhere(function ($nullPeriodTo) use ($start) {
+                        $nullPeriodTo->whereNull('period_to')
+                            ->whereDate('period_from', '>=', $start->toDateString());
+                    });
+            });
+        }
+
+        return $query->whereDate('period_from', '>=', $start->toDateString());
+    }
+
     private function readingPumpSales($reading, $lastVerified = null): float
     {
         $total = 0;
@@ -556,6 +650,91 @@ class AdminDashboardController extends Controller
         }
 
         return $this->money($total);
+    }
+
+    private function readingPumpLitersByPump($reading, $lastVerified = null): array
+    {
+        $litersByPump = [];
+
+        for ($pump = 1; $pump <= 6; $pump++) {
+            $startField = "pump{$pump}_liters_start";
+            $endField = "pump{$pump}_liters_end";
+            $previousEnd = $lastVerified ? (float) ($lastVerified->$endField ?? 0) : 0;
+            $startValue = $reading->$startField ?? $previousEnd;
+
+            $litersByPump[$pump] = (float) ($reading->$endField ?? 0) - (float) $startValue;
+        }
+
+        return $litersByPump;
+    }
+
+    private function emptyPumpLiters(): array
+    {
+        return collect($this->defaultFuelByPump())
+            ->mapWithKeys(function ($fuelType, $pumpId) {
+                return [
+                    (int) $pumpId => [
+                        'pump_id' => (int) $pumpId,
+                        'pump_label' => 'Pump ' . (int) $pumpId,
+                        'fuel_type' => $fuelType,
+                        'liters' => 0,
+                    ],
+                ];
+            })
+            ->all();
+    }
+
+    private function addPumpLiters(array &$pumpTotals, array $pumpLiters): void
+    {
+        $defaultFuelByPump = $this->defaultFuelByPump();
+
+        foreach ($pumpLiters as $pumpId => $liters) {
+            $pumpId = (int) $pumpId;
+
+            if (! isset($pumpTotals[$pumpId])) {
+                $pumpTotals[$pumpId] = [
+                    'pump_id' => $pumpId,
+                    'pump_label' => 'Pump ' . $pumpId,
+                    'fuel_type' => $defaultFuelByPump[$pumpId] ?? 'N/A',
+                    'liters' => 0,
+                ];
+            }
+
+            $pumpTotals[$pumpId]['liters'] += (float) $liters;
+        }
+    }
+
+    private function formatPumpLiters(array $pumpTotals): array
+    {
+        return collect($pumpTotals)
+            ->sortKeys()
+            ->map(function ($pump) {
+                $pump['liters'] = $this->liters($pump['liters'] ?? 0);
+
+                return $pump;
+            })
+            ->values()
+            ->all();
+    }
+
+    private function tankLitersFromPumps(array $pumpTotals): array
+    {
+        return $this->preparedTanks()
+            ->map(function ($tank) use ($pumpTotals) {
+                $liters = $tank['connected_pump_numbers']->sum(function ($pumpNumber) use ($pumpTotals) {
+                    return (float) ($pumpTotals[(int) $pumpNumber]['liters'] ?? 0);
+                });
+
+                return [
+                    'id' => $tank['id'],
+                    'name' => $tank['name'],
+                    'fuel_type' => $tank['fuel_type'],
+                    'connected_pumps_display' => $tank['connected_pumps_display'],
+                    'liters' => $this->liters($liters),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     private function readingSalesAdjustments($reading, $lastVerified = null)

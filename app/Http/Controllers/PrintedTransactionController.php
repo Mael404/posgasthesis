@@ -157,6 +157,163 @@ class PrintedTransactionController extends Controller
         return back()->with('success', $message);
     }
 
+    public function destroy(Request $request, $batch)
+    {
+        $this->ensureTrackingTableReady();
+
+        $printedBatch = $this->findBatchForRoute($request, (int) $batch);
+
+        DB::table('printed_transaction_batches')
+            ->where('id', $printedBatch->id)
+            ->delete();
+
+        $message = 'Printed transaction batch deleted.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
+
+    public function bulkMark(Request $request)
+    {
+        $this->ensureTrackingTableReady();
+
+        if ($request->routeIs('admin.printed-transactions.*') && ! $this->canViewAllPrintedTransactions()) {
+            abort(403);
+        }
+
+        $request->validate([
+            'batch_ids' => ['nullable', 'array'],
+            'batch_ids.*' => ['integer'],
+        ]);
+
+        $batchIds = collect($request->input('batch_ids', []))
+            ->filter(fn ($id) => is_numeric($id))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($batchIds->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please select at least one printed transaction batch to mark.',
+                ], 422);
+            }
+
+            return back()->with('error', 'Please select at least one printed transaction batch to mark.');
+        }
+
+        $query = DB::table('printed_transaction_batches')
+            ->whereIn('id', $batchIds->all());
+
+        if (! $request->routeIs('admin.printed-transactions.*')) {
+            $query->where('staff_id', auth()->id());
+        }
+
+        $markableIds = $query->pluck('id');
+
+        if ($markableIds->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No selected printed transaction batches could be marked.',
+                ], 422);
+            }
+
+            return back()->with('error', 'No selected printed transaction batches could be marked.');
+        }
+
+        DB::table('printed_transaction_batches')
+            ->whereIn('id', $markableIds->all())
+            ->update([
+                'is_marked' => 1,
+                'marked_at' => DB::raw('COALESCE(marked_at, CURRENT_TIMESTAMP)'),
+                'marked_by' => DB::raw('COALESCE(marked_by, ' . (int) auth()->id() . ')'),
+                'updated_at' => now(),
+            ]);
+
+        $message = $markableIds->count() . ' printed transaction batch' . ($markableIds->count() === 1 ? '' : 'es') . ' marked.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
+
+    public function bulkDestroy(Request $request)
+    {
+        $this->ensureTrackingTableReady();
+
+        if ($request->routeIs('admin.printed-transactions.*') && ! $this->canViewAllPrintedTransactions()) {
+            abort(403);
+        }
+
+        $request->validate([
+            'batch_ids' => ['nullable', 'array'],
+            'batch_ids.*' => ['integer'],
+        ]);
+
+        $batchIds = collect($request->input('batch_ids', []))
+            ->filter(fn ($id) => is_numeric($id))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($batchIds->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please select at least one printed transaction batch to delete.',
+                ], 422);
+            }
+
+            return back()->with('error', 'Please select at least one printed transaction batch to delete.');
+        }
+
+        $query = DB::table('printed_transaction_batches')
+            ->whereIn('id', $batchIds->all());
+
+        if (! $request->routeIs('admin.printed-transactions.*')) {
+            $query->where('staff_id', auth()->id());
+        }
+
+        $deletedCount = $query->delete();
+
+        if ($deletedCount < 1) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No selected printed transaction batches could be deleted.',
+                ], 422);
+            }
+
+            return back()->with('error', 'No selected printed transaction batches could be deleted.');
+        }
+
+        $message = $deletedCount . ' printed transaction batch' . ($deletedCount === 1 ? '' : 'es') . ' deleted.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
+
     public function printBatch(Request $request, $batch): View
     {
         $this->ensureTrackingTableReady();
