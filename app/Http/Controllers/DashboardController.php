@@ -27,9 +27,9 @@ class DashboardController extends Controller
         );
     }
 
-    public function staff(): View
+    public function staff(): RedirectResponse
     {
-        return view('pages.staff.staffdashboard', ['title' => 'Staff Dashboard']);
+        return redirect()->route('staff.pump.index');
     }
 
     private function dashboard(string $title, string $roleName, string $roleDescription): View

@@ -1,0 +1,295 @@
+@extends('layouts.app')
+
+@section('content')
+    @php
+        $announcementItems = $announcements->getCollection();
+        $announcementPayload = $announcementItems->map(function ($announcement) {
+            $adminName = $announcement->admin_name ?: 'Admin #' . $announcement->admin_id;
+            $createdAt = $announcement->created_at
+                ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
+                : 'N/A';
+            $readAt = $announcement->read_at
+                ? \Carbon\Carbon::parse($announcement->read_at)->format('M d, Y h:i A')
+                : null;
+
+            return [
+                'id' => (int) $announcement->id,
+                'subject' => $announcement->subject,
+                'message' => $announcement->message,
+                'admin_name' => $adminName,
+                'created_at' => $createdAt,
+                'read_at' => $readAt,
+                'is_read' => (bool) $readAt,
+                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName),
+            ];
+        })->values();
+
+        $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
+        $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
+        $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
+    @endphp
+
+    <x-common.page-breadcrumb pageTitle="Notifications" />
+
+    <div
+        x-data="staffAnnouncementsModule({
+            announcements: @js($announcementPayload),
+            unreadCount: @js((int) $unreadCount),
+            csrfToken: @js(csrf_token()),
+            markReadUrlTemplate: @js(route('staff.notifications.read', ['announcement' => '__ID__']))
+        })"
+        x-init="init()"
+        class="space-y-6">
+        <style>[x-cloak] { display: none !important; }</style>
+
+        <section class="{{ $cardClass }}">
+            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+                <div class="min-w-0">
+                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Notifications</h1>
+                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Station notices and updates from the admin team.</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 sm:min-w-80">
+                    <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                        <p class="{{ $labelClass }}">Total</p>
+                        <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($announcements->total()) }}</p>
+                    </article>
+                    <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                        <p class="{{ $labelClass }}">Unread</p>
+                        <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90" x-text="unreadCount"></p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="{{ $cardClass }}">
+            <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] lg:items-end">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Inbox</h2>
+                    <p class="mt-1 {{ $captionClass }}">Open a notice to mark it as read.</p>
+                </div>
+                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                    <span>Search</span>
+                    <input type="search" x-model.debounce.150ms="search" class="mt-1.5 {{ $inputClass }}" placeholder="Subject, message, or admin">
+                </label>
+            </div>
+
+            <div class="space-y-3">
+                @forelse ($announcementItems as $announcement)
+                    @php
+                        $adminName = $announcement->admin_name ?: 'Admin #' . $announcement->admin_id;
+                        $createdAt = $announcement->created_at
+                            ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
+                            : 'N/A';
+                    @endphp
+                    <article
+                        x-show="matches('{{ $announcement->id }}')"
+                        x-on:click="openDetails('{{ $announcement->id }}')"
+                        x-on:keydown.enter.prevent="openDetails('{{ $announcement->id }}')"
+                        x-on:keydown.space.prevent="openDetails('{{ $announcement->id }}')"
+                        tabindex="0"
+                        class="cursor-pointer rounded-xl border p-4 transition hover:border-brand-200 hover:bg-brand-50/30 hover:shadow-theme-xs dark:hover:border-brand-500/30 dark:hover:bg-brand-500/[0.05]"
+                        :class="isRead('{{ $announcement->id }}')
+                            ? 'border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]'
+                            : 'border-brand-200 bg-brand-50/40 dark:border-brand-500/30 dark:bg-brand-500/[0.08]'">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <h3 class="break-words text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $announcement->subject }}</h3>
+                                    <span
+                                        class="inline-flex rounded-full px-2.5 py-0.5 text-theme-xs font-medium"
+                                        :class="isRead('{{ $announcement->id }}')
+                                            ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                            : 'bg-brand-100 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'"
+                                        x-text="isRead('{{ $announcement->id }}') ? 'Read' : 'Unread'"></span>
+                                </div>
+                                <p class="mt-2 line-clamp-3 whitespace-pre-line break-words text-theme-sm leading-6 text-gray-600 dark:text-gray-400">{{ $announcement->message }}</p>
+                            </div>
+                            <p class="shrink-0 text-theme-xs text-gray-500 dark:text-gray-400">{{ $createdAt }}</p>
+                        </div>
+
+                        <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <p class="min-w-0 break-words text-theme-xs text-gray-500 dark:text-gray-400">
+                                Posted by <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $adminName }}</span>
+                            </p>
+                            <button type="button" x-on:click.stop="openDetails('{{ $announcement->id }}')" class="{{ $primaryButtonClass }}">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
+                                Open
+                            </button>
+                        </div>
+                    </article>
+                @empty
+                    <div class="rounded-xl border border-dashed border-gray-300 p-10 text-center dark:border-gray-700">
+                        <div class="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400">
+                            <svg class="size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-7-8-1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m12 13 4-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </div>
+                        <p class="mt-3 text-theme-sm font-medium text-gray-800 dark:text-white/90">No notifications yet.</p>
+                    </div>
+                @endforelse
+            </div>
+
+            @if ($announcements->hasPages())
+                <div class="mt-5">
+                    {{ $announcements->links() }}
+                </div>
+            @endif
+        </section>
+
+        <div
+            x-show="modal === 'details'"
+            x-cloak
+            x-on:keydown.escape.window="closeModal()"
+            class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+            style="z-index: 100240;">
+            <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeModal()"></div>
+            <div class="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close details">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+
+                <div class="p-6 pr-14">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="break-words text-xl font-semibold text-gray-800 dark:text-white/90" x-text="selected ? selected.subject : 'Announcement'"></h2>
+                        <span
+                            x-show="selected"
+                            x-cloak
+                            class="inline-flex rounded-full px-2.5 py-0.5 text-theme-xs font-medium"
+                            :class="selected && selected.is_read
+                                ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                : 'bg-brand-100 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'"
+                            x-text="selected && selected.is_read ? 'Read' : 'Unread'"></span>
+                    </div>
+                    <p class="mt-2 break-words text-theme-sm text-gray-500 dark:text-gray-400" x-text="selected ? ('Posted by ' + selected.admin_name + ' | ' + selected.created_at) : ''"></p>
+                    <p x-show="selected && selected.read_at" x-cloak class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="'Read on ' + selected.read_at"></p>
+                    <div class="mt-5 max-h-[55vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm leading-6 text-gray-700 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-300" x-text="selected ? selected.message : ''"></div>
+                </div>
+            </div>
+        </div>
+
+        <div
+            x-show="messageDialog.open"
+            x-cloak
+            x-on:keydown.escape.window="closeMessageDialog()"
+            class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+            style="z-index: 100250;">
+            <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeMessageDialog()"></div>
+            <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                <div class="p-6">
+                    <div class="flex items-start gap-4">
+                        <span class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-400">
+                            <svg class="size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8.25h.01M11.25 11.25h1.5v5h-1.5z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                        </span>
+                        <div class="min-w-0">
+                            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Unable to Continue</h2>
+                            <p class="mt-2 text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="messageDialog.message"></p>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex justify-end">
+                        <button type="button" x-on:click="closeMessageDialog()" class="{{ $primaryButtonClass }}">OK</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endsection
+
+@push('scripts')
+    <script>
+        function staffAnnouncementsModule(config) {
+            return {
+                announcements: config.announcements || [],
+                announcementsById: {},
+                unreadCount: Number(config.unreadCount || 0),
+                search: '',
+                modal: null,
+                selected: null,
+                markingRead: {},
+                messageDialog: { open: false, message: '' },
+
+                init() {
+                    this.announcementsById = Object.fromEntries(this.announcements.map(item => [String(item.id), item]));
+                },
+
+                matches(id) {
+                    const item = this.announcementsById[String(id)];
+                    const value = String(this.search || '').toLowerCase().trim();
+                    return !value || (item && item.search.includes(value));
+                },
+
+                isRead(id) {
+                    const item = this.announcementsById[String(id)];
+                    return !!(item && item.is_read);
+                },
+
+                openDetails(id) {
+                    const item = this.announcementsById[String(id)];
+                    if (!item) return;
+
+                    this.selected = item;
+                    this.modal = 'details';
+
+                    if (!item.is_read) {
+                        this.markRead(id);
+                    }
+                },
+
+                closeModal() {
+                    if (this.messageDialog.open) return;
+                    this.modal = null;
+                    this.selected = null;
+                },
+
+                async markRead(id) {
+                    const item = this.announcementsById[String(id)];
+                    if (!item || item.is_read || this.markingRead[String(id)]) return;
+
+                    this.markingRead[String(id)] = true;
+
+                    try {
+                        const response = await fetch(this.markReadUrl(id), {
+                            method: 'POST',
+                            headers: {
+                                'X-CSRF-TOKEN': config.csrfToken,
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        const data = await response.json();
+
+                        if (!response.ok || !data.success) {
+                            this.showMessage(data.message || 'Unable to mark announcement as read.');
+                            return;
+                        }
+
+                        item.is_read = true;
+                        item.read_at = data.read_at || item.read_at;
+                        this.unreadCount = Number(data.unread_count || 0);
+
+                        if (this.selected && String(this.selected.id) === String(id)) {
+                            this.selected = item;
+                        }
+                    } catch (error) {
+                        this.showMessage('An unexpected error occurred.');
+                    } finally {
+                        delete this.markingRead[String(id)];
+                    }
+                },
+
+                markReadUrl(id) {
+                    return config.markReadUrlTemplate.replace('__ID__', encodeURIComponent(id));
+                },
+
+                showMessage(message) {
+                    this.messageDialog = { open: true, message };
+                },
+
+                closeMessageDialog() {
+                    this.messageDialog.open = false;
+                }
+            };
+        }
+    </script>
+@endpush

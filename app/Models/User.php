@@ -84,7 +84,7 @@ class User extends Authenticatable
         return match ($this->role) {
             self::ROLE_VP_ADMIN => 'dashboard.admin',
             self::ROLE_SEMI_ADMIN => 'dashboard.semi-admin',
-            self::ROLE_STAFF => 'dashboard.staff',
+            self::ROLE_STAFF => 'staff.pump.index',
             default => 'login',
         };
     }

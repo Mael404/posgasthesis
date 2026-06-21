@@ -3,13 +3,17 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminReportController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\PrintedTransactionController;
 use App\Http\Controllers\ShiftReconciliationController;
+use App\Http\Controllers\StaffAnnouncementController;
 use App\Http\Controllers\StaffController;
+use App\Http\Controllers\StaffPumpController;
+use App\Http\Controllers\StaffReadingController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -37,7 +41,9 @@ Route::middleware('auth')->group(function () {
         ->middleware('role:semiadmin')
         ->name('dashboard.semi-admin');
 
-    Route::get('/staff/dashboard', [DashboardController::class, 'staff'])
+    Route::get('/staff/dashboard', function () {
+        return redirect()->route('staff.pump.index');
+    })
         ->middleware('role:staff')
         ->name('dashboard.staff');
 
@@ -79,6 +85,13 @@ Route::middleware('auth')->group(function () {
             Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
             Route::delete('/{batch}', [PrintedTransactionController::class, 'destroy'])->name('destroy');
+        });
+
+        Route::prefix('admin/announcements')->name('admin.announcements.')->group(function () {
+            Route::get('/', [AnnouncementController::class, 'index'])->name('index');
+            Route::post('/', [AnnouncementController::class, 'store'])->name('store');
+            Route::put('/{announcement}', [AnnouncementController::class, 'update'])->name('update');
+            Route::delete('/{announcement}', [AnnouncementController::class, 'destroy'])->name('destroy');
         });
 
         Route::prefix('sales')->name('sales.')->group(function () {
@@ -196,85 +209,106 @@ Route::middleware('auth')->group(function () {
         Route::post('/staffs/password', [StaffController::class, 'resetPassword'])->name('staffs.resetPassword');
     });
 
-    Route::middleware('role:staff')->group(function () {
-        Route::get('/staff/pump', function () {
+    Route::prefix('staff')->name('staff.')->middleware('role:staff')->group(function () {
+        Route::get('/pump', function () {
             return redirect()->route('staff.pump.index');
-        });
+        })->name('pump.legacy');
 
-        Route::get('/staff/readings', function () {
+        Route::get('/readings', function () {
             return redirect()->route('staff.readings.index');
-        });
+        })->name('readings.legacy');
 
-        Route::get('/staff/sales/history', function () {
+        Route::get('/sales/history', function () {
             return redirect()->route('staff.sales.history');
-        });
+        })->name('sales.legacy');
 
-        Route::get('/staff/pump-station', function () {
-            return view('pages.staff.pumpstation', ['title' => 'Pump Station']);
-        })->name('staff.pump.index');
+        Route::get('/pump-station', [StaffPumpController::class, 'index'])->name('pump.index');
 
-        Route::post('/staff/pump-station/store', function () {
-            return back()->with('status', 'Pump station saving is not connected yet.');
-        })->name('staff.pump.store');
+        Route::post('/pump-station/store', [StaffPumpController::class, 'storeSale'])->name('pump.store');
 
-        Route::post('/staff/pump-station/{id}/update', function ($id) {
-            return back()->with('status', "Pump station update {$id} is not connected yet.");
-        })->name('staff.pump.update');
+        Route::post('/pump-station/{id}/update', [StaffPumpController::class, 'updateSale'])
+            ->whereNumber('id')
+            ->name('pump.update');
 
-        Route::match(['get', 'post'], '/staff/pump-station/print-selected', [PrintedTransactionController::class, 'printSelected'])
-            ->name('staff.pump.printSelected');
+        Route::get('/pump-station/customers/{customerId}/unpaid-invoices', [CustomerController::class, 'getUnpaidInvoices'])
+            ->whereNumber('customerId')
+            ->name('pump.unpaidInvoices');
 
-        Route::get('/staff/shift-readings', function () {
-            return view('pages.staff.shiftreadings', ['title' => 'Shift Readings']);
-        })->name('staff.readings.index');
+        Route::match(['get', 'post'], '/pump-station/print-selected', [PrintedTransactionController::class, 'printSelected'])
+            ->name('pump.printSelected');
 
-        Route::post('/staff/shift-readings/store', function () {
-            return back()->with('status', 'Shift reading saving is not connected yet.');
-        })->name('staff.readings.store');
+        Route::post('/pump/void', [StaffPumpController::class, 'voidSale'])->name('pump.void');
 
-        Route::get('/staff/readings/{reading}/images/{dispenser}/{type}', function ($reading, $dispenser, $type) {
-            abort(404, "Image {$type} for reading {$reading} is not connected yet.");
-        })
+        Route::post('/pump/payment', [StaffPumpController::class, 'storePayment'])->name('pump.storePayment');
+
+        Route::post('/pump/payment/bypass', [StaffPumpController::class, 'bypassPayment'])->name('pump.bypassPayment');
+
+        Route::post('/pump/payment/void-posted', [StaffPumpController::class, 'voidPostedPayment'])->name('pump.voidPostedPayment');
+
+        Route::get('/shift-readings', [StaffReadingController::class, 'index'])->name('readings.index');
+
+        Route::post('/shift-readings/store', [StaffReadingController::class, 'store'])->name('readings.store');
+
+        Route::get('/readings/{reading}/images/{dispenser}/{type}', [StaffReadingController::class, 'showImage'])
             ->where(['dispenser' => '[1-3]', 'type' => 'liters|sales'])
-            ->name('staff.readings.image');
+            ->name('readings.image');
 
-        Route::get('/staff/readings/{id}/details', function ($id) {
-            return response()->json([
-                'message' => 'Shift reading details are not connected yet.',
-                'id' => $id,
-            ], 501);
-        })->name('staff.readings.details');
+        Route::get('/readings/{id}/details', [StaffReadingController::class, 'getDetails'])->name('readings.details');
 
-        Route::get('/staff/sales-history', function () {
+        Route::post('/shift-readings/{reading}/void', [StaffReadingController::class, 'voidReading'])->name('readings.void');
+
+        Route::get('/tank-delivery-records', function () {
+            return view('pages.staff.tankdeliveryrecords', ['title' => 'Tank Delivery Record']);
+        })->name('tank-delivery-records.index');
+
+        Route::post('/tank-delivery-records', function () {
+            return back()->with('status', 'Tank delivery record saving is not connected yet.');
+        })->name('tank-delivery-records.store');
+
+        Route::put('/tank-delivery-records/{record}', function ($record) {
+            return back()->with('status', "Tank delivery record update {$record} is not connected yet.");
+        })->whereNumber('record')->name('tank-delivery-records.update');
+
+        Route::delete('/tank-delivery-records/{record}', function ($record) {
+            return back()->with('status', "Tank delivery record delete {$record} is not connected yet.");
+        })->whereNumber('record')->name('tank-delivery-records.destroy');
+
+        Route::get('/sales-history', function () {
             return view('pages.staff.transactionhistory', ['title' => 'Transaction History']);
-        })->name('staff.sales.history');
+        })->name('sales.history');
 
-        Route::get('/staff/sales-history/print', function () {
+        Route::get('/sales-history/print', function () {
             return view('pages.staff.transactionhistory', ['title' => 'Print Transaction History']);
-        })->name('staff.sales.print');
+        })->name('sales.print');
 
-        Route::prefix('staff/printed-transactions')->name('staff.printed-transactions.')->group(function () {
+        Route::prefix('printed-transactions')->name('printed-transactions.')->group(function () {
             Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');
             Route::post('/', [PrintedTransactionController::class, 'storeSelected'])->name('store');
+            Route::post('/bulk-mark', [PrintedTransactionController::class, 'bulkMark'])->name('bulk-mark');
             Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
         });
 
-        Route::post('/staff/pump/void', function () {
-            return back()->with('status', 'Pump voiding is not connected yet.');
-        })->name('staff.pump.void');
+        Route::get('/billing', function () {
+            return view('pages.staff.billing', ['title' => 'Billing']);
+        })->name('billing.index');
 
-        Route::post('/staff/pump/payment', function () {
-            return back()->with('status', 'Pump payment posting is not connected yet.');
-        })->name('staff.pump.storePayment');
+        Route::get('/billing/print/{id}', [BillingController::class, 'printInvoice'])->name('billing.print');
+        Route::post('/billing/print/{id}/signatories', [BillingController::class, 'savePrintInvoiceSignatories'])->name('billing.print.signatories');
 
-        Route::post('/staff/pump/payment/bypass', function () {
-            return back()->with('status', 'Pump payment bypass is not connected yet.');
-        })->name('staff.pump.bypassPayment');
+        Route::prefix('notifications')->name('notifications.')->group(function () {
+            Route::get('/', [StaffAnnouncementController::class, 'index'])->name('index');
+            Route::post('/mark-all-read', [StaffAnnouncementController::class, 'markAllRead'])->name('mark-all-read');
+            Route::post('/{announcement}/read', [StaffAnnouncementController::class, 'markRead'])->name('read');
+        });
 
-        Route::post('/staff/pump/payment/void-posted', function () {
-            return back()->with('status', 'Posted payment voiding is not connected yet.');
-        })->name('staff.pump.voidPostedPayment');
+        Route::prefix('announcements')->name('announcements.')->group(function () {
+            Route::get('/', function () {
+                return redirect()->route('staff.notifications.index');
+            })->name('index');
+            Route::post('/mark-all-read', [StaffAnnouncementController::class, 'markAllRead'])->name('mark-all-read');
+            Route::post('/{announcement}/read', [StaffAnnouncementController::class, 'markRead'])->name('mark-read');
+        });
     });
 
     // calender pages
@@ -341,10 +375,5 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
-
-
-
 
 

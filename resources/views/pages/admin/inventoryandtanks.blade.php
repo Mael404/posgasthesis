@@ -428,6 +428,11 @@
                 <form id="stockInForm" class="mt-5 space-y-4" x-on:submit.prevent="confirmStockIn">
                     @csrf
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>Delivery Code</span>
+                        <input type="text" value="Generated after saving" class="mt-1.5 {{ $inputClass }} font-semibold text-brand-600 dark:text-brand-400" readonly>
+                    </label>
+
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                         <span>Delivery Date</span>
                         <span class="relative mt-1.5 block custom-datepicker">
                             <input type="text" name="delivery_date" value="{{ now()->toDateString() }}" autocomplete="off" class="{{ $dateInputClass }}" data-inventory-datepicker required>
@@ -484,22 +489,26 @@
 
                 <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                     <div class="max-h-[620px] max-w-full overflow-auto custom-scrollbar">
-                        <table class="min-w-[880px] w-full table-fixed">
+                        <table class="min-w-[1120px] w-full table-fixed">
                             <colgroup>
                                 <col class="w-[15%]">
-                                <col class="w-[23%]">
-                                <col class="w-[22%]">
-                                <col class="w-[14%]">
-                                <col class="w-[13%]">
-                                <col class="w-[13%]">
+                                <col class="w-[12%]">
+                                <col class="w-[16%]">
+                                <col class="w-[16%]">
+                                <col class="w-[12%]">
+                                <col class="w-[10%]">
+                                <col class="w-[12%]">
+                                <col class="w-[7%]">
                             </colgroup>
                             <thead class="sticky top-0 z-1 border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
                                 <tr>
+                                    <th class="{{ $thClass }}">Delivery Code</th>
                                     <th class="{{ $thClass }}">Delivery Date</th>
                                     <th class="{{ $thClass }}">Supplier</th>
                                     <th class="{{ $thClass }}">Tank / Fuel</th>
                                     <th class="{{ $thNumberClass }}">Volume Added</th>
                                     <th class="{{ $thNumberClass }}">Total Cost</th>
+                                    <th class="{{ $thClass }}">Status</th>
                                     <th class="{{ $thClass }}">Logged At</th>
                                 </tr>
                             </thead>
@@ -507,8 +516,18 @@
                                 @forelse ($deliveryLogs as $log)
                                     @php
                                         $style = $fuelStyle($log->fuel_type);
+                                        $deliveryCode = trim((string) ($log->delivery_code ?? ''));
+                                        $deliveryStatus = trim((string) ($log->delivery_status ?? '')) ?: \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
+                                        $deliveryCompleted = $deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED;
                                     @endphp
                                     <tr>
+                                        <td class="{{ $tdPrimaryClass }}">
+                                            @if ($deliveryCode !== '')
+                                                <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $deliveryCode }}</span>
+                                            @else
+                                                <span class="text-theme-xs text-gray-400 dark:text-gray-500">Not assigned</span>
+                                            @endif
+                                        </td>
                                         <td class="{{ $tdClass }}">{{ \Carbon\Carbon::parse($log->delivery_date)->format('M d, Y') }}</td>
                                         <td class="{{ $tdPrimaryClass }}">{{ $log->supplier_name }}</td>
                                         <td class="{{ $tdClass }}">
@@ -520,11 +539,16 @@
                                         </td>
                                         <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">+{{ number_format((float) $log->liters_delivered, 2) }} L</td>
                                         <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $log->total_cost, 2) }}</td>
+                                        <td class="{{ $tdClass }}">
+                                            <span class="inline-flex max-w-[150px] whitespace-normal rounded-full px-2.5 py-1 text-theme-xs font-medium leading-5 {{ $deliveryCompleted ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500' : 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400' }}">
+                                                {{ $deliveryStatus }}
+                                            </span>
+                                        </td>
                                         <td class="{{ $tdClass }}">{{ $log->created_at ? \Carbon\Carbon::parse($log->created_at)->format('M d, h:i A') : 'N/A' }}</td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No delivery records found.</td>
+                                        <td colspan="8" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No delivery records found.</td>
                                     </tr>
                                 @endforelse
                             </tbody>
@@ -608,6 +632,7 @@
                 savingStock: false,
                 savingPrices: false,
                 init() {
+                    this.restoreNotice();
                     this.initDatePickers();
 
                     const supplierInput = document.getElementById('supplierName');
@@ -654,6 +679,27 @@
                     this.notice = { type, message };
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 },
+                restoreNotice() {
+                    try {
+                        const storedNotice = window.sessionStorage.getItem('inventoryNotice');
+
+                        if (!storedNotice) {
+                            return;
+                        }
+
+                        this.notice = JSON.parse(storedNotice);
+                        window.sessionStorage.removeItem('inventoryNotice');
+                    } catch (error) {
+                        this.notice = { type: '', message: '' };
+                    }
+                },
+                persistNotice(type, message) {
+                    try {
+                        window.sessionStorage.setItem('inventoryNotice', JSON.stringify({ type, message }));
+                    } catch (error) {
+                        return;
+                    }
+                },
                 async confirmStockIn() {
                     const form = document.getElementById('stockInForm');
                     const liters = document.getElementById('inputLiters')?.value || '0';
@@ -685,7 +731,12 @@
                             return;
                         }
 
-                        this.showNotice('success', data.message || 'Delivery saved.');
+                        const successMessage = data.delivery_code
+                            ? 'Delivery Code: ' + data.delivery_code + '. ' + (data.message || 'Delivery saved.')
+                            : (data.message || 'Delivery saved.');
+
+                        this.persistNotice('success', successMessage);
+                        this.showNotice('success', successMessage);
                         window.setTimeout(function() {
                             window.location.reload();
                         }, 700);

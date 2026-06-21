@@ -11,6 +11,7 @@ use Throwable;
 class MenuHelper
 {
     private static ?int $pendingShiftReadingsCount = null;
+    private static ?int $unreadAnnouncementsCount = null;
 
     public static function getMainNavItems()
     {
@@ -85,7 +86,7 @@ class MenuHelper
         return match ($role ?? Auth::user()?->role) {
             'vp_admin' => self::routePath('dashboard.admin', '/admin/dashboard'),
             'semiadmin' => self::routePath('dashboard.semi-admin', '/semi-admin/dashboard'),
-            'staff' => self::routePath('dashboard.staff', '/staff/dashboard'),
+            'staff' => self::routePath('staff.pump.index', '/staff/pump-station'),
             default => '/login',
         };
     }
@@ -201,6 +202,12 @@ class MenuHelper
                 'activePatterns' => ['/admin/printed-transactions', '/admin/printed-transactions/*'],
             ],
             [
+                'icon' => 'chat',
+                'name' => 'Announcements',
+                'path' => self::routePath('admin.announcements.index', '/admin/announcements'),
+                'activePatterns' => ['/admin/announcements', '/admin/announcements/*'],
+            ],
+            [
                 'icon' => 'forms',
                 'name' => 'Billing & Invoices',
                 'path' => self::routePath('admin.billing.index', '/admin/billing'),
@@ -243,6 +250,8 @@ class MenuHelper
 
     private static function getStaffItems(): array
     {
+        $unreadAnnouncementsCount = self::getUnreadAnnouncementsCount();
+
         return [
             [
                 'icon' => 'ecommerce',
@@ -257,6 +266,12 @@ class MenuHelper
                 'activePatterns' => ['/staff/shift-readings', '/staff/shift-readings/*', '/staff/readings', '/staff/readings/*'],
             ],
             [
+                'icon' => 'task',
+                'name' => 'Tank Delivery Record',
+                'path' => self::routePath('staff.tank-delivery-records.index', '/staff/tank-delivery-records'),
+                'activePatterns' => ['/staff/tank-delivery-records', '/staff/tank-delivery-records/*'],
+            ],
+            [
                 'icon' => 'tables',
                 'name' => 'Transaction History',
                 'path' => self::routePath('staff.sales.history', '/staff/sales-history'),
@@ -267,6 +282,19 @@ class MenuHelper
                 'name' => 'Printed Transactions',
                 'path' => self::routePath('staff.printed-transactions.index', '/staff/printed-transactions'),
                 'activePatterns' => ['/staff/printed-transactions', '/staff/printed-transactions/*'],
+            ],
+            [
+                'icon' => 'forms',
+                'name' => 'Billing',
+                'path' => self::routePath('staff.billing.index', '/staff/billing'),
+                'activePatterns' => ['/staff/billing', '/staff/billing/*'],
+            ],
+            [
+                'icon' => 'chat',
+                'name' => 'Notifications',
+                'path' => self::routePath('staff.notifications.index', '/staff/notifications'),
+                'badge' => $unreadAnnouncementsCount,
+                'activePatterns' => ['/staff/notifications', '/staff/notifications/*', '/staff/announcements', '/staff/announcements/*'],
             ],
         ];
     }
@@ -287,6 +315,32 @@ class MenuHelper
                 ->count();
         } catch (Throwable) {
             return self::$pendingShiftReadingsCount = 0;
+        }
+    }
+
+    private static function getUnreadAnnouncementsCount(): int
+    {
+        if (self::$unreadAnnouncementsCount !== null) {
+            return self::$unreadAnnouncementsCount;
+        }
+
+        try {
+            $userId = Auth::id();
+
+            if (! $userId || ! Schema::hasTable('announcements') || ! Schema::hasTable('announcement_reads')) {
+                return self::$unreadAnnouncementsCount = 0;
+            }
+
+            return self::$unreadAnnouncementsCount = (int) DB::table('announcements')
+                ->whereNotExists(function ($query) use ($userId) {
+                    $query->selectRaw('1')
+                        ->from('announcement_reads')
+                        ->whereColumn('announcement_reads.announcement_id', 'announcements.id')
+                        ->where('announcement_reads.user_id', $userId);
+                })
+                ->count();
+        } catch (Throwable) {
+            return self::$unreadAnnouncementsCount = 0;
         }
     }
 

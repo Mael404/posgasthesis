@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\InventoryLog;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -81,45 +83,12 @@ class InventoryController extends Controller
         }
 
         try {
-            DB::transaction(function () use ($validated, $supplierName) {
-                $tank = DB::table('tanks')
-                    ->where('id', $validated['tank_id'])
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $tank) {
-                    throw new \RuntimeException('The selected tank was not found.');
-                }
-
-                $liters = (float) $validated['liters'];
-                $capacity = (float) ($tank->capacity ?? 0);
-                $currentVolume = (float) ($tank->current_volume ?? 0);
-                $newTotalVolume = $currentVolume + $liters;
-
-                if ($capacity > 0 && $newTotalVolume > $capacity) {
-                    $excess = $newTotalVolume - $capacity;
-                    throw new \RuntimeException('OVERFILL ALERT! This delivery exceeds the tank capacity by ' . number_format($excess, 2) . ' liters.');
-                }
-
-                $supplierId = $this->findOrCreateSupplier($supplierName);
-
-                DB::table('inventory_logs')->insert([
-                    'tank_id' => $validated['tank_id'],
-                    'supplier_id' => $supplierId,
-                    'liters_delivered' => $liters,
-                    'total_cost' => (float) $validated['cost'],
-                    'delivery_date' => Carbon::parse($validated['delivery_date'])->toDateString(),
-                    'created_at' => now(),
-                ]);
-
-                DB::table('tanks')
-                    ->where('id', $validated['tank_id'])
-                    ->update(['current_volume' => $newTotalVolume]);
-            });
+            $deliveryCode = $this->saveDeliveryWithGeneratedCode($validated, $supplierName);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Delivery saved. Tank volume updated.',
+                'delivery_code' => $deliveryCode,
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -452,6 +421,95 @@ class InventoryController extends Controller
         }
 
         return (int) DB::table('suppliers')->insertGetId(['name' => $supplierName]);
+    }
+
+    private function saveDeliveryWithGeneratedCode(array $validated, string $supplierName): string
+    {
+        $lastDuplicate = null;
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            try {
+                return DB::transaction(function () use ($validated, $supplierName) {
+                    $tank = DB::table('tanks')
+                        ->where('id', $validated['tank_id'])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $tank) {
+                        throw new \RuntimeException('The selected tank was not found.');
+                    }
+
+                    $liters = (float) $validated['liters'];
+                    $capacity = (float) ($tank->capacity ?? 0);
+                    $currentVolume = (float) ($tank->current_volume ?? 0);
+                    $newTotalVolume = $currentVolume + $liters;
+
+                    if ($capacity > 0 && $newTotalVolume > $capacity) {
+                        $excess = $newTotalVolume - $capacity;
+                        throw new \RuntimeException('OVERFILL ALERT! This delivery exceeds the tank capacity by ' . number_format($excess, 2) . ' liters.');
+                    }
+
+                    $createdAt = now();
+                    $deliveryCode = $this->generateDeliveryCode($createdAt);
+                    $supplierId = $this->findOrCreateSupplier($supplierName);
+
+                    DB::table('inventory_logs')->insert([
+                        'delivery_code' => $deliveryCode,
+                        'delivery_status' => InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD,
+                        'tank_id' => $validated['tank_id'],
+                        'supplier_id' => $supplierId,
+                        'liters_delivered' => $liters,
+                        'total_cost' => (float) $validated['cost'],
+                        'delivery_date' => Carbon::parse($validated['delivery_date'])->toDateString(),
+                        'created_at' => $createdAt,
+                    ]);
+
+                    DB::table('tanks')
+                        ->where('id', $validated['tank_id'])
+                        ->update(['current_volume' => $newTotalVolume]);
+
+                    return $deliveryCode;
+                });
+            } catch (QueryException $e) {
+                if (! $this->isDuplicateDeliveryCodeError($e)) {
+                    throw $e;
+                }
+
+                $lastDuplicate = $e;
+                usleep(100000);
+            }
+        }
+
+        throw $lastDuplicate ?: new \RuntimeException('Unable to generate a unique delivery code.');
+    }
+
+    private function generateDeliveryCode(Carbon $timestamp): string
+    {
+        $datePrefix = 'DLV-' . $timestamp->format('Ymd') . '-';
+
+        $maxSequence = DB::table('inventory_logs')
+            ->whereNotNull('delivery_code')
+            ->where('delivery_code', 'like', $datePrefix . '%')
+            ->lockForUpdate()
+            ->pluck('delivery_code')
+            ->map(function ($code) {
+                preg_match('/-(\d{3,})$/', (string) $code, $matches);
+
+                return isset($matches[1]) ? (int) $matches[1] : 0;
+            })
+            ->max();
+
+        $sequence = ((int) $maxSequence) + 1;
+
+        return sprintf('%s%s-%03d', $datePrefix, $timestamp->format('His'), $sequence);
+    }
+
+    private function isDuplicateDeliveryCodeError(QueryException $e): bool
+    {
+        $sqlState = $e->errorInfo[0] ?? null;
+        $driverCode = (int) ($e->errorInfo[1] ?? 0);
+
+        return $sqlState === '23000' && $driverCode === 1062;
     }
 
     private function dateRangeFromRequest(Request $request): ?array
