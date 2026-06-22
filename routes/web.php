@@ -12,8 +12,10 @@ use App\Http\Controllers\PrintedTransactionController;
 use App\Http\Controllers\ShiftReconciliationController;
 use App\Http\Controllers\StaffAnnouncementController;
 use App\Http\Controllers\StaffController;
+use App\Http\Controllers\StaffTankDeliveryRecordController;
 use App\Http\Controllers\StaffPumpController;
 use App\Http\Controllers\StaffReadingController;
+use App\Http\Controllers\StaffSalesController;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -257,29 +259,20 @@ Route::middleware('auth')->group(function () {
 
         Route::post('/shift-readings/{reading}/void', [StaffReadingController::class, 'voidReading'])->name('readings.void');
 
-        Route::get('/tank-delivery-records', function () {
-            return view('pages.staff.tankdeliveryrecords', ['title' => 'Tank Delivery Record']);
-        })->name('tank-delivery-records.index');
+        Route::prefix('tank-delivery-records')->name('tank-delivery-records.')->group(function () {
+            Route::get('/', [StaffTankDeliveryRecordController::class, 'index'])->name('index');
+            Route::post('/', [StaffTankDeliveryRecordController::class, 'store'])->name('store');
+            Route::put('/{record}', [StaffTankDeliveryRecordController::class, 'update'])
+                ->whereNumber('record')
+                ->name('update');
+            Route::delete('/{record}', [StaffTankDeliveryRecordController::class, 'destroy'])
+                ->whereNumber('record')
+                ->name('destroy');
+        });
 
-        Route::post('/tank-delivery-records', function () {
-            return back()->with('status', 'Tank delivery record saving is not connected yet.');
-        })->name('tank-delivery-records.store');
+        Route::get('/sales-history', [StaffSalesController::class, 'index'])->name('sales.history');
 
-        Route::put('/tank-delivery-records/{record}', function ($record) {
-            return back()->with('status', "Tank delivery record update {$record} is not connected yet.");
-        })->whereNumber('record')->name('tank-delivery-records.update');
-
-        Route::delete('/tank-delivery-records/{record}', function ($record) {
-            return back()->with('status', "Tank delivery record delete {$record} is not connected yet.");
-        })->whereNumber('record')->name('tank-delivery-records.destroy');
-
-        Route::get('/sales-history', function () {
-            return view('pages.staff.transactionhistory', ['title' => 'Transaction History']);
-        })->name('sales.history');
-
-        Route::get('/sales-history/print', function () {
-            return view('pages.staff.transactionhistory', ['title' => 'Print Transaction History']);
-        })->name('sales.print');
+        Route::get('/sales-history/print', [StaffSalesController::class, 'print'])->name('sales.print');
 
         Route::prefix('printed-transactions')->name('printed-transactions.')->group(function () {
             Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');
@@ -375,5 +368,3 @@ Route::middleware('auth')->group(function () {
         return view('pages.ui-elements.videos', ['title' => 'Videos']);
     })->name('videos');
 });
-
-
