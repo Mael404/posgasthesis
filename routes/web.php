@@ -72,7 +72,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/', [ShiftReconciliationController::class, 'index'])->name('index');
             Route::get('/details/{id}', [ShiftReconciliationController::class, 'getDetails'])->name('details');
             Route::get('/images/{reading}/{dispenser}/{type}', [ShiftReconciliationController::class, 'image'])
-                ->where(['dispenser' => '[1-3]', 'type' => 'liters|sales'])
+                ->where(['dispenser' => '[1-3]', 'type' => 'opening_liters|opening_sales|closing_liters|closing_sales|liters|sales'])
                 ->name('image');
             Route::post('/approve', [ShiftReconciliationController::class, 'approve'])->name('approve');
             Route::post('/void-approval', [ShiftReconciliationController::class, 'voidApproval'])->name('voidApproval');
@@ -252,7 +252,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/shift-readings/store', [StaffReadingController::class, 'store'])->name('readings.store');
 
         Route::get('/readings/{reading}/images/{dispenser}/{type}', [StaffReadingController::class, 'showImage'])
-            ->where(['dispenser' => '[1-3]', 'type' => 'liters|sales'])
+            ->where(['dispenser' => '[1-3]', 'type' => 'opening_liters|opening_sales|closing_liters|closing_sales|liters|sales'])
             ->name('readings.image');
 
         Route::get('/readings/{id}/details', [StaffReadingController::class, 'getDetails'])->name('readings.details');

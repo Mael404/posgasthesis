@@ -729,26 +729,61 @@
             document.getElementById('detailsContent').classList.remove('hidden');
         }
 
-        function imageFor(images, dispenser, type) {
-            return images.find((image) => Number(image.dispenser) === dispenser && String(image.image_type || '').toLowerCase() === type);
+        function imageTypeMatches(imageType, expectedType) {
+            const actual = String(imageType || '').toLowerCase();
+            const expected = String(expectedType || '').toLowerCase();
+
+            if (actual === expected) {
+                return true;
+            }
+
+            return expected.startsWith('closing_') && actual === expected.replace('closing_', '');
+        }
+
+        function imagesFor(images, dispenser, type) {
+            return images.filter((image) => Number(image.dispenser) === dispenser
+                && imageTypeMatches(image.image_type, type)
+                && String(image.image_url || '').trim() !== '');
         }
 
         function imageSlot(images, dispenser, type, label) {
-            const image = imageFor(images, dispenser, type);
+            const matches = imagesFor(images, dispenser, type);
 
-            if (!image || !image.image_url) {
+            if (!matches.length) {
                 return `
-                    <div class="flex min-h-[92px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 text-center text-theme-xs text-gray-400 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-500">
+                    <div class="flex min-h-[78px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 text-center text-theme-xs text-gray-400 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-500">
                         No ${esc(label)} photo
                     </div>
                 `;
             }
 
             return `
-                <button type="button" class="group relative block min-h-[92px] overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800" data-lightbox-url="${esc(image.image_url)}" onclick="openLightbox(this.dataset.lightboxUrl)">
-                    <img src="${esc(image.image_url)}" alt="${esc(label)} meter photo" class="h-[92px] w-full object-cover transition group-hover:scale-[1.02]">
-                    <span class="absolute bottom-1 left-1 rounded bg-gray-950/70 px-2 py-0.5 text-[11px] font-medium text-white">${esc(label)}</span>
-                </button>
+                <div class="grid grid-cols-${matches.length > 1 ? '2' : '1'} gap-1">
+                    ${matches.map((image, index) => `
+                        <button type="button" class="group relative block min-h-[78px] overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800" data-lightbox-url="${esc(image.image_url)}" onclick="openLightbox(this.dataset.lightboxUrl)">
+                            <img src="${esc(image.image_url)}" alt="${esc(label)} meter photo ${index + 1}" class="h-[78px] w-full object-cover transition group-hover:scale-[1.02]">
+                            <span class="absolute bottom-1 left-1 rounded bg-gray-950/70 px-2 py-0.5 text-[10px] font-medium text-white">${esc(label)}${matches.length > 1 ? ' ' + (index + 1) : ''}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function photoPhaseSlot(images, dispenser, phase) {
+            const phaseLabel = phase === 'opening' ? 'Opening' : 'Closing';
+            const caption = phase === 'opening' ? 'Before shift' : 'After shift';
+
+            return `
+                <div class="rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-white/[0.02]">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-theme-xs font-semibold uppercase text-gray-600 dark:text-gray-300">${phaseLabel}</span>
+                        <span class="text-[11px] text-gray-400 dark:text-gray-500">${caption}</span>
+                    </div>
+                    <div class="mt-2 grid grid-cols-2 gap-2">
+                        ${imageSlot(images, dispenser, `${phase}_liters`, 'Liters')}
+                        ${imageSlot(images, dispenser, `${phase}_sales`, 'Sales')}
+                    </div>
+                </div>
             `;
         }
 
@@ -822,9 +857,9 @@
                             <h4 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dispenser ${dispenser}</h4>
                             <span class="text-theme-xs text-gray-500 dark:text-gray-400">Pumps ${pumpA}-${pumpB}</span>
                         </div>
-                        <div class="mb-3 grid grid-cols-2 gap-2">
-                            ${imageSlot(images, dispenser, 'sales', 'Sales')}
-                            ${imageSlot(images, dispenser, 'liters', 'Liters')}
+                        <div class="mb-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
+                            ${photoPhaseSlot(images, dispenser, 'opening')}
+                            ${photoPhaseSlot(images, dispenser, 'closing')}
                         </div>
                         <div class="space-y-3">
                             ${pumpLine(reading, pumpA)}

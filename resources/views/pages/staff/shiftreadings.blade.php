@@ -29,6 +29,14 @@
             ],
         ];
         $pumpMap = collect($dispenserMap)->flatMap(fn ($dispenser) => $dispenser['pumps'])->values()->all();
+        $meterPhotoGroups = [
+            ['key' => 'opening', 'label' => 'Opening', 'caption' => 'Before shift starts'],
+            ['key' => 'closing', 'label' => 'Closing', 'caption' => 'After shift ends'],
+        ];
+        $meterPhotoMetrics = [
+            ['key' => 'liters', 'label' => 'Liters Reading'],
+            ['key' => 'sales', 'label' => 'Sales Reading'],
+        ];
         $denominations = [
             ['key' => '1000', 'label' => '1000', 'value' => 1000, 'type' => 'Paper'],
             ['key' => '500', 'label' => '500', 'value' => 500, 'type' => 'Paper'],
@@ -433,40 +441,48 @@
                                                 </div>
                                             </div>
 
-                                            <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                                                <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
-                                                    <label class="block {{ $labelClass }}">
-                                                        <span>Liters Reading Photo</span>
-                                                        <input type="file" accept="image/*" name="dispenser_image_{{ $dispenser['id'] }}" x-on:change="setPhoto($event, 'liters', {{ $dispenser['id'] }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_liters_{{ $dispenser['id'] }}'] ? 'border-error-400' : ''">
-                                                    </label>
-                                                    <div class="mt-3">
-                                                        <template x-if="photoPreviews.liters[{{ $dispenser['id'] }}]">
-                                                            <button type="button" x-on:click="openLightbox(photoPreviews.liters[{{ $dispenser['id'] }}])" class="block w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
-                                                                <img x-bind:src="photoPreviews.liters[{{ $dispenser['id'] }}]" alt="" class="h-36 w-full object-contain">
-                                                            </button>
-                                                        </template>
-                                                        <template x-if="!photoPreviews.liters[{{ $dispenser['id'] }}]">
-                                                            <div class="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">No liters photo selected.</div>
-                                                        </template>
-                                                    </div>
-                                                </div>
+                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                @foreach ($meterPhotoGroups as $group)
+                                                    <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                                        <div class="mb-3 flex items-center justify-between gap-3">
+                                                            <div>
+                                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $group['label'] }} Photos</p>
+                                                                <p class="text-theme-xs text-gray-500 dark:text-gray-400">{{ $group['caption'] }}</p>
+                                                            </div>
+                                                        </div>
 
-                                                <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
-                                                    <label class="block {{ $labelClass }}">
-                                                        <span>Sales Reading Photo</span>
-                                                        <input type="file" accept="image/*" name="dispenser_sales_image_{{ $dispenser['id'] }}" x-on:change="setPhoto($event, 'sales', {{ $dispenser['id'] }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_sales_{{ $dispenser['id'] }}'] ? 'border-error-400' : ''">
-                                                    </label>
-                                                    <div class="mt-3">
-                                                        <template x-if="photoPreviews.sales[{{ $dispenser['id'] }}]">
-                                                            <button type="button" x-on:click="openLightbox(photoPreviews.sales[{{ $dispenser['id'] }}])" class="block w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
-                                                                <img x-bind:src="photoPreviews.sales[{{ $dispenser['id'] }}]" alt="" class="h-36 w-full object-contain">
-                                                            </button>
-                                                        </template>
-                                                        <template x-if="!photoPreviews.sales[{{ $dispenser['id'] }}]">
-                                                            <div class="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">No sales photo selected.</div>
-                                                        </template>
+                                                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                            @foreach ($meterPhotoMetrics as $metric)
+                                                                @php
+                                                                    $photoType = $group['key'] . '_' . $metric['key'];
+                                                                    $inputName = 'dispenser_' . $photoType . '_image_' . $dispenser['id'];
+                                                                @endphp
+
+                                                                <div class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950">
+                                                                    <label class="block {{ $labelClass }}" for="{{ $inputName }}">
+                                                                        <span>{{ $metric['label'] }}</span>
+                                                                        <input id="{{ $inputName }}" type="file" accept="image/*" multiple name="{{ $inputName }}[]" x-on:change="setPhotos($event, '{{ $photoType }}', {{ $dispenser['id'] }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_{{ $photoType }}_{{ $dispenser['id'] }}'] ? 'border-error-400' : ''">
+                                                                    </label>
+
+                                                                    <div class="mt-3">
+                                                                        <template x-if="photoPreviewUrls('{{ $photoType }}', {{ $dispenser['id'] }}).length">
+                                                                            <div class="grid grid-cols-2 gap-2">
+                                                                                <template x-for="(url, index) in photoPreviewUrls('{{ $photoType }}', {{ $dispenser['id'] }})" :key="'{{ $photoType }}-{{ $dispenser['id'] }}-' + index">
+                                                                                    <button type="button" x-on:click="openLightbox(url)" class="block overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+                                                                                        <img x-bind:src="url" alt="" class="h-24 w-full object-contain">
+                                                                                    </button>
+                                                                                </template>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template x-if="!photoPreviewUrls('{{ $photoType }}', {{ $dispenser['id'] }}).length">
+                                                                            <div class="flex h-24 items-center justify-center rounded-lg border border-dashed border-gray-300 px-2 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">No {{ strtolower($group['label']) }} {{ strtolower($metric['label']) }} photo selected.</div>
+                                                                        </template>
+                                                                    </div>
+                                                                </div>
+                                                            @endforeach
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                @endforeach
                                             </div>
 
                                             <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -758,30 +774,35 @@
                                                 </div>
                                             </div>
 
-                                            <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                                                <div>
-                                                    <p class="{{ $labelClass }}">Liters Photo</p>
-                                                    <template x-if="imageUrl(dispenser.id, 'liters')">
-                                                        <button type="button" x-on:click="openLightbox(imageUrl(dispenser.id, 'liters'))" class="mt-2 block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
-                                                            <img x-bind:src="imageUrl(dispenser.id, 'liters')" alt="" class="h-44 w-full object-contain">
-                                                        </button>
-                                                    </template>
-                                                    <template x-if="!imageUrl(dispenser.id, 'liters')">
-                                                        <div class="mt-2 flex h-44 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">No liters photo found.</div>
-                                                    </template>
-                                                </div>
+                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                <template x-for="photoPhase in meterPhotoPhases" :key="'details-photo-phase-' + dispenser.id + '-' + photoPhase.key">
+                                                    <section class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                                        <div class="mb-3">
+                                                            <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="photoPhase.label + ' Photos'"></p>
+                                                            <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="photoPhase.caption"></p>
+                                                        </div>
 
-                                                <div>
-                                                    <p class="{{ $labelClass }}">Sales Photo</p>
-                                                    <template x-if="imageUrl(dispenser.id, 'sales')">
-                                                        <button type="button" x-on:click="openLightbox(imageUrl(dispenser.id, 'sales'))" class="mt-2 block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
-                                                            <img x-bind:src="imageUrl(dispenser.id, 'sales')" alt="" class="h-44 w-full object-contain">
-                                                        </button>
-                                                    </template>
-                                                    <template x-if="!imageUrl(dispenser.id, 'sales')">
-                                                        <div class="mt-2 flex h-44 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">No sales photo found.</div>
-                                                    </template>
-                                                </div>
+                                                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                            <template x-for="metric in meterPhotoMetrics" :key="'details-photo-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key">
+                                                                <div>
+                                                                    <p class="{{ $labelClass }}" x-text="metric.label"></p>
+                                                                    <template x-if="photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
+                                                                        <div class="mt-2 grid grid-cols-2 gap-2">
+                                                                            <template x-for="(url, index) in photoUrls(dispenser.id, photoPhase.key + '_' + metric.key)" :key="'details-photo-url-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key + '-' + index">
+                                                                                <button type="button" x-on:click="openLightbox(url)" class="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+                                                                                    <img x-bind:src="url" alt="" class="h-28 w-full object-contain">
+                                                                                </button>
+                                                                            </template>
+                                                                        </div>
+                                                                    </template>
+                                                                    <template x-if="!photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
+                                                                        <div class="mt-2 flex h-28 items-center justify-center rounded-lg border border-dashed border-gray-300 px-2 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400" x-text="'No ' + photoPhase.label.toLowerCase() + ' ' + metric.label.toLowerCase() + ' photo found.'"></div>
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </section>
+                                                </template>
                                             </div>
 
                                             <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -926,12 +947,21 @@
                 staffName: config.staffName || 'Staff',
                 latestReadingLabel: config.latestReadingLabel || '',
                 latestReadingExists: Boolean(config.latestReadingExists),
+                meterPhotoPhases: [
+                    { key: 'opening', label: 'Opening', caption: 'Before shift starts' },
+                    { key: 'closing', label: 'Closing', caption: 'After shift ends' }
+                ],
+                meterPhotoMetrics: [
+                    { key: 'liters', label: 'Liters Reading' },
+                    { key: 'sales', label: 'Sales Reading' }
+                ],
+                meterPhotoTypes: ['opening_liters', 'opening_sales', 'closing_liters', 'closing_sales'],
                 toast: { open: false, message: '', timer: null },
                 modal: null,
                 saving: false,
                 fieldErrors: {},
                 form: {},
-                photoPreviews: { liters: {}, sales: {} },
+                photoPreviews: { opening_liters: {}, opening_sales: {}, closing_liters: {}, closing_sales: {} },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
                 confirmation: {
                     open: false,
@@ -952,6 +982,13 @@
                 init() {
                     this.resetForm();
                     this.restoreToast();
+                },
+                blankPhotoPreviews() {
+                    return this.meterPhotoTypes.reduce((previews, type) => {
+                        previews[type] = {};
+
+                        return previews;
+                    }, {});
                 },
                 today() {
                     const date = new Date();
@@ -993,7 +1030,7 @@
                     };
 
                     this.fieldErrors = {};
-                    this.photoPreviews = { liters: {}, sales: {} };
+                    this.photoPreviews = this.blankPhotoPreviews();
                     this.saving = false;
                 },
                 openForm() {
@@ -1055,15 +1092,18 @@
                 setFieldError(field) {
                     this.fieldErrors[field] = true;
                 },
-                setPhoto(event, type, dispenser) {
-                    const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                photoPreviewUrls(type, dispenser) {
+                    return (this.photoPreviews[type] && this.photoPreviews[type][dispenser]) || [];
+                },
+                setPhotos(event, type, dispenser) {
+                    const files = Array.from(event.target.files || []);
 
-                    if (!file) {
+                    if (!files.length) {
                         delete this.photoPreviews[type][dispenser];
                         return;
                     }
 
-                    this.photoPreviews[type][dispenser] = URL.createObjectURL(file);
+                    this.photoPreviews[type][dispenser] = files.map((file) => URL.createObjectURL(file));
                     this.clearFieldError('photo_' + type + '_' + dispenser);
                 },
                 blankPaymentRow(type) {
@@ -1299,10 +1339,10 @@
                     }
 
                     for (const dispenser of this.dispensers.map((item) => item.id)) {
-                        for (const type of ['liters', 'sales']) {
-                            if (!this.photoPreviews[type][dispenser]) {
+                        for (const type of this.meterPhotoTypes) {
+                            if (!this.photoPreviewUrls(type, dispenser).length) {
                                 this.setFieldError('photo_' + type + '_' + dispenser);
-                                return 'Upload both liters and sales photos for every dispenser.';
+                                return 'Upload opening and closing liters/sales photos for every dispenser.';
                             }
                         }
                     }
@@ -1466,11 +1506,25 @@
                         minute: '2-digit'
                     });
                 },
-                imageUrl(dispenser, type) {
-                    const image = (this.details.images || []).find((item) => Number(item.dispenser) === Number(dispenser)
-                        && String(item.image_type || '').toLowerCase() === String(type || '').toLowerCase());
+                imageTypeMatches(imageType, expectedType) {
+                    const actual = String(imageType || '').toLowerCase();
+                    const expected = String(expectedType || '').toLowerCase();
 
-                    return image ? (image.image_url || '') : '';
+                    if (actual === expected) {
+                        return true;
+                    }
+
+                    return expected.startsWith('closing_') && actual === expected.replace('closing_', '');
+                },
+                photoUrls(dispenser, type) {
+                    return (this.details.images || [])
+                        .filter((item) => Number(item.dispenser) === Number(dispenser)
+                            && this.imageTypeMatches(item.image_type, type)
+                            && String(item.image_url || '').trim() !== '')
+                        .map((item) => item.image_url);
+                },
+                imageUrl(dispenser, type) {
+                    return this.photoUrls(dispenser, type)[0] || '';
                 },
                 detailDispenserSales(dispenser) {
                     return (dispenser.pumps || []).reduce((total, pump) => total + this.readingPumpValue(pump.id, 'dispensed_sales'), 0);

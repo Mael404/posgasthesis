@@ -86,7 +86,7 @@ class ShiftReconciliationController extends Controller
         ]);
     }
 
-    public function image(int $reading, int $dispenser, string $type)
+    public function image(Request $request, int $reading, int $dispenser, string $type)
     {
         if (
             ! $this->hasTable('shift_reading_images')
@@ -97,10 +97,19 @@ class ShiftReconciliationController extends Controller
             abort(404);
         }
 
-        $image = DB::table('shift_reading_images')
+        $query = DB::table('shift_reading_images')
             ->where('shift_reading_id', $reading)
             ->where('dispenser', $dispenser)
-            ->whereRaw('LOWER(image_type) = ?', [strtolower($type)])
+            ->whereRaw('LOWER(image_type) = ?', [strtolower($type)]);
+
+        $imageId = (int) $request->query('image', 0);
+
+        if ($imageId > 0 && $this->hasColumn('shift_reading_images', 'id')) {
+            $query->where('id', $imageId);
+        }
+
+        $image = $query
+            ->when($this->hasColumn('shift_reading_images', 'id'), fn ($query) => $query->orderBy('id'))
             ->first();
 
         if (! $image) {
@@ -498,12 +507,18 @@ class ShiftReconciliationController extends Controller
             ->map(function ($image) {
                 $image->dispenser = (int) ($image->dispenser ?? 0);
                 $image->image_type = strtolower(trim((string) ($image->image_type ?? '')));
+                $imageRouteParameters = [
+                    'reading' => $image->shift_reading_id,
+                    'dispenser' => $image->dispenser,
+                    'type' => $image->image_type,
+                ];
+
+                if (isset($image->id)) {
+                    $imageRouteParameters['image'] = $image->id;
+                }
+
                 $image->image_url = $image->dispenser > 0 && $image->image_type !== ''
-                    ? route('admin.reconcile.image', [
-                        'reading' => $image->shift_reading_id,
-                        'dispenser' => $image->dispenser,
-                        'type' => $image->image_type,
-                    ])
+                    ? route('admin.reconcile.image', $imageRouteParameters)
                     : null;
 
                 return $image;

@@ -119,9 +119,14 @@ class StaffReadingController extends Controller
                     $this->lockSalesForReading($reading);
                 }
 
-                for ($dispenser = 1; $dispenser <= 3; $dispenser++) {
-                    $this->storeMeterImage($request, $readingId, $dispenser, 'liters', "dispenser_image_{$dispenser}");
-                    $this->storeMeterImage($request, $readingId, $dispenser, 'sales', "dispenser_sales_image_{$dispenser}");
+                foreach ($this->meterPhotoFields() as $field) {
+                    $this->storeMeterImages(
+                        $request,
+                        $readingId,
+                        $field['dispenser'],
+                        $field['type'],
+                        $field['name']
+                    );
                 }
             });
 
@@ -160,7 +165,7 @@ class StaffReadingController extends Controller
         ]);
     }
 
-    public function showImage(int $reading, int $dispenser, string $type)
+    public function showImage(Request $request, int $reading, int $dispenser, string $type)
     {
         if (
             ! $this->hasTable('shift_reading_images')
@@ -171,13 +176,22 @@ class StaffReadingController extends Controller
             abort(404);
         }
 
-        $image = DB::table('shift_reading_images')
+        $query = DB::table('shift_reading_images')
             ->join('shift_readings', 'shift_reading_images.shift_reading_id', '=', 'shift_readings.id')
             ->select('shift_reading_images.*', 'shift_readings.user_id')
             ->where('shift_reading_images.shift_reading_id', $reading)
             ->where('shift_reading_images.dispenser', $dispenser)
             ->whereRaw('LOWER(shift_reading_images.image_type) = ?', [strtolower($type)])
-            ->where('shift_readings.user_id', auth()->id())
+            ->where('shift_readings.user_id', auth()->id());
+
+        $imageId = (int) $request->query('image', 0);
+
+        if ($imageId > 0 && $this->hasColumn('shift_reading_images', 'id')) {
+            $query->where('shift_reading_images.id', $imageId);
+        }
+
+        $image = $query
+            ->when($this->hasColumn('shift_reading_images', 'id'), fn ($query) => $query->orderBy('shift_reading_images.id'))
             ->first();
 
         if (! $image) {
@@ -365,9 +379,9 @@ class StaffReadingController extends Controller
             $rules["dipstick_{$fuel}"] = ['required', 'numeric', 'min:0'];
         }
 
-        for ($dispenser = 1; $dispenser <= 3; $dispenser++) {
-            $rules["dispenser_image_{$dispenser}"] = ['required', 'image', 'max:10240'];
-            $rules["dispenser_sales_image_{$dispenser}"] = ['required', 'image', 'max:10240'];
+        foreach ($this->meterPhotoFields() as $field) {
+            $rules[$field['name']] = ['required', 'array', 'min:1'];
+            $rules[$field['name'] . '.*'] = ['image', 'max:10240'];
         }
 
         return $rules;
@@ -377,12 +391,40 @@ class StaffReadingController extends Controller
     {
         $attributes = [];
 
-        for ($dispenser = 1; $dispenser <= 3; $dispenser++) {
-            $attributes["dispenser_image_{$dispenser}"] = "Dispenser {$dispenser} liters photo";
-            $attributes["dispenser_sales_image_{$dispenser}"] = "Dispenser {$dispenser} sales photo";
+        foreach ($this->meterPhotoFields() as $field) {
+            $attributes[$field['name']] = $field['label'];
+            $attributes[$field['name'] . '.*'] = $field['label'];
         }
 
         return $attributes;
+    }
+
+    private function meterPhotoFields(): array
+    {
+        $fields = [];
+        $phases = [
+            'opening' => 'Opening',
+            'closing' => 'Closing',
+        ];
+        $metrics = [
+            'liters' => 'Liters',
+            'sales' => 'Sales',
+        ];
+
+        for ($dispenser = 1; $dispenser <= 3; $dispenser++) {
+            foreach ($phases as $phase => $phaseLabel) {
+                foreach ($metrics as $metric => $metricLabel) {
+                    $fields[] = [
+                        'name' => "dispenser_{$phase}_{$metric}_image_{$dispenser}",
+                        'label' => "Dispenser {$dispenser} {$phaseLabel} {$metricLabel} photo",
+                        'dispenser' => $dispenser,
+                        'type' => "{$phase}_{$metric}",
+                    ];
+                }
+            }
+        }
+
+        return $fields;
     }
 
     private function cashDenominationMap(): array
@@ -674,12 +716,18 @@ class StaffReadingController extends Controller
             ->map(function ($image) {
                 $image->dispenser = (int) ($image->dispenser ?? 0);
                 $image->image_type = strtolower(trim((string) ($image->image_type ?? '')));
+                $imageRouteParameters = [
+                    'reading' => $image->shift_reading_id,
+                    'dispenser' => $image->dispenser,
+                    'type' => $image->image_type,
+                ];
+
+                if (isset($image->id)) {
+                    $imageRouteParameters['image'] = $image->id;
+                }
+
                 $image->image_url = $image->dispenser > 0 && $image->image_type !== ''
-                    ? route('staff.readings.image', [
-                        'reading' => $image->shift_reading_id,
-                        'dispenser' => $image->dispenser,
-                        'type' => $image->image_type,
-                    ], false)
+                    ? route('staff.readings.image', $imageRouteParameters, false)
                     : null;
 
                 return $image;
@@ -892,22 +940,31 @@ class StaffReadingController extends Controller
         unset($this->lockedSalesPresence[(int) $reading->id]);
     }
 
-    private function storeMeterImage(Request $request, int $readingId, int $dispenser, string $type, string $input): void
+    private function storeMeterImages(Request $request, int $readingId, int $dispenser, string $type, string $input): void
     {
-        if (! $request->hasFile($input) || ! $request->file($input)->isValid()) {
+        if (! $request->hasFile($input)) {
             return;
         }
 
-        $path = $request->file($input)->store('meter_images', 'public');
+        $files = $request->file($input, []);
+        $files = is_array($files) ? $files : [$files];
 
-        $this->insertForExistingColumns('shift_reading_images', [
-            'shift_reading_id' => $readingId,
-            'dispenser' => $dispenser,
-            'image_type' => $type,
-            'image_path' => $path,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        foreach ($files as $file) {
+            if (! $file || ! $file->isValid()) {
+                continue;
+            }
+
+            $path = $file->store('meter_images', 'public');
+
+            $this->insertForExistingColumns('shift_reading_images', [
+                'shift_reading_id' => $readingId,
+                'dispenser' => $dispenser,
+                'image_type' => $type,
+                'image_path' => $path,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
     }
 
     private function voidUpdatePayload(?string $reason): array
