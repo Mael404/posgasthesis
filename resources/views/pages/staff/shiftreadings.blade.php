@@ -2,14 +2,33 @@
 
 @section('content')
     @php
-        $pumpMap = [
-            ['id' => 1, 'label' => 'Pump 01', 'fuel' => 'Premium'],
-            ['id' => 2, 'label' => 'Pump 02', 'fuel' => 'Unleaded'],
-            ['id' => 3, 'label' => 'Pump 03', 'fuel' => 'Premium'],
-            ['id' => 4, 'label' => 'Pump 04', 'fuel' => 'Unleaded'],
-            ['id' => 5, 'label' => 'Pump 05', 'fuel' => 'Diesel'],
-            ['id' => 6, 'label' => 'Pump 06', 'fuel' => 'Diesel'],
+        $dispenserMap = [
+            [
+                'id' => 1,
+                'label' => 'Dispenser 1',
+                'pumps' => [
+                    ['id' => 1, 'label' => 'Pump 01', 'fuel' => 'Premium'],
+                    ['id' => 2, 'label' => 'Pump 02', 'fuel' => 'Unleaded'],
+                ],
+            ],
+            [
+                'id' => 2,
+                'label' => 'Dispenser 2',
+                'pumps' => [
+                    ['id' => 3, 'label' => 'Pump 03', 'fuel' => 'Premium'],
+                    ['id' => 4, 'label' => 'Pump 04', 'fuel' => 'Unleaded'],
+                ],
+            ],
+            [
+                'id' => 3,
+                'label' => 'Dispenser 3',
+                'pumps' => [
+                    ['id' => 5, 'label' => 'Pump 05', 'fuel' => 'Diesel'],
+                    ['id' => 6, 'label' => 'Pump 06', 'fuel' => 'Diesel'],
+                ],
+            ],
         ];
+        $pumpMap = collect($dispenserMap)->flatMap(fn ($dispenser) => $dispenser['pumps'])->values()->all();
         $denominations = [
             ['key' => '1000', 'label' => '1000', 'value' => 1000, 'type' => 'Paper'],
             ['key' => '500', 'label' => '500', 'value' => 500, 'type' => 'Paper'],
@@ -94,6 +113,15 @@
             'verified' => $rows->filter(fn ($reading) => str_contains(strtolower((string) ($reading->status ?? '')), 'verified'))->count(),
             'rejected' => $rows->filter(fn ($reading) => str_contains(strtolower((string) ($reading->status ?? '')), 'reject'))->count(),
         ];
+
+        $latestReadingLabel = null;
+        if (! empty($latestReading?->created_at)) {
+            try {
+                $latestReadingLabel = \Carbon\Carbon::parse($latestReading->created_at)->format('M d, Y h:i A');
+            } catch (\Throwable) {
+                $latestReadingLabel = null;
+            }
+        }
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Shift Readings" />
@@ -107,15 +135,31 @@
                 voidTemplate: @js(route('staff.readings.void', ['reading' => '__ID__']))
             },
             pumps: @js($pumpMap),
+            dispensers: @js($dispenserMap),
             denominations: @js($denominations),
             prevReadings: @js($prevReadings ?? []),
             liveSales: @js($liveSales ?? []),
-            latestSubmitted: @js(optional($latestReading)->created_at)
+            staffName: @js(auth()->user()->name ?? 'Staff'),
+            latestReadingExists: @js(! empty($latestReading)),
+            latestSubmitted: @js(optional($latestReading)->created_at),
+            latestReadingLabel: @js($latestReadingLabel)
         })"
         x-init="init()"
         x-effect="document.body.classList.toggle('overflow-hidden', modal !== null || confirmation.open || messageDialog.open || lightbox.open)"
-        class="space-y-6">
-        <style>[x-cloak] { display: none !important; }</style>
+        x-on:wheel.capture="stopNumberWheel($event)"
+        class="shift-readings-module space-y-6">
+        <style>
+            [x-cloak] { display: none !important; }
+            .shift-readings-module input[type="number"] {
+                appearance: textfield;
+                -moz-appearance: textfield;
+            }
+            .shift-readings-module input[type="number"]::-webkit-inner-spin-button,
+            .shift-readings-module input[type="number"]::-webkit-outer-spin-button {
+                -webkit-appearance: none;
+                margin: 0;
+            }
+        </style>
 
         <div
             x-show="toast.open"
@@ -294,10 +338,31 @@
                 </div>
 
                 <form x-ref="form" x-on:submit.prevent="submitReading()" class="max-h-[82vh] overflow-y-auto p-5 custom-scrollbar md:p-6">
+                    <div class="mb-5 rounded-xl border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-500/25 dark:bg-brand-500/10">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div class="min-w-0">
+                                <p class="text-theme-xs font-semibold uppercase text-brand-700 dark:text-brand-300">Time-Saving Tool</p>
+                                <h3 class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">Fetch Last Closing Data</h3>
+                                <p class="mt-1 text-theme-sm text-gray-600 dark:text-gray-400">Fill every Opening input with the latest submitted shift closing numbers before entering new closings.</p>
+                                <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">
+                                    Latest source:
+                                    <span class="font-medium text-gray-700 dark:text-gray-200" x-text="latestReadingLabel || 'No submitted settlement found yet'"></span>
+                                </p>
+                            </div>
+                            <button type="button" x-on:click="fetchPreviousData()" class="{{ $secondaryButtonClass }} shrink-0">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.75 12a7.25 7.25 0 1 1 2.12 5.13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4.75 17.25v-4.5h4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                Fetch Last Closing Data
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                         <div class="space-y-5">
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div class="mb-4">
+                                    <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">1. Shift Details</h3>
+                                </div>
+                                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                                     <label class="block {{ $labelClass }}">
                                         <span>Period From</span>
                                         <input type="date" name="period_from" x-model="form.period_from" x-on:input="clearFieldError('period_from')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.period_from ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
@@ -306,109 +371,183 @@
                                         <span>Period To</span>
                                         <input type="date" name="period_to" x-model="form.period_to" x-on:input="clearFieldError('period_to')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.period_to ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
                                     </label>
+                                    <label class="block {{ $labelClass }}">
+                                        <span>Prepared By</span>
+                                        <input type="text" readonly x-bind:value="staffName" class="mt-1.5 {{ $inputClass }} bg-gray-50 font-semibold dark:bg-white/[0.03]">
+                                    </label>
+                                </div>
+                            </section>
+
+                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">2. Dipstick Monitoring</h3>
+                                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                                    @foreach (['premium' => 'Premium', 'regular' => 'Regular / Unleaded', 'diesel' => 'Diesel'] as $fuelKey => $fuelLabel)
+                                        <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                            <div class="mb-3 flex items-center justify-between gap-3">
+                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $fuelLabel }}</p>
+                                                <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">Dipstick</span>
+                                            </div>
+                                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-1">
+                                                <label class="block {{ $labelClass }}">
+                                                    <span>Opening (L)</span>
+                                                    <input type="number" step="0.01" name="dipstick_{{ $fuelKey }}_start" x-model="form.dipstick.{{ $fuelKey }}_start" x-on:input="clearFieldError('dipstick_{{ $fuelKey }}_start')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.dipstick_{{ $fuelKey }}_start ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                </label>
+                                                <label class="block {{ $labelClass }}">
+                                                    <span>Current (L)</span>
+                                                    <input type="number" step="0.01" name="dipstick_{{ $fuelKey }}" x-model="form.dipstick.{{ $fuelKey }}" x-on:input="clearFieldError('dipstick_{{ $fuelKey }}')" class="mt-1.5 {{ $inputClass }} font-semibold" x-bind:class="fieldErrors.dipstick_{{ $fuelKey }} ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                </label>
+                                            </div>
+                                        </article>
+                                    @endforeach
                                 </div>
                             </section>
 
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                                     <div>
-                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pump Meter Readings</h3>
-                                        <p class="{{ $captionClass }}">Opening values are prefilled from the latest submitted reading.</p>
+                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">3. Pump Meter Readings</h3>
+                                        <p class="{{ $captionClass }}">Upload each dispenser's meter photos before entering the two pump readings below it.</p>
                                     </div>
-                                    <span class="text-theme-xs font-medium tabular-nums text-gray-500 dark:text-gray-400" x-text="formatLiters(totalPumpLiters()) + ' total liters'"></span>
+                                    <div class="flex flex-wrap gap-2 text-theme-xs font-medium tabular-nums text-gray-500 dark:text-gray-400">
+                                        <span x-text="money(totalPumpSales()) + ' gross sales'"></span>
+                                        <span class="hidden sm:inline">/</span>
+                                        <span x-text="formatLiters(totalPumpLiters()) + ' total liters'"></span>
+                                    </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                    @foreach ($pumpMap as $pump)
+                                <div class="space-y-4">
+                                    @foreach ($dispenserMap as $dispenser)
+                                        @php
+                                            $firstPump = $dispenser['pumps'][0]['id'];
+                                            $secondPump = $dispenser['pumps'][1]['id'];
+                                        @endphp
                                         <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <div class="mb-4 flex items-center justify-between gap-3">
+                                            <div class="flex flex-col gap-2 border-b border-gray-100 pb-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                                                 <div>
-                                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $pump['label'] }}</p>
-                                                    <p class="{{ $captionClass }}">{{ $pump['fuel'] }}</p>
+                                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dispenser['label'] }}</p>
+                                                    <p class="{{ $captionClass }}">Pump {{ $firstPump }} &amp; Pump {{ $secondPump }}</p>
                                                 </div>
-                                                <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="money(pumpSales({{ $pump['id'] }}))"></span>
+                                                <div class="flex flex-wrap gap-2">
+                                                    <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium tabular-nums text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="money(dispenserSales({{ $dispenser['id'] }}))"></span>
+                                                    <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium tabular-nums text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="formatLiters(dispenserLiters({{ $dispenser['id'] }}))"></span>
+                                                </div>
                                             </div>
 
-                                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Sales Opening</span>
-                                                    <input type="number" step="0.01" name="pump{{ $pump['id'] }}_sales_start" x-model="form.pumps[{{ $pump['id'] }}].sales_start" x-on:input="clearFieldError('pump{{ $pump['id'] }}_sales_start')" class="mt-1.5 {{ $inputClass }}">
-                                                </label>
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Sales Closing</span>
-                                                    <input type="number" step="0.01" name="pump{{ $pump['id'] }}_sales_end" x-model="form.pumps[{{ $pump['id'] }}].sales_end" x-on:input="clearFieldError('pump{{ $pump['id'] }}_sales_end')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_sales_end ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
-                                                </label>
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Liters Opening</span>
-                                                    <input type="number" step="0.01" name="pump{{ $pump['id'] }}_liters_start" x-model="form.pumps[{{ $pump['id'] }}].liters_start" x-on:input="clearFieldError('pump{{ $pump['id'] }}_liters_start')" class="mt-1.5 {{ $inputClass }}">
-                                                </label>
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Liters Closing</span>
-                                                    <input type="number" step="0.01" name="pump{{ $pump['id'] }}_liters_end" x-model="form.pumps[{{ $pump['id'] }}].liters_end" x-on:input="clearFieldError('pump{{ $pump['id'] }}_liters_end')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_liters_end ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
-                                                </label>
+                                            <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                                                <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                                    <label class="block {{ $labelClass }}">
+                                                        <span>Liters Reading Photo</span>
+                                                        <input type="file" accept="image/*" name="dispenser_image_{{ $dispenser['id'] }}" x-on:change="setPhoto($event, 'liters', {{ $dispenser['id'] }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_liters_{{ $dispenser['id'] }}'] ? 'border-error-400' : ''">
+                                                    </label>
+                                                    <div class="mt-3">
+                                                        <template x-if="photoPreviews.liters[{{ $dispenser['id'] }}]">
+                                                            <button type="button" x-on:click="openLightbox(photoPreviews.liters[{{ $dispenser['id'] }}])" class="block w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+                                                                <img x-bind:src="photoPreviews.liters[{{ $dispenser['id'] }}]" alt="" class="h-36 w-full object-contain">
+                                                            </button>
+                                                        </template>
+                                                        <template x-if="!photoPreviews.liters[{{ $dispenser['id'] }}]">
+                                                            <div class="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">No liters photo selected.</div>
+                                                        </template>
+                                                    </div>
+                                                </div>
+
+                                                <div class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                                    <label class="block {{ $labelClass }}">
+                                                        <span>Sales Reading Photo</span>
+                                                        <input type="file" accept="image/*" name="dispenser_sales_image_{{ $dispenser['id'] }}" x-on:change="setPhoto($event, 'sales', {{ $dispenser['id'] }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_sales_{{ $dispenser['id'] }}'] ? 'border-error-400' : ''">
+                                                    </label>
+                                                    <div class="mt-3">
+                                                        <template x-if="photoPreviews.sales[{{ $dispenser['id'] }}]">
+                                                            <button type="button" x-on:click="openLightbox(photoPreviews.sales[{{ $dispenser['id'] }}])" class="block w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+                                                                <img x-bind:src="photoPreviews.sales[{{ $dispenser['id'] }}]" alt="" class="h-36 w-full object-contain">
+                                                            </button>
+                                                        </template>
+                                                        <template x-if="!photoPreviews.sales[{{ $dispenser['id'] }}]">
+                                                            <div class="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">No sales photo selected.</div>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                @foreach ($dispenser['pumps'] as $pump)
+                                                    <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                                        <div class="mb-4 flex items-center justify-between gap-3">
+                                                            <div>
+                                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $pump['label'] }}</p>
+                                                                <p class="{{ $captionClass }}">{{ $pump['fuel'] }}</p>
+                                                            </div>
+                                                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium tabular-nums text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="money(pumpSales({{ $pump['id'] }}))"></span>
+                                                        </div>
+
+                                                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                            <label class="block {{ $labelClass }}">
+                                                                <span>Opening Sales</span>
+                                                                <input type="number" step="0.01" name="pump{{ $pump['id'] }}_sales_start" x-model="form.pumps[{{ $pump['id'] }}].sales_start" x-on:input="clearFieldError('pump{{ $pump['id'] }}_sales_start')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_sales_start ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                            </label>
+                                                            <label class="block {{ $labelClass }}">
+                                                                <span>Closing Sales</span>
+                                                                <input type="number" step="0.01" name="pump{{ $pump['id'] }}_sales_end" x-model="form.pumps[{{ $pump['id'] }}].sales_end" x-on:input="clearFieldError('pump{{ $pump['id'] }}_sales_end')" class="mt-1.5 {{ $inputClass }} font-semibold" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_sales_end ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                            </label>
+                                                            <label class="block {{ $labelClass }}">
+                                                                <span>Opening Liters</span>
+                                                                <input type="number" step="0.01" name="pump{{ $pump['id'] }}_liters_start" x-model="form.pumps[{{ $pump['id'] }}].liters_start" x-on:input="clearFieldError('pump{{ $pump['id'] }}_liters_start')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_liters_start ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                            </label>
+                                                            <label class="block {{ $labelClass }}">
+                                                                <span>Closing Liters</span>
+                                                                <input type="number" step="0.01" name="pump{{ $pump['id'] }}_liters_end" x-model="form.pumps[{{ $pump['id'] }}].liters_end" x-on:input="clearFieldError('pump{{ $pump['id'] }}_liters_end')" class="mt-1.5 {{ $inputClass }} font-semibold" x-bind:class="fieldErrors.pump{{ $pump['id'] }}_liters_end ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                @endforeach
                                             </div>
                                         </article>
                                     @endforeach
-                                </div>
-                            </section>
-
-                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dipstick Readings</h3>
-                                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-                                    @foreach (['premium' => 'Premium', 'regular' => 'Regular', 'diesel' => 'Diesel'] as $fuelKey => $fuelLabel)
-                                        <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $fuelLabel }}</p>
-                                            <div class="mt-3 grid grid-cols-1 gap-3">
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Opening</span>
-                                                    <input type="number" step="0.01" name="dipstick_{{ $fuelKey }}_start" x-model="form.dipstick.{{ $fuelKey }}_start" x-on:input="clearFieldError('dipstick_{{ $fuelKey }}_start')" class="mt-1.5 {{ $inputClass }}">
-                                                </label>
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Current</span>
-                                                    <input type="number" step="0.01" name="dipstick_{{ $fuelKey }}" x-model="form.dipstick.{{ $fuelKey }}" x-on:input="clearFieldError('dipstick_{{ $fuelKey }}')" class="mt-1.5 {{ $inputClass }}">
-                                                </label>
-                                            </div>
-                                        </article>
-                                    @endforeach
-                                </div>
-                            </section>
-
-                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Meter Photos</h3>
-                                <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-                                    @for ($dispenser = 1; $dispenser <= 3; $dispenser++)
-                                        <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dispenser {{ $dispenser }}</p>
-                                            <div class="mt-3 space-y-3">
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Liters Photo</span>
-                                                    <input type="file" accept="image/*" name="dispenser_image_{{ $dispenser }}" x-on:change="setPhoto($event, 'liters', {{ $dispenser }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_liters_{{ $dispenser }}'] ? 'border-error-400' : ''">
-                                                </label>
-                                                <template x-if="photoPreviews.liters[{{ $dispenser }}]">
-                                                    <img x-bind:src="photoPreviews.liters[{{ $dispenser }}]" alt="" class="h-28 w-full rounded-lg border border-gray-200 object-contain dark:border-gray-800">
-                                                </template>
-                                                <label class="block {{ $labelClass }}">
-                                                    <span>Sales Photo</span>
-                                                    <input type="file" accept="image/*" name="dispenser_sales_image_{{ $dispenser }}" x-on:change="setPhoto($event, 'sales', {{ $dispenser }})" class="mt-1.5 {{ $fileClass }}" x-bind:class="fieldErrors['photo_sales_{{ $dispenser }}'] ? 'border-error-400' : ''">
-                                                </label>
-                                                <template x-if="photoPreviews.sales[{{ $dispenser }}]">
-                                                    <img x-bind:src="photoPreviews.sales[{{ $dispenser }}]" alt="" class="h-28 w-full rounded-lg border border-gray-200 object-contain dark:border-gray-800">
-                                                </template>
-                                            </div>
-                                        </article>
-                                    @endfor
                                 </div>
                             </section>
                         </div>
 
-                        <aside class="space-y-5 xl:sticky xl:top-4 xl:self-start">
-                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                        <aside class="space-y-5 xl:self-start">
+                            <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-theme-sm dark:border-gray-800 dark:bg-gray-900 xl:sticky xl:top-0 xl:z-20">
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Live Settlement Preview</h3>
                                         <p class="{{ $captionClass }}">Computed from the current form values.</p>
                                     </div>
                                     <span class="rounded-full px-2.5 py-1 text-theme-xs font-medium" x-bind:class="varianceMeta().badge" x-text="varianceMeta().label"></span>
+                                </div>
+
+                                <div class="mt-4 grid grid-cols-1 gap-3">
+                                    <div class="rounded-xl border border-brand-200 bg-brand-50/70 p-3 dark:border-brand-500/25 dark:bg-brand-500/10">
+                                        <p class="{{ $labelClass }}">Expected Balance</p>
+                                        <p class="mt-1 text-xl font-semibold tabular-nums text-brand-700 dark:text-brand-300" x-text="money(expectedCollection())"></p>
+                                    </div>
+                                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Actual Remitted</p>
+                                        <p class="mt-1 text-xl font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(totalRemitted())"></p>
+                                    </div>
+                                    <div class="rounded-xl border p-3" x-bind:class="variancePreviewClass()">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <p class="text-theme-xs font-medium uppercase">Cash Variance</p>
+                                            <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase" x-bind:class="varianceMeta().badge" x-text="varianceMeta().label"></span>
+                                        </div>
+                                        <p class="mt-1 text-xl font-semibold tabular-nums" x-text="signedMoney(variance())"></p>
+                                    </div>
+                                </div>
+
+                                <div class="mt-4 grid grid-cols-1 gap-2">
+                                    <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Prepared By</p>
+                                        <p class="mt-0.5 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="staffName"></p>
+                                    </div>
+                                    <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Period</p>
+                                        <p class="mt-0.5 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="formPeriodLabel()"></p>
+                                    </div>
+                                    <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Unlocked POS Rows</p>
+                                        <p class="mt-0.5 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="liveSaleCount()"></p>
+                                    </div>
                                 </div>
 
                                 <div class="mt-4 divide-y divide-gray-100 dark:divide-gray-800">
@@ -542,27 +681,49 @@
                                 </article>
                             </div>
 
-                            <template x-if="feedbackText()">
-                                <div class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300" x-text="feedbackText()"></div>
-                            </template>
+                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Shift Details</h3>
+                                <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Prepared By</p>
+                                        <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="details.reading.staff_name || 'Staff'"></p>
+                                    </div>
+                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Period Covered</p>
+                                        <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="dateLabel(details.reading)"></p>
+                                    </div>
+                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Review Status</p>
+                                        <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="statusLabel(details.reading.status)"></p>
+                                    </div>
+                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                        <p class="{{ $labelClass }}">Submitted At</p>
+                                        <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="submittedAt(details.reading)"></p>
+                                    </div>
+                                </div>
+                            </section>
 
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pump Breakdown</h3>
-                                <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                                    <template x-for="pump in pumps" :key="pump.id">
+                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dipstick Monitoring</h3>
+                                <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    <template x-for="row in dipstickRows()" :key="row.key">
                                         <article class="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-                                            <div class="mb-3 flex items-center justify-between">
-                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
-                                                <span class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="pump.fuel"></span>
+                                            <div class="mb-3 flex items-center justify-between gap-3">
+                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="row.label"></p>
+                                                <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">Dipstick</span>
                                             </div>
-                                            <div class="grid grid-cols-2 gap-2">
-                                                <div class="rounded-lg bg-gray-50 p-2 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Sales</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(readingPumpValue(pump.id, 'dispensed_sales'))"></p>
+                                            <div class="space-y-2">
+                                                <div class="flex items-center justify-between gap-3">
+                                                    <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400">Opening</span>
+                                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatLiters(row.opening)"></span>
                                                 </div>
-                                                <div class="rounded-lg bg-gray-50 p-2 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Liters</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatLiters(readingPumpValue(pump.id, 'dispensed_liters'))"></p>
+                                                <div class="flex items-center justify-between gap-3">
+                                                    <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400">Current</span>
+                                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatLiters(row.current)"></span>
+                                                </div>
+                                                <div class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
+                                                    <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400">Movement</span>
+                                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatLiters(row.movement)"></span>
                                                 </div>
                                             </div>
                                         </article>
@@ -570,20 +731,81 @@
                                 </div>
                             </section>
 
+                            <template x-if="feedbackText()">
+                                <div class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300" x-text="feedbackText()"></div>
+                            </template>
+
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Meter Photos</h3>
-                                <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                                    <template x-for="image in details.images" :key="image.image_type + '-' + image.dispenser">
-                                        <button type="button" x-on:click="openLightbox(image.image_url)" class="overflow-hidden rounded-lg border border-gray-200 text-left dark:border-gray-800">
-                                            <img x-bind:src="image.image_url" alt="" class="h-40 w-full bg-gray-50 object-contain dark:bg-gray-950">
-                                            <div class="flex items-center justify-between px-3 py-2">
-                                                <span class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400" x-text="'Dispenser ' + image.dispenser"></span>
-                                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium uppercase text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="image.image_type"></span>
+                                <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                                    <div>
+                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dispenser Meter Review</h3>
+                                        <p class="{{ $captionClass }}">Photos and meter values are grouped exactly by dispenser.</p>
+                                    </div>
+                                    <span class="text-theme-xs font-medium tabular-nums text-gray-500 dark:text-gray-400" x-text="formatLiters(details.reading.total_pump_liters) + ' total liters'"></span>
+                                </div>
+
+                                <div class="mt-4 space-y-4">
+                                    <template x-for="dispenser in dispensers" :key="'details-dispenser-' + dispenser.id">
+                                        <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                            <div class="flex flex-col gap-2 border-b border-gray-100 pb-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+                                                <div>
+                                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="dispenser.label"></p>
+                                                    <p class="text-theme-sm text-gray-500 dark:text-gray-400" x-text="'Pump ' + dispenser.pumps[0].id + ' & Pump ' + dispenser.pumps[1].id"></p>
+                                                </div>
+                                                <div class="flex flex-wrap gap-2">
+                                                    <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium tabular-nums text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="money(detailDispenserSales(dispenser))"></span>
+                                                    <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium tabular-nums text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="formatLiters(detailDispenserLiters(dispenser))"></span>
+                                                </div>
                                             </div>
-                                        </button>
-                                    </template>
-                                    <template x-if="!details.images.length">
-                                        <div class="rounded-lg border border-dashed border-gray-300 p-6 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400 md:col-span-3">No photos found.</div>
+
+                                            <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                                                <div>
+                                                    <p class="{{ $labelClass }}">Liters Photo</p>
+                                                    <template x-if="imageUrl(dispenser.id, 'liters')">
+                                                        <button type="button" x-on:click="openLightbox(imageUrl(dispenser.id, 'liters'))" class="mt-2 block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+                                                            <img x-bind:src="imageUrl(dispenser.id, 'liters')" alt="" class="h-44 w-full object-contain">
+                                                        </button>
+                                                    </template>
+                                                    <template x-if="!imageUrl(dispenser.id, 'liters')">
+                                                        <div class="mt-2 flex h-44 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">No liters photo found.</div>
+                                                    </template>
+                                                </div>
+
+                                                <div>
+                                                    <p class="{{ $labelClass }}">Sales Photo</p>
+                                                    <template x-if="imageUrl(dispenser.id, 'sales')">
+                                                        <button type="button" x-on:click="openLightbox(imageUrl(dispenser.id, 'sales'))" class="mt-2 block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+                                                            <img x-bind:src="imageUrl(dispenser.id, 'sales')" alt="" class="h-44 w-full object-contain">
+                                                        </button>
+                                                    </template>
+                                                    <template x-if="!imageUrl(dispenser.id, 'sales')">
+                                                        <div class="mt-2 flex h-44 items-center justify-center rounded-lg border border-dashed border-gray-300 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">No sales photo found.</div>
+                                                    </template>
+                                                </div>
+                                            </div>
+
+                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                <template x-for="pump in dispenser.pumps" :key="'details-pump-' + pump.id">
+                                                    <article class="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                                                        <div class="mb-3 flex items-center justify-between gap-3">
+                                                            <div>
+                                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
+                                                                <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="pump.fuel"></p>
+                                                            </div>
+                                                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="pump.fuel"></span>
+                                                        </div>
+                                                        <div class="space-y-2">
+                                                            <template x-for="row in pumpDetailRows(pump.id)" :key="row.label">
+                                                                <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2" x-bind:class="row.highlight ? 'bg-gray-50 dark:bg-white/[0.03]' : ''">
+                                                                    <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400" x-text="row.label"></span>
+                                                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="row.value"></span>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </article>
+                                                </template>
+                                            </div>
+                                        </article>
                                     </template>
                                 </div>
                             </section>
@@ -698,8 +920,12 @@
         function shiftReadingsModule(config) {
             return {
                 pumps: config.pumps || [],
+                dispensers: config.dispensers || [],
                 denominations: config.denominations || [],
                 liveSales: config.liveSales || [],
+                staffName: config.staffName || 'Staff',
+                latestReadingLabel: config.latestReadingLabel || '',
+                latestReadingExists: Boolean(config.latestReadingExists),
                 toast: { open: false, message: '', timer: null },
                 modal: null,
                 saving: false,
@@ -733,14 +959,13 @@
                     return date.toISOString().slice(0, 10);
                 },
                 resetForm() {
-                    const prev = config.prevReadings || {};
                     const pumps = {};
 
                     this.pumps.forEach((pump) => {
                         pumps[pump.id] = {
-                            sales_start: Number(prev['p' + pump.id + '_sales'] || 0).toFixed(2),
+                            sales_start: '',
                             sales_end: '',
-                            liters_start: Number(prev['p' + pump.id + '_liters'] || 0).toFixed(2),
+                            liters_start: '',
                             liters_end: ''
                         };
                     });
@@ -755,11 +980,11 @@
                         period_to: this.today(),
                         pumps,
                         dipstick: {
-                            premium_start: Number(prev.dipstick_premium || 0).toFixed(2),
+                            premium_start: '',
                             premium: '',
-                            regular_start: Number(prev.dipstick_regular || 0).toFixed(2),
+                            regular_start: '',
                             regular: '',
-                            diesel_start: Number(prev.dipstick_diesel || 0).toFixed(2),
+                            diesel_start: '',
                             diesel: ''
                         },
                         cash,
@@ -778,6 +1003,51 @@
                 closeForm() {
                     if (this.saving) return;
                     this.modal = null;
+                },
+                stopNumberWheel(event) {
+                    const target = event.target;
+
+                    if (target instanceof HTMLInputElement && target.type === 'number') {
+                        target.blur();
+                    }
+                },
+                formatInputNumber(value) {
+                    return Number(value || 0).toFixed(2);
+                },
+                hasPreviousData() {
+                    const prev = config.prevReadings || {};
+
+                    return this.latestReadingExists && (
+                        this.pumps.some((pump) => Object.prototype.hasOwnProperty.call(prev, 'p' + pump.id + '_sales')
+                            || Object.prototype.hasOwnProperty.call(prev, 'p' + pump.id + '_liters'))
+                        || ['premium', 'regular', 'diesel'].some((fuel) => Object.prototype.hasOwnProperty.call(prev, 'dipstick_' + fuel))
+                    );
+                },
+                fetchPreviousData() {
+                    if (!this.hasPreviousData()) {
+                        this.showNotice('info', 'No latest submitted shift reading is available yet. Enter the opening values manually for this first settlement.');
+                        return;
+                    }
+
+                    const prev = config.prevReadings || {};
+
+                    this.pumps.forEach((pump) => {
+                        if (!this.form.pumps[pump.id]) {
+                            this.form.pumps[pump.id] = { sales_start: '', sales_end: '', liters_start: '', liters_end: '' };
+                        }
+
+                        this.form.pumps[pump.id].sales_start = this.formatInputNumber(prev['p' + pump.id + '_sales']);
+                        this.form.pumps[pump.id].liters_start = this.formatInputNumber(prev['p' + pump.id + '_liters']);
+                        this.clearFieldError('pump' + pump.id + '_sales_start');
+                        this.clearFieldError('pump' + pump.id + '_liters_start');
+                    });
+
+                    ['premium', 'regular', 'diesel'].forEach((fuel) => {
+                        this.form.dipstick[fuel + '_start'] = this.formatInputNumber(prev['dipstick_' + fuel]);
+                        this.clearFieldError('dipstick_' + fuel + '_start');
+                    });
+
+                    this.showNotice('success', 'Opening data auto-filled from the latest submitted reading.');
                 },
                 clearFieldError(field) {
                     delete this.fieldErrors[field];
@@ -826,6 +1096,18 @@
                         maximumFractionDigits: 2
                     });
                 },
+                signedMoney(value) {
+                    const amount = Number(value || 0);
+
+                    if (Math.abs(amount) < 0.01) {
+                        return 'PHP 0.00';
+                    }
+
+                    return (amount < 0 ? '-PHP ' : '+PHP ') + Math.abs(amount).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                },
                 formatLiters(value) {
                     return Number(value || 0).toLocaleString('en-US', {
                         minimumFractionDigits: 2,
@@ -846,6 +1128,15 @@
                 totalPumpLiters() {
                     return this.pumps.reduce((total, pump) => total + this.pumpLiters(pump.id), 0);
                 },
+                findDispenser(id) {
+                    return this.dispensers.find((dispenser) => Number(dispenser.id) === Number(id)) || { pumps: [] };
+                },
+                dispenserSales(id) {
+                    return this.findDispenser(id).pumps.reduce((total, pump) => total + this.pumpSales(pump.id), 0);
+                },
+                dispenserLiters(id) {
+                    return this.findDispenser(id).pumps.reduce((total, pump) => total + this.pumpLiters(pump.id), 0);
+                },
                 saleInPeriod(sale) {
                     if (!sale.created_at || !this.form.period_from || !this.form.period_to) {
                         return true;
@@ -856,6 +1147,14 @@
                     const end = new Date(this.form.period_to + 'T23:59:59');
 
                     return saleDate >= start && saleDate <= end;
+                },
+                formPeriodLabel() {
+                    if (!this.form.period_from || !this.form.period_to) return 'No period selected';
+                    if (this.form.period_from === this.form.period_to) return this.form.period_to;
+                    return this.form.period_from + ' to ' + this.form.period_to;
+                },
+                liveSaleCount() {
+                    return this.liveSales.filter((sale) => this.saleInPeriod(sale)).length.toLocaleString('en-US');
                 },
                 liveAdjustments() {
                     return this.liveSales
@@ -915,6 +1214,19 @@
 
                     return { label: 'Overage', badge: 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400' };
                 },
+                variancePreviewClass() {
+                    const variance = this.variance();
+
+                    if (Math.abs(variance) < 0.01) {
+                        return 'border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-500';
+                    }
+
+                    if (variance < 0) {
+                        return 'border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400';
+                    }
+
+                    return 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400';
+                },
                 previewRows() {
                     const adjustments = this.liveAdjustments();
 
@@ -926,7 +1238,7 @@
                         { label: 'Discounts', value: '-' + this.money(adjustments.discount + adjustments.manualDiscount), className: 'text-error-600 dark:text-error-500' },
                         { label: 'Expected Collection', value: this.money(this.expectedCollection()), className: 'text-brand-600 dark:text-brand-400' },
                         { label: 'Actual Remitted', value: this.money(this.totalRemitted()) },
-                        { label: 'Cash Variance', value: (this.variance() > 0 ? '+' : '') + this.money(this.variance()), className: this.variance() < -0.01 ? 'text-error-600 dark:text-error-500' : 'text-success-600 dark:text-success-500' }
+                        { label: 'Cash Variance', value: this.signedMoney(this.variance()), className: this.variance() < -0.01 ? 'text-error-600 dark:text-error-500' : 'text-success-600 dark:text-success-500' }
                     ];
                 },
                 validatePaymentRows(type) {
@@ -986,7 +1298,7 @@
                         }
                     }
 
-                    for (const dispenser of [1, 2, 3]) {
+                    for (const dispenser of this.dispensers.map((item) => item.id)) {
                         for (const type of ['liters', 'sales']) {
                             if (!this.photoPreviews[type][dispenser]) {
                                 this.setFieldError('photo_' + type + '_' + dispenser);
@@ -1138,6 +1450,63 @@
                 readingPumpValue(id, suffix) {
                     const reading = this.details.reading || {};
                     return Number(reading['pump' + id + '_' + suffix] || 0);
+                },
+                readingField(field) {
+                    const reading = this.details.reading || {};
+                    return Number(reading[field] || 0);
+                },
+                submittedAt(reading) {
+                    if (!reading || !reading.created_at) return '-';
+
+                    return new Date(String(reading.created_at).replace(' ', 'T')).toLocaleString('en-US', {
+                        month: 'short',
+                        day: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                },
+                imageUrl(dispenser, type) {
+                    const image = (this.details.images || []).find((item) => Number(item.dispenser) === Number(dispenser)
+                        && String(item.image_type || '').toLowerCase() === String(type || '').toLowerCase());
+
+                    return image ? (image.image_url || '') : '';
+                },
+                detailDispenserSales(dispenser) {
+                    return (dispenser.pumps || []).reduce((total, pump) => total + this.readingPumpValue(pump.id, 'dispensed_sales'), 0);
+                },
+                detailDispenserLiters(dispenser) {
+                    return (dispenser.pumps || []).reduce((total, pump) => total + this.readingPumpValue(pump.id, 'dispensed_liters'), 0);
+                },
+                pumpDetailRows(id) {
+                    return [
+                        { label: 'Open Sales', value: this.money(this.readingField('pump' + id + '_sales_start')) },
+                        { label: 'Close Sales', value: this.money(this.readingField('pump' + id + '_sales_end')) },
+                        { label: 'Total Sales', value: this.money(this.readingPumpValue(id, 'dispensed_sales')), highlight: true },
+                        { label: 'Open Liters', value: this.formatLiters(this.readingField('pump' + id + '_liters_start')) },
+                        { label: 'Close Liters', value: this.formatLiters(this.readingField('pump' + id + '_liters_end')) },
+                        { label: 'Total Liters', value: this.formatLiters(this.readingPumpValue(id, 'dispensed_liters')), highlight: true }
+                    ];
+                },
+                dipstickRows() {
+                    const fuels = [
+                        { key: 'premium', label: 'Premium' },
+                        { key: 'regular', label: 'Regular / Unleaded' },
+                        { key: 'diesel', label: 'Diesel' }
+                    ];
+
+                    return fuels.map((fuel) => {
+                        const opening = this.readingField('dipstick_' + fuel.key + '_start');
+                        const current = this.readingField('dipstick_' + fuel.key);
+
+                        return {
+                            key: fuel.key,
+                            label: fuel.label,
+                            opening,
+                            current,
+                            movement: current - opening
+                        };
+                    });
                 },
                 financialRows() {
                     const reading = this.details.reading || {};
