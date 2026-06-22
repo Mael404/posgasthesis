@@ -349,31 +349,40 @@
 
                         <div id="viewAdminFeedback" class="hidden rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-300"></div>
 
-                        <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(0,0.82fr)]">
+                        <div class="grid grid-cols-1 gap-5">
                             <section class="min-w-0 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pump Meter & Photos</h3>
                                         <p class="{{ $captionClass }}">Three dispenser blocks, two pumps each.</p>
                                     </div>
-                                    <div class="text-right">
+                                    <div class="text-left sm:text-right">
                                         <p id="viewTotalSales" class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90"></p>
                                         <p id="viewTotalLiters" class="text-theme-xs tabular-nums text-gray-500 dark:text-gray-400"></p>
                                     </div>
                                 </div>
-                                <div id="pumpCardsContainer" class="grid grid-cols-1 gap-3 lg:grid-cols-3"></div>
+                                <div id="pumpCardsContainer" class="space-y-4"></div>
                                 <div id="dipstickSummaryContainer" class="mt-3"></div>
                             </section>
-
-                            <aside class="min-w-0 space-y-4">
-                                <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                    <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Financial Reconciliation</h3>
-                                    <div id="financialCalcBody" class="mt-4 divide-y divide-gray-100 dark:divide-gray-800"></div>
-                                </section>
-                            </aside>
                         </div>
                     </div>
                 </div>
+                <button id="detailsFinancialButton" type="button" class="{{ $primaryButtonClass }} absolute bottom-4 right-4 z-20 hidden h-11 px-4 shadow-theme-lg sm:bottom-5 sm:right-5" onclick="openFinancialModal()">View Financial Reconciliation</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="financialModal" data-reconciliation-modal class="fixed inset-0 z-[100250] hidden items-center justify-center overflow-y-auto bg-gray-900/60 p-4 backdrop-blur-sm">
+        <div class="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+            <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Financial Reconciliation</h2>
+                    <p id="financialSubtitle" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400"></p>
+                </div>
+                <button type="button" class="{{ $buttonClass }}" data-close-modal="#financialModal">Close</button>
+            </div>
+            <div class="max-h-[75vh] overflow-y-auto p-5 custom-scrollbar">
+                <div id="financialCalcBody" class="divide-y divide-gray-100 dark:divide-gray-800"></div>
             </div>
         </div>
     </div>
@@ -713,6 +722,7 @@
             document.getElementById('detailsLoadingState').classList.remove('hidden');
             document.getElementById('detailsErrorState').classList.add('hidden');
             document.getElementById('detailsContent').classList.add('hidden');
+            document.getElementById('detailsFinancialButton').classList.add('hidden');
         }
 
         function showDetailsError(message) {
@@ -721,12 +731,14 @@
             errorState.classList.remove('hidden');
             document.getElementById('detailsLoadingState').classList.add('hidden');
             document.getElementById('detailsContent').classList.add('hidden');
+            document.getElementById('detailsFinancialButton').classList.add('hidden');
         }
 
         function showDetailsContent() {
             document.getElementById('detailsLoadingState').classList.add('hidden');
             document.getElementById('detailsErrorState').classList.add('hidden');
             document.getElementById('detailsContent').classList.remove('hidden');
+            document.getElementById('detailsFinancialButton').classList.remove('hidden');
         }
 
         function imageTypeMatches(imageType, expectedType) {
@@ -751,17 +763,17 @@
 
             if (!matches.length) {
                 return `
-                    <div class="flex min-h-[78px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 text-center text-theme-xs text-gray-400 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-500">
+                    <div class="flex min-h-52 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 text-center text-theme-xs text-gray-400 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-500 sm:min-h-60 xl:min-h-72">
                         No ${esc(label)} photo
                     </div>
                 `;
             }
 
             return `
-                <div class="grid grid-cols-${matches.length > 1 ? '2' : '1'} gap-1">
+                <div class="grid grid-cols-${matches.length > 1 ? '2' : '1'} gap-2">
                     ${matches.map((image, index) => `
-                        <button type="button" class="group relative block min-h-[78px] overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800" data-lightbox-url="${esc(image.image_url)}" onclick="openLightbox(this.dataset.lightboxUrl)">
-                            <img src="${esc(image.image_url)}" alt="${esc(label)} meter photo ${index + 1}" class="h-[78px] w-full object-cover transition group-hover:scale-[1.02]">
+                        <button type="button" class="group relative block overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950" data-lightbox-url="${esc(image.image_url)}" onclick="openLightbox(this.dataset.lightboxUrl)">
+                            <img src="${esc(image.image_url)}" alt="${esc(label)} meter photo ${index + 1}" class="h-52 w-full object-contain p-1 transition group-hover:scale-[1.02] sm:h-60 xl:h-72">
                             <span class="absolute bottom-1 left-1 rounded bg-gray-950/70 px-2 py-0.5 text-[10px] font-medium text-white">${esc(label)}${matches.length > 1 ? ' ' + (index + 1) : ''}</span>
                         </button>
                     `).join('')}
@@ -774,12 +786,12 @@
             const caption = phase === 'opening' ? 'Before shift' : 'After shift';
 
             return `
-                <div class="rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-white/[0.02]">
+                <div class="rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
                     <div class="flex items-center justify-between gap-2">
                         <span class="text-theme-xs font-semibold uppercase text-gray-600 dark:text-gray-300">${phaseLabel}</span>
                         <span class="text-[11px] text-gray-400 dark:text-gray-500">${caption}</span>
                     </div>
-                    <div class="mt-2 grid grid-cols-2 gap-2">
+                    <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                         ${imageSlot(images, dispenser, `${phase}_liters`, 'Liters')}
                         ${imageSlot(images, dispenser, `${phase}_sales`, 'Sales')}
                     </div>
@@ -801,7 +813,7 @@
                         <span class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pump ${pump}</span>
                         <span class="rounded-full bg-gray-100 px-2 py-0.5 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">${pumpFuel(pump)}</span>
                     </div>
-                    <div class="grid grid-cols-3 gap-2 text-theme-xs">
+                    <div class="grid grid-cols-2 gap-2 text-theme-xs sm:grid-cols-3">
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Open Sales</p>
                             <p class="mt-0.5 font-medium tabular-nums text-gray-800 dark:text-white/90">${peso(salesStart)}</p>
@@ -852,18 +864,20 @@
                 const pumpB = dispenser * 2;
 
                 html += `
-                    <article class="min-w-0 rounded-xl border border-gray-200 p-3 dark:border-gray-800">
-                        <div class="mb-3 flex items-center justify-between">
+                    <article class="min-w-0 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                        <div class="mb-4 flex items-center justify-between gap-3">
                             <h4 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Dispenser ${dispenser}</h4>
                             <span class="text-theme-xs text-gray-500 dark:text-gray-400">Pumps ${pumpA}-${pumpB}</span>
                         </div>
-                        <div class="mb-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
-                            ${photoPhaseSlot(images, dispenser, 'opening')}
-                            ${photoPhaseSlot(images, dispenser, 'closing')}
-                        </div>
-                        <div class="space-y-3">
-                            ${pumpLine(reading, pumpA)}
-                            ${pumpLine(reading, pumpB)}
+                        <div class="space-y-4">
+                            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                ${photoPhaseSlot(images, dispenser, 'opening')}
+                                ${photoPhaseSlot(images, dispenser, 'closing')}
+                            </div>
+                            <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                ${pumpLine(reading, pumpA)}
+                                ${pumpLine(reading, pumpB)}
+                            </div>
                         </div>
                     </article>
                 `;
@@ -1042,6 +1056,10 @@
             ].join('');
         }
 
+        function openFinancialModal() {
+            openModal('#financialModal');
+        }
+
         function fillDetails(data) {
             const reading = data.reading || {};
             const images = Array.isArray(data.meter_images) ? data.meter_images : [];
@@ -1049,8 +1067,10 @@
             const row = reconciliationRows[reading.id] || {};
             const variance = varianceState(reading.cash_variance);
             const feedback = [reading.rejection_reason, reading.admin_remarks].filter(Boolean);
+            const subtitle = `${statusLabel(reading.status)} - ${dateLabel(reading)}`;
 
-            document.getElementById('detailsSubtitle').textContent = `${statusLabel(reading.status)} - ${dateLabel(reading)}`;
+            document.getElementById('detailsSubtitle').textContent = subtitle;
+            document.getElementById('financialSubtitle').textContent = subtitle;
             document.getElementById('viewStaff').textContent = row.staff || reading.staff_name || 'Staff';
             document.getElementById('viewDate').textContent = dateLabel(reading);
             document.getElementById('viewTotalRemitted').innerHTML = peso(reading.total_remitted);
@@ -1240,7 +1260,7 @@
                     return;
                 }
 
-                ['#lightboxModal', '#detailsModal', '#remarksModal', '#approveModal', '#rejectModal', '#voidApprovalModal'].forEach(closeModal);
+                ['#lightboxModal', '#detailsModal', '#financialModal', '#remarksModal', '#approveModal', '#rejectModal', '#voidApprovalModal'].forEach(closeModal);
             });
         });
     </script>

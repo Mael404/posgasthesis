@@ -657,7 +657,7 @@
 
         <div x-show="modal === 'details'" x-cloak class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
             <div class="fixed inset-0 bg-gray-950/75 backdrop-blur-md" x-on:click="closeDetails()"></div>
-            <div class="relative w-full max-w-6xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+            <div class="relative w-full max-w-7xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
                 <button type="button" x-on:click="closeDetails()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close settlement details">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
@@ -774,104 +774,121 @@
                                                 </div>
                                             </div>
 
-                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                                <template x-for="photoPhase in meterPhotoPhases" :key="'details-photo-phase-' + dispenser.id + '-' + photoPhase.key">
-                                                    <section class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
-                                                        <div class="mb-3">
-                                                            <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="photoPhase.label + ' Photos'"></p>
-                                                            <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="photoPhase.caption"></p>
-                                                        </div>
-
-                                                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                            <template x-for="metric in meterPhotoMetrics" :key="'details-photo-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key">
-                                                                <div>
-                                                                    <p class="{{ $labelClass }}" x-text="metric.label"></p>
-                                                                    <template x-if="photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
-                                                                        <div class="mt-2 grid grid-cols-2 gap-2">
-                                                                            <template x-for="(url, index) in photoUrls(dispenser.id, photoPhase.key + '_' + metric.key)" :key="'details-photo-url-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key + '-' + index">
-                                                                                <button type="button" x-on:click="openLightbox(url)" class="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
-                                                                                    <img x-bind:src="url" alt="" class="h-28 w-full object-contain">
-                                                                                </button>
-                                                                            </template>
-                                                                        </div>
-                                                                    </template>
-                                                                    <template x-if="!photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
-                                                                        <div class="mt-2 flex h-28 items-center justify-center rounded-lg border border-dashed border-gray-300 px-2 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400" x-text="'No ' + photoPhase.label.toLowerCase() + ' ' + metric.label.toLowerCase() + ' photo found.'"></div>
-                                                                    </template>
-                                                                </div>
-                                                            </template>
-                                                        </div>
-                                                    </section>
-                                                </template>
-                                            </div>
-
-                                            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                                <template x-for="pump in dispenser.pumps" :key="'details-pump-' + pump.id">
-                                                    <article class="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-                                                        <div class="mb-3 flex items-center justify-between gap-3">
-                                                            <div>
-                                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
-                                                                <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="pump.fuel"></p>
+                                            <div class="mt-4 space-y-4">
+                                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                    <template x-for="photoPhase in meterPhotoPhases" :key="'details-photo-phase-' + dispenser.id + '-' + photoPhase.key">
+                                                        <section class="rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                                            <div class="mb-3">
+                                                                <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="photoPhase.label + ' Photos'"></p>
+                                                                <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="photoPhase.caption"></p>
                                                             </div>
-                                                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="pump.fuel"></span>
-                                                        </div>
-                                                        <div class="space-y-2">
-                                                            <template x-for="row in pumpDetailRows(pump.id)" :key="row.label">
-                                                                <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2" x-bind:class="row.highlight ? 'bg-gray-50 dark:bg-white/[0.03]' : ''">
-                                                                    <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400" x-text="row.label"></span>
-                                                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="row.value"></span>
+
+                                                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                                <template x-for="metric in meterPhotoMetrics" :key="'details-photo-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key">
+                                                                    <div>
+                                                                        <p class="{{ $labelClass }}" x-text="metric.label"></p>
+                                                                        <template x-if="photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
+                                                                            <div class="mt-2 grid grid-cols-2 gap-2">
+                                                                                <template x-for="(url, index) in photoUrls(dispenser.id, photoPhase.key + '_' + metric.key)" :key="'details-photo-url-' + dispenser.id + '-' + photoPhase.key + '-' + metric.key + '-' + index">
+                                                                                    <button type="button" x-on:click="openLightbox(url)" class="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+                                                                                        <img x-bind:src="url" alt="" class="h-52 w-full object-contain p-1 sm:h-60 xl:h-72">
+                                                                                    </button>
+                                                                                </template>
+                                                                            </div>
+                                                                        </template>
+                                                                        <template x-if="!photoUrls(dispenser.id, photoPhase.key + '_' + metric.key).length">
+                                                                            <div class="mt-2 flex min-h-52 items-center justify-center rounded-lg border border-dashed border-gray-300 px-2 text-center text-theme-xs text-gray-500 dark:border-gray-700 dark:text-gray-400 sm:min-h-60 xl:min-h-72" x-text="'No ' + photoPhase.label.toLowerCase() + ' ' + metric.label.toLowerCase() + ' photo found.'"></div>
+                                                                        </template>
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                        </section>
+                                                    </template>
+                                                </div>
+
+                                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                    <template x-for="pump in dispenser.pumps" :key="'details-pump-' + pump.id">
+                                                        <article class="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                                                            <div class="mb-3 flex items-center justify-between gap-3">
+                                                                <div>
+                                                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
+                                                                    <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="pump.fuel"></p>
                                                                 </div>
-                                                            </template>
-                                                        </div>
-                                                    </article>
-                                                </template>
+                                                                <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="pump.fuel"></span>
+                                                            </div>
+                                                            <div class="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
+                                                                <template x-for="row in pumpDetailRows(pump.id)" :key="row.label">
+                                                                    <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2" x-bind:class="row.highlight ? 'bg-gray-50 dark:bg-white/[0.03]' : ''">
+                                                                        <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400" x-text="row.label"></span>
+                                                                        <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="row.value"></span>
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                        </article>
+                                                    </template>
+                                                </div>
                                             </div>
                                         </article>
                                     </template>
                                 </div>
                             </section>
-
-                            <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Financial Reconciliation</h3>
-                                <div class="mt-3 divide-y divide-gray-100 dark:divide-gray-800">
-                                    <template x-for="row in financialRows()" :key="row.key">
-                                        <details class="group">
-                                            <summary class="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-3 [&::-webkit-details-marker]:hidden">
-                                                <span class="text-theme-sm text-gray-600 dark:text-gray-400" x-text="row.label"></span>
-                                                <span class="text-theme-sm font-semibold tabular-nums" x-bind:class="row.className" x-text="row.display"></span>
-                                                <span class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition group-open:rotate-180 dark:border-gray-800 dark:text-gray-400">
-                                                    <svg class="size-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                                </span>
-                                            </summary>
-                                            <div class="pb-3">
-                                                <template x-if="row.items.length">
-                                                    <div class="overflow-x-auto rounded-lg border border-gray-100 dark:border-gray-800">
-                                                        <table class="min-w-[560px] w-full">
-                                                            <tbody>
-                                                                <template x-for="(item, index) in row.items" :key="index">
-                                                                    <tr class="border-t border-gray-100 first:border-t-0 dark:border-gray-800">
-                                                                        <template x-for="cell in detailItemCells(row.key, item)" :key="cell.label">
-                                                                            <td class="px-3 py-2 align-top text-theme-xs text-gray-700 dark:text-gray-300">
-                                                                                <p class="text-[11px] font-medium uppercase text-gray-400" x-text="cell.label"></p>
-                                                                                <p class="mt-0.5 break-words" x-bind:class="cell.className" x-text="cell.value"></p>
-                                                                            </td>
-                                                                        </template>
-                                                                    </tr>
-                                                                </template>
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </template>
-                                                <template x-if="!row.items.length">
-                                                    <div class="rounded-lg bg-gray-50 px-3 py-4 text-center text-theme-xs text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">No breakdown records.</div>
-                                                </template>
-                                            </div>
-                                        </details>
-                                    </template>
-                                </div>
-                            </section>
                         </div>
                     </template>
+                </div>
+                <button type="button" x-show="details.reading && !details.loading && !details.error" x-cloak x-on:click="openFinancialDetails()" class="{{ $primaryButtonClass }} absolute bottom-4 right-4 z-20 h-11 px-4 shadow-theme-lg sm:bottom-5 sm:right-5">View Financial Reconciliation</button>
+            </div>
+        </div>
+
+        <div x-show="modal === 'financial'" x-cloak class="fixed inset-0 z-[100030] flex items-center justify-center overflow-y-auto p-4">
+            <div class="fixed inset-0 bg-gray-950/75 backdrop-blur-md" x-on:click="closeFinancialDetails()"></div>
+            <div class="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                <button type="button" x-on:click="closeFinancialDetails()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close financial reconciliation">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+
+                <div class="border-b border-gray-100 bg-gray-50/70 p-5 pr-14 dark:border-gray-800 dark:bg-white/[0.02] md:p-6 md:pr-16">
+                    <p class="{{ $labelClass }}">Settlement Details</p>
+                    <h2 class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">Financial Reconciliation</h2>
+                    <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400" x-text="detailsTitle()"></p>
+                </div>
+
+                <div class="max-h-[76vh] overflow-y-auto p-5 custom-scrollbar md:p-6">
+                    <div class="divide-y divide-gray-100 dark:divide-gray-800">
+                        <template x-for="row in financialRows()" :key="row.key">
+                            <details class="group">
+                                <summary class="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-3 [&::-webkit-details-marker]:hidden">
+                                    <span class="text-theme-sm text-gray-600 dark:text-gray-400" x-text="row.label"></span>
+                                    <span class="text-theme-sm font-semibold tabular-nums" x-bind:class="row.className" x-text="row.display"></span>
+                                    <span class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition group-open:rotate-180 dark:border-gray-800 dark:text-gray-400">
+                                        <svg class="size-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </span>
+                                </summary>
+                                <div class="pb-3">
+                                    <template x-if="row.items.length">
+                                        <div class="overflow-x-auto rounded-lg border border-gray-100 dark:border-gray-800">
+                                            <table class="min-w-[560px] w-full">
+                                                <tbody>
+                                                    <template x-for="(item, index) in row.items" :key="index">
+                                                        <tr class="border-t border-gray-100 first:border-t-0 dark:border-gray-800">
+                                                            <template x-for="cell in detailItemCells(row.key, item)" :key="cell.label">
+                                                                <td class="px-3 py-2 align-top text-theme-xs text-gray-700 dark:text-gray-300">
+                                                                    <p class="text-[11px] font-medium uppercase text-gray-400" x-text="cell.label"></p>
+                                                                    <p class="mt-0.5 break-words" x-bind:class="cell.className" x-text="cell.value"></p>
+                                                                </td>
+                                                            </template>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
+                                    <template x-if="!row.items.length">
+                                        <div class="rounded-lg bg-gray-50 px-3 py-4 text-center text-theme-xs text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">No breakdown records.</div>
+                                    </template>
+                                </div>
+                            </details>
+                        </template>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1427,6 +1444,16 @@
                 closeDetails() {
                     this.modal = null;
                     this.details = { loading: false, error: '', reading: null, images: [], breakdowns: {} };
+                },
+                openFinancialDetails() {
+                    if (!this.details.reading) {
+                        return;
+                    }
+
+                    this.modal = 'financial';
+                },
+                closeFinancialDetails() {
+                    this.modal = this.details.reading ? 'details' : null;
                 },
                 detailsTitle() {
                     if (this.details.loading) return 'Loading...';
