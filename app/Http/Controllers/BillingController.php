@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -82,6 +83,84 @@ class BillingController extends Controller
             'summaryInvoices' => $summaryInvoices,
             'acknowledgementReceipts' => $acknowledgementReceipts,
             'canManageBilling' => $canManageBilling,
+            'missingBillingTables' => $missingBillingTables,
+            'activeBillingTab' => $activeBillingTab,
+            'invoiceSearch' => $invoiceSearch,
+            'perPage' => $perPage,
+            'perPageOptions' => $perPageOptions,
+        ]);
+    }
+
+    public function staffIndex(Request $request): View
+    {
+        $missingBillingTables = $this->missingTables(['customers', 'customer_ledgers', 'invoices']);
+        $perPageOptions = [10, 50, 100];
+        $perPage = (int) $request->query('per_page', 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
+        $activeBillingTab = in_array($request->query('tab'), ['unpaid', 'partial'], true)
+            ? $request->query('tab')
+            : 'unpaid';
+        $invoiceSearch = trim((string) $request->query('invoice_search', ''));
+        $summaryInvoices = collect();
+        $invoices = new LengthAwarePaginator(
+            collect(),
+            0,
+            $perPage,
+            1,
+            [
+                'path' => $request->url(),
+                'pageName' => 'invoice_page',
+            ]
+        );
+
+        if ($missingBillingTables === []) {
+            $summaryInvoices = $this->billingInvoiceQuery()
+                ->orderByDesc('invoices.created_at')
+                ->get()
+                ->map(fn ($invoice) => $this->refreshInvoiceTotalsFromLedger($invoice, null, true, true))
+                ->filter(fn ($invoice) => in_array($invoice->status, ['Unpaid', 'Partial'], true))
+                ->values();
+
+            $filteredInvoices = $summaryInvoices
+                ->filter(fn ($invoice) => $activeBillingTab === 'partial'
+                    ? $invoice->status === 'Partial'
+                    : $invoice->status === 'Unpaid')
+                ->values();
+
+            if ($invoiceSearch !== '') {
+                $search = strtolower($invoiceSearch);
+
+                $filteredInvoices = $filteredInvoices
+                    ->filter(function ($invoice) use ($search) {
+                        return str_contains(strtolower((string) ($invoice->invoice_number ?? '')), $search)
+                            || str_contains(strtolower((string) ($invoice->business_name ?? '')), $search)
+                            || str_contains(strtolower((string) ($invoice->owner_name ?? '')), $search);
+                    })
+                    ->values();
+            }
+
+            $total = $filteredInvoices->count();
+            $page = max((int) $request->query('invoice_page', 1), 1);
+            $lastPage = max((int) ceil($total / $perPage), 1);
+            $page = min($page, $lastPage);
+
+            $invoices = new LengthAwarePaginator(
+                $filteredInvoices->slice(($page - 1) * $perPage, $perPage)->values(),
+                $total,
+                $perPage,
+                $page,
+                [
+                    'path' => $request->url(),
+                    'pageName' => 'invoice_page',
+                ]
+            );
+            $invoices->appends($request->except('invoice_page'));
+        }
+
+        return view('pages.staff.billing', [
+            'title' => 'Billing',
+            'invoices' => $invoices,
+            'summaryInvoices' => $summaryInvoices,
             'missingBillingTables' => $missingBillingTables,
             'activeBillingTab' => $activeBillingTab,
             'invoiceSearch' => $invoiceSearch,
@@ -531,7 +610,9 @@ class BillingController extends Controller
 
         $unbilledCarryOver = $this->moneyValue((float) $invoice->previous_balance - $rolledTotal);
         $printSignatories = $this->billingPrintSignatories((int) $invoice->id);
-        $signatorySaveUrl = route('admin.billing.print.signatories', $invoice->id);
+        $signatorySaveUrl = request()->routeIs('staff.billing.*')
+            ? route('staff.billing.print.signatories', $invoice->id)
+            : route('admin.billing.print.signatories', $invoice->id);
         $signatorySignedAt = $printSignatories->signed_at ?? now();
         $title = $invoice->invoice_number . ' - Billing Statement';
 

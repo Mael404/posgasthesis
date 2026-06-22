@@ -282,9 +282,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
         });
 
-        Route::get('/billing', function () {
-            return view('pages.staff.billing', ['title' => 'Billing']);
-        })->name('billing.index');
+        Route::get('/billing', [BillingController::class, 'staffIndex'])->name('billing.index');
 
         Route::get('/billing/print/{id}', [BillingController::class, 'printInvoice'])->name('billing.print');
         Route::post('/billing/print/{id}/signatories', [BillingController::class, 'savePrintInvoiceSignatories'])->name('billing.print.signatories');
