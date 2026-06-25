@@ -293,6 +293,15 @@ class StaffPumpController extends Controller
                 }
 
                 [$standardPrice, $appliedPrice] = $this->salePrices($fuelType, $pricingCustomer, $validated);
+                $originalPaymentType = $sale->payment_type === 'credit' ? 'credit' : 'walkin';
+                $samePricingContext = $paymentType === $originalPaymentType
+                    && $fuelType === $sale->fuel_type
+                    && (int) ($newCustomerId ?? 0) === (int) ($sale->customer_id ?? 0);
+
+                if ($samePricingContext && (float) ($validated['price'] ?? 0) > 0) {
+                    $appliedPrice = round((float) $validated['price'], 2);
+                }
+
                 [$totalAmount, $autoDiscount, $totalDiscount, $totalSurcharge] = $this->saleTotals(
                     $liters,
                     $standardPrice,

@@ -172,10 +172,46 @@
         $fuelSaleItems = $recentItems->reject(fn ($sale) => strtolower((string) ($sale->payment_type ?? '')) === 'collection');
         $collectionItems = $recentItems->filter(fn ($sale) => (string) ($sale->payment_type ?? '') === 'Collection');
         $pendingCollections = $collectionItems->filter(fn ($sale) => empty($sale->customer_payment_posted_at) && empty($sale->customer_payment_voided_at) && empty($sale->locked_by_shift_reading_id));
+        $editableSales = $fuelSaleItems->mapWithKeys(function ($sale) {
+            return [(string) $sale->id => [
+                'id' => (int) $sale->id,
+                'pump_id' => (int) $sale->pump_id,
+                'fuel_type' => $sale->fuel_type,
+                'payment_type' => $sale->payment_type,
+                'customer_id' => $sale->customer_id ? (int) $sale->customer_id : null,
+                'customer_name' => $sale->customer_name,
+                'plate_no' => $sale->plate_no,
+                'liters' => (float) $sale->liters,
+                'price_applied' => (float) $sale->price_applied,
+                'amount' => (float) $sale->amount,
+                'manual_discount' => (float) ($sale->manual_discount ?? 0),
+                'surcharge' => (float) ($sale->surcharge ?? 0),
+                'or_number' => $sale->or_number,
+            ]];
+        });
     @endphp
 
     <style>
         [x-cloak] { display: none !important; }
+
+        .sale-transaction-modal .sale-modal-control {
+            height: 2.75rem;
+            min-height: 2.75rem;
+            min-width: 0;
+            font-size: 0.9375rem;
+            line-height: 1.375rem;
+        }
+
+        .sale-transaction-modal .sale-modal-affix {
+            height: 2.75rem;
+            font-size: 0.9375rem;
+        }
+
+        .sale-transaction-modal .sale-modal-digital {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.025em;
+        }
     </style>
 
     <x-common.page-breadcrumb pageTitle="Pump Station" />
@@ -185,6 +221,7 @@
             pumps: @js($pumps),
             customers: @js($customerPayload),
             prices: @js($prices),
+            editableSales: @js($editableSales),
             routes: {
                 store: @js(route('staff.pump.store')),
                 updateTemplate: @js(route('staff.pump.update', ['id' => '__ID__'])),
@@ -411,20 +448,6 @@
                                         $printCustomerLabel = $walkinName . ($walkinPlate ? ' / Plate: ' . $walkinPlate : '');
                                     }
 
-                                    $editPayload = [
-                                        'id' => (int) $sale->id,
-                                        'pump_id' => (int) $sale->pump_id,
-                                        'fuel_type' => $sale->fuel_type,
-                                        'payment_type' => $sale->payment_type,
-                                        'customer_id' => $sale->customer_id ? (int) $sale->customer_id : null,
-                                        'customer_name' => $sale->customer_name,
-                                        'plate_no' => $sale->plate_no,
-                                        'liters' => (float) $sale->liters,
-                                        'price_applied' => (float) $sale->price_applied,
-                                        'manual_discount' => (float) ($sale->manual_discount ?? 0),
-                                        'surcharge' => (float) ($sale->surcharge ?? 0),
-                                        'or_number' => $sale->or_number,
-                                    ];
                                 @endphp
                                 <tr :class="selectedIds.includes({{ (int) $sale->id }}) ? 'bg-brand-50/60 dark:bg-brand-500/10' : ''">
                                     <td class="px-5 py-4 text-center align-middle">
@@ -514,7 +537,7 @@
                                             <span class="inline-flex h-9 items-center rounded-lg bg-gray-100 px-3 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">Locked</span>
                                         @else
                                             <div class="flex flex-wrap gap-2">
-                                                <button type="button" class="{{ $smallButtonClass }}" x-on:click='openEditSale(@js($editPayload))'>Edit</button>
+                                                <button type="button" class="{{ $smallButtonClass }}" x-on:click="openEditSale(editableSales[{{ (int) $sale->id }}])">Edit</button>
                                                 <button type="button" class="{{ $dangerButtonClass }}" x-on:click="voidSale({{ (int) $sale->id }})">Void</button>
                                             </div>
                                         @endif
@@ -543,72 +566,70 @@
         </section>
 
         <template x-teleport="body">
-            <div x-show="saleModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-y-auto bg-gray-950/75 p-4 backdrop-blur-md sm:p-6">
-                <div x-on:click.outside="if (!feedbackActive()) closeSaleModal()" class="w-full max-w-5xl overflow-hidden rounded-2xl border bg-white shadow-2xl dark:bg-gray-900" :class="fuelTheme(sale.fuel_type).modalBorder">
-                    <div class="h-1.5" :class="fuelTheme(sale.fuel_type).bar"></div>
-
-                    <div class="flex items-start justify-between gap-4 border-b px-5 py-4" :class="fuelTheme(sale.fuel_type).header">
-                        <div>
-                            <p class="{{ $labelClass }}" x-text="sale.id ? 'Edit Transaction' : 'New Transaction'"></p>
-                            <h2 class="mt-2 flex flex-wrap items-center gap-2 text-xl font-semibold text-gray-800 dark:text-white/90">
-                                <span x-text="sale.pumpLabel || 'Pump'"></span>
-                                <span class="text-gray-400">/</span>
-                                <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="fuelTheme(sale.fuel_type).badge" x-text="sale.fuel_type || 'Fuel'"></span>
+            <div x-show="saleModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-hidden bg-gray-950/75 p-2 backdrop-blur-md sm:p-4">
+                <div
+                    x-on:click.outside="if (!feedbackActive()) closeSaleModal()"
+                    class="sale-transaction-modal flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 max-w-6xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:rounded-2xl">
+                    <div class="flex shrink-0 items-start justify-between gap-3 px-4 py-3 text-white sm:px-5 sm:py-4" :class="fuelTheme(sale.fuel_type).header">
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-white/75 sm:text-xs" x-text="sale.id ? 'Edit Transaction' : 'New Transaction'"></p>
+                            <h2 class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-lg font-semibold sm:gap-2 sm:text-xl">
+                                <span class="truncate" x-text="sale.pumpLabel || 'Pump'"></span>
+                                <span class="text-white/55">/</span>
+                                <span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold sm:text-sm" :class="fuelTheme(sale.fuel_type).badge" x-text="sale.fuel_type || 'Fuel'"></span>
                             </h2>
-                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400" x-text="sale.mode === 'credit' ? 'Charge this transaction to a customer account.' : 'Record a walk-in transaction.'"></p>
+                            <p class="mt-1 hidden truncate text-sm text-white/80 sm:block" x-text="sale.mode === 'credit' ? 'Charge this transaction to a customer account.' : 'Record a walk-in transaction.'"></p>
                         </div>
-                        <button type="button" x-on:click="closeSaleModal" class="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
+                        <button type="button" x-on:click="closeSaleModal" class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/85 transition hover:bg-white/20 hover:text-white sm:size-10" aria-label="Close transaction modal">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <path d="m6.75 6.75 10.5 10.5M17.25 6.75 6.75 17.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                             </svg>
                         </button>
                     </div>
 
-                    <form x-on:submit.prevent="submitSale" class="max-h-[calc(100vh-8rem)] overflow-y-auto p-5">
-                    <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-4">
-                        <div class="rounded-xl border p-3" :class="fuelTheme(sale.fuel_type).summary">
-                            <p class="flex items-center gap-2 text-theme-xs font-medium uppercase" :class="fuelTheme(sale.fuel_type).labelText">
-                                <span class="h-2 w-2 rounded-full" :class="fuelTheme(sale.fuel_type).dot"></span>
-                                Pump
-                            </p>
-                            <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">
+                    <form x-on:submit.prevent="submitSale" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:p-4 lg:p-5">
+                    <div class="mb-4 grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
+                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Pump</p>
+                            <p class="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-white/90 sm:text-base">
                                 <span x-text="sale.pumpLabel || 'Pump'"></span>
                                 <span class="text-gray-400">/</span>
                                 <span x-text="sale.fuel_type || 'Fuel'"></span>
                             </p>
                         </div>
-                        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="{{ $labelClass }}">Customer</p>
-                            <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="sale.mode === 'credit' ? (selectedCreditCustomer?.label || 'Select customer') : (pricingCustomer()?.label || sale.walkin_name || 'Walk-in customer')"></p>
+                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Customer</p>
+                            <p class="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-white/90 sm:text-base" x-text="sale.mode === 'credit' ? (selectedCreditCustomer?.label || 'Select customer') : (pricingCustomer()?.label || sale.walkin_name || 'Walk-in customer')"></p>
                         </div>
-                        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="{{ $labelClass }}">Liters</p>
-                            <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="liters().toFixed(2) + ' L'"></p>
+                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Liters</p>
+                            <p class="sale-modal-digital mt-1 truncate text-base font-bold text-gray-800 dark:text-white/90 sm:text-lg" x-text="liters().toFixed(2) + ' L'"></p>
                         </div>
-                        <div class="rounded-xl border p-3" :class="fuelTheme(sale.fuel_type).summary">
-                            <p class="text-theme-xs font-medium uppercase" :class="fuelTheme(sale.fuel_type).labelText" x-text="sale.mode === 'credit' ? 'Charge Total' : 'Collect Total'"></p>
-                            <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(totalAmount())"></p>
+                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                            <p class="truncate text-xs font-medium uppercase text-gray-500 dark:text-gray-400" x-text="sale.mode === 'credit' ? 'Charge Total' : 'Collect Total'"></p>
+                            <p class="sale-modal-digital mt-1 truncate text-base font-bold text-gray-900 dark:text-white sm:text-lg" x-text="money(totalAmount())"></p>
                         </div>
                     </div>
 
-                    <div class="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <button type="button" x-on:click="setSaleMode('credit')" class="rounded-lg px-4 py-2.5 text-theme-sm font-medium transition" :class="saleModeButtonClass('credit')">Credit Customer</button>
-                        <button type="button" x-on:click="setSaleMode('walkin')" class="rounded-lg px-4 py-2.5 text-theme-sm font-medium transition" :class="saleModeButtonClass('walkin')">Walk-In Customer</button>
+                    <div class="mb-4 grid min-w-0 grid-cols-2 gap-1.5 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-white/[0.03]">
+                        <button type="button" x-on:click="setSaleMode('credit')" class="min-h-10 min-w-0 rounded-lg px-2 py-2 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('credit')">Credit Customer</button>
+                        <button type="button" x-on:click="setSaleMode('walkin')" class="min-h-10 min-w-0 rounded-lg px-2 py-2 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('walkin')">Walk-In Customer</button>
                     </div>
 
-                    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                        <div class="space-y-4">
+                    <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.85fr)] lg:gap-5">
+                        <div class="min-w-0 space-y-4">
                             <div x-show="sale.mode === 'credit'" x-cloak>
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Credit Account</span>
-                                    <select x-model="sale.customer_id" x-on:change="touchSale" class="mt-1.5 {{ $selectClass }}" :required="sale.mode === 'credit'">
+                                    <select x-model="sale.customer_id" x-on:change="syncRegisteredSaleCustomer('credit')" class="sale-modal-control mt-1.5 {{ $selectClass }}" :required="sale.mode === 'credit'">
                                         <option value="">Select customer</option>
                                         <template x-for="customer in customers" :key="customer.id">
                                             <option :value="customer.id" x-text="customer.label"></option>
                                         </template>
                                     </select>
                                 </label>
-                                <div class="mt-2 rounded-lg border border-gray-100 bg-gray-50 p-3 text-theme-xs text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300" x-show="selectedCreditCustomer">
+                                <div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 sm:text-sm" x-show="selectedCreditCustomer">
                                     <div class="flex flex-wrap gap-x-4 gap-y-1">
                                         <span>Balance: <strong x-text="money(selectedCreditCustomer?.balance || 0)"></strong></span>
                                         <span>Limit: <strong x-text="money(selectedCreditCustomer?.limit || 0)"></strong></span>
@@ -618,95 +639,96 @@
                             </div>
 
                             <div x-show="sale.mode === 'walkin'" x-cloak class="space-y-4">
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Registered Customer</span>
-                                    <select x-model="sale.walkin_customer_id" x-on:change="touchSale" class="mt-1.5 {{ $selectClass }}">
+                                    <select x-model="sale.walkin_customer_id" x-on:change="syncRegisteredSaleCustomer('walkin')" class="sale-modal-control mt-1.5 {{ $selectClass }}">
                                         <option value="">Walk-in or typed name</option>
                                         <template x-for="customer in customers" :key="customer.id">
                                             <option :value="customer.id" x-text="customer.label"></option>
                                         </template>
                                     </select>
                                 </label>
-                                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                    <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                         <span>Customer Name</span>
-                                        <input type="text" x-model="sale.walkin_name" x-on:input="touchSale" class="mt-1.5 {{ $inputClass }}" placeholder="Walk-in customer">
+                                        <input type="text" x-model="sale.walkin_name" x-on:input="touchSale" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="Walk-in customer">
                                     </label>
-                                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                    <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                         <span>Plate Number</span>
-                                        <input type="text" x-model="sale.plate_no" class="mt-1.5 {{ $inputClass }}" placeholder="ABC-1234">
+                                        <input type="text" x-model="sale.plate_no" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="ABC-1234">
                                     </label>
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Liters Dispensed</span>
-                                    <input type="number" x-model.number="sale.liters" x-on:input="touchSale" min="0.1" step="0.01" class="mt-1.5 {{ $inputClass }} text-right font-semibold tabular-nums" placeholder="0.00" required>
+                                    <input type="number" x-model.number="sale.liters" x-on:input="touchSale" min="0.1" step="0.01" class="sale-modal-control sale-modal-digital mt-1.5 {{ $inputClass }} text-right font-bold" placeholder="0.00" required>
                                 </label>
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>OR Number</span>
-                                    <input type="text" x-model="sale.or_number" class="mt-1.5 {{ $inputClass }}" placeholder="Optional">
+                                    <input type="text" x-model="sale.or_number" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="Optional">
                                 </label>
                             </div>
 
-                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Manual Discount</span>
-                                    <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
-                                        <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                        <input type="number" x-model.number="sale.manual_discount" x-on:input="touchSale" min="0" step="0.01" class="h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-right text-theme-sm text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
+                                    <div class="mt-1.5 flex min-w-0 rounded-lg shadow-theme-xs">
+                                        <span class="sale-modal-affix inline-flex shrink-0 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                        <input type="number" x-model.number="sale.manual_discount" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-digital min-w-0 w-full rounded-r-lg border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
                                     </div>
                                 </label>
-                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Manual Excess</span>
-                                    <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
-                                        <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                        <input type="number" x-model.number="sale.manual_excess" x-on:input="touchSale" min="0" step="0.01" class="h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-right text-theme-sm text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
+                                    <div class="mt-1.5 flex min-w-0 rounded-lg shadow-theme-xs">
+                                        <span class="sale-modal-affix inline-flex shrink-0 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                        <input type="number" x-model.number="sale.manual_excess" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-digital min-w-0 w-full rounded-r-lg border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
                                     </div>
                                 </label>
                             </div>
 
-                            <div x-show="creditWarning" x-cloak class="rounded-xl border border-error-200 bg-error-50 p-3 text-theme-sm font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300" x-text="creditWarning"></div>
+                            <div x-show="creditWarning" x-cloak class="rounded-lg border border-error-200 bg-error-50 p-3 text-sm font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300" x-text="creditWarning"></div>
                         </div>
 
-                        <div class="space-y-4 rounded-2xl border p-4" :class="fuelTheme(sale.fuel_type).panel">
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-                                    <p class="{{ $labelClass }}">Standard Price</p>
-                                    <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(standardPrice()) + ' / L'"></p>
+                        <div class="min-w-0 space-y-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4">
+                            <div class="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-1 xl:grid-cols-2">
+                                <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                                    <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Standard Price</p>
+                                    <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-800 dark:text-white/90 sm:text-xl" x-text="money(standardPrice()) + ' / L'"></p>
                                 </div>
-                                <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-                                    <p class="{{ $labelClass }}">Applied Price</p>
-                                    <p class="mt-2 text-lg font-semibold tabular-nums" :class="fuelTheme(sale.fuel_type).text" x-text="money(appliedPrice()) + ' / L'"></p>
+                                <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                                    <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Applied Price</p>
+                                    <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-xl" x-text="money(appliedPrice()) + ' / L'"></p>
                                 </div>
                             </div>
 
-                            <div class="space-y-3">
-                                <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-3 text-theme-sm dark:border-gray-800 dark:bg-gray-900">
+                            <div class="space-y-2">
+                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-gray-800 dark:bg-gray-900">
                                     <span class="text-gray-500 dark:text-gray-400">Subtotal</span>
-                                    <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(subtotalBeforeManual())"></span>
+                                    <span class="sale-modal-digital min-w-0 truncate font-bold text-gray-800 dark:text-white/90" x-text="money(subtotalBeforeManual())"></span>
                                 </div>
-                                <div class="flex items-center justify-between rounded-xl border border-success-100 bg-success-50 p-3 text-theme-sm text-success-700 dark:border-success-500/20 dark:bg-success-500/10 dark:text-success-400" x-show="totalDiscount() > 0" x-cloak>
+                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-success-100 bg-success-50 p-3 text-sm text-success-700 dark:border-success-500/20 dark:bg-success-500/10 dark:text-success-400" x-show="totalDiscount() > 0" x-cloak>
                                     <span>Total Discount</span>
-                                    <span class="font-semibold tabular-nums" x-text="'-' + money(totalDiscount())"></span>
+                                    <span class="sale-modal-digital min-w-0 truncate font-bold" x-text="'-' + money(totalDiscount())"></span>
                                 </div>
-                                <div class="flex items-center justify-between rounded-xl border border-warning-100 bg-warning-50 p-3 text-theme-sm text-warning-700 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-400" x-show="totalExcess() > 0" x-cloak>
+                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-400" x-show="totalExcess() > 0" x-cloak>
                                     <span>Total Excess</span>
-                                    <span class="font-semibold tabular-nums" x-text="'+' + money(totalExcess())"></span>
+                                    <span class="sale-modal-digital min-w-0 truncate font-bold" x-text="'+' + money(totalExcess())"></span>
                                 </div>
                             </div>
 
-                            <div class="rounded-2xl border border-dashed p-5 text-center" :class="fuelTheme(sale.fuel_type).totalBox">
-                                <p class="{{ $labelClass }}" x-text="sale.mode === 'credit' ? 'Total Amount to Charge' : 'Total Amount Collected'"></p>
-                                <p class="mt-2 text-title-md font-bold tabular-nums text-gray-800 dark:text-white/90" x-text="money(totalAmount())"></p>
+                            <div class="min-w-0 rounded-xl bg-gray-900 p-4 text-center shadow-theme-sm dark:bg-gray-950">
+                                <p class="truncate text-xs font-semibold uppercase tracking-wide text-white/65" x-text="sale.mode === 'credit' ? 'Total Amount to Charge' : 'Total Amount Collected'"></p>
+                                <p class="sale-modal-digital mt-2 truncate text-2xl font-bold text-white sm:text-3xl" x-text="money(totalAmount())"></p>
                             </div>
                         </div>
                     </div>
+                    </div>
 
-                    <div class="mt-5 flex flex-col-reverse gap-3 border-t border-gray-100 pt-5 dark:border-gray-800 sm:flex-row sm:justify-end">
-                        <button type="button" x-on:click="closeSaleModal" class="{{ $secondaryButtonClass }}">Cancel</button>
-                        <button type="submit" class="inline-flex h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition disabled:cursor-not-allowed disabled:opacity-60" :class="saleSubmitButtonClass()" :disabled="savingSale || !!creditWarning">
+                    <div class="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:justify-end sm:px-4">
+                        <button type="button" x-on:click="closeSaleModal" class="{{ $secondaryButtonClass }} !h-10 px-4 !text-sm sm:!h-11">Cancel</button>
+                        <button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-theme-xs transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-11" :class="saleSubmitButtonClass()" :disabled="savingSale || !!creditWarning">
                             <span x-text="savingSale ? 'Saving...' : (sale.id ? 'Update Transaction' : 'Record Transaction')"></span>
                         </button>
                     </div>
@@ -1016,6 +1038,7 @@
                 pumps: config.pumps || [],
                 customers: config.customers || [],
                 prices: config.prices || {},
+                editableSales: config.editableSales || {},
                 customersById: {},
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
@@ -1058,6 +1081,7 @@
                 selectedPaymentCustomer: null,
                 creditWarning: '',
                 paymentAdvanceMessage: '',
+                syncingSaleCustomers: false,
                 feedbackClosing: false,
                 init() {
                     this.customersById = Object.fromEntries(this.customers.map(customer => [String(customer.id), customer]));
@@ -1090,7 +1114,11 @@
                         manual_discount: '',
                         manual_excess: '',
                         or_number: '',
-                        standard_price: 0
+                        standard_price: 0,
+                        original_payment_type: '',
+                        original_customer_id: '',
+                        original_amount: 0,
+                        original_price_applied: null
                     };
                     this.selectedCreditCustomer = null;
                     this.creditWarning = '';
@@ -1129,23 +1157,49 @@
                     this.sale.fuel_type = row.fuel_type;
                     this.sale.standard_price = Number(pump.standard_price || this.priceForFuel(row.fuel_type));
                     this.sale.mode = row.payment_type === 'credit' ? 'credit' : 'walkin';
-                    this.sale.customer_id = row.payment_type === 'credit' && row.customer_id ? String(row.customer_id) : '';
-                    this.sale.walkin_customer_id = row.payment_type !== 'credit' && row.customer_id ? String(row.customer_id) : '';
+                    const registeredCustomerId = row.customer_id ? String(row.customer_id) : '';
+                    this.sale.customer_id = registeredCustomerId;
+                    this.sale.walkin_customer_id = registeredCustomerId;
                     this.sale.walkin_name = row.payment_type !== 'credit' && !row.customer_id ? (row.customer_name || '') : '';
                     this.sale.plate_no = row.plate_no || '';
                     this.sale.liters = Number(row.liters || 0);
                     this.sale.manual_discount = Number(row.manual_discount || 0);
                     this.sale.manual_excess = Math.max(0, Number(row.surcharge || 0) - Math.max(0, (Number(row.price_applied || 0) - this.sale.standard_price) * Number(row.liters || 0)));
                     this.sale.or_number = row.or_number || '';
+                    this.sale.original_payment_type = row.payment_type;
+                    this.sale.original_customer_id = row.customer_id ? String(row.customer_id) : '';
+                    this.sale.original_amount = Number(row.amount || 0);
+                    this.sale.original_price_applied = Number(row.price_applied || 0);
                     this.touchSale();
                     this.saleModalOpen = true;
+                    this.$nextTick(() => document.querySelector('[x-model\\.number="sale.liters"]')?.focus());
                 },
                 closeSaleModal() {
                     this.saleModalOpen = false;
                     this.resetSale();
                 },
                 setSaleMode(mode) {
+                    this.syncRegisteredSaleCustomer(this.sale.mode);
                     this.sale.mode = mode;
+                    this.touchSale();
+                },
+                syncRegisteredSaleCustomer(sourceMode) {
+                    if (this.syncingSaleCustomers) {
+                        return;
+                    }
+
+                    const sourceField = sourceMode === 'credit' ? 'customer_id' : 'walkin_customer_id';
+                    const targetField = sourceMode === 'credit' ? 'walkin_customer_id' : 'customer_id';
+                    const customerId = String(this.sale[sourceField] || '');
+
+                    if (!customerId || !this.customersById[customerId]) {
+                        this.touchSale();
+                        return;
+                    }
+
+                    this.syncingSaleCustomers = true;
+                    this.sale[targetField] = customerId;
+                    this.syncingSaleCustomers = false;
                     this.touchSale();
                 },
                 touchSale() {
@@ -1153,7 +1207,7 @@
                     const total = this.totalAmount();
 
                     if (this.sale.mode === 'credit' && this.selectedCreditCustomer) {
-                        const projected = Number(this.selectedCreditCustomer.balance || 0) + total;
+                        const projected = this.balanceForCreditLimit(this.selectedCreditCustomer) + total;
                         const limit = Number(this.selectedCreditCustomer.limit || 0);
                         this.creditWarning = projected > limit
                             ? 'Credit limit exceeded. Projected balance is ' + this.money(projected) + '.'
@@ -1185,56 +1239,20 @@
                 fuelTheme(fuel) {
                     const themes = {
                         premium: {
-                            bar: 'bg-error-500',
-                            badge: 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400',
-                            dot: 'bg-error-500',
-                            modalBorder: 'border-error-200 dark:border-error-500/30',
-                            header: 'border-error-100 bg-error-50/80 dark:border-error-500/20 dark:bg-error-500/10',
-                            summary: 'border-error-100 bg-error-50 dark:border-error-500/20 dark:bg-error-500/10',
-                            panel: 'border-error-100 bg-error-50/50 dark:border-error-500/20 dark:bg-error-500/10',
-                            totalBox: 'border-error-200 bg-error-50/50 dark:border-error-500/30 dark:bg-error-500/10',
-                            labelText: 'text-error-700 dark:text-error-400',
-                            text: 'text-error-600 dark:text-error-400',
-                            button: 'bg-error-500 hover:bg-error-600'
+                            header: 'bg-error-600 dark:bg-error-700',
+                            badge: 'bg-white/15 text-white ring-1 ring-inset ring-white/25'
                         },
                         unleaded: {
-                            bar: 'bg-success-500',
-                            badge: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
-                            dot: 'bg-success-500',
-                            modalBorder: 'border-success-200 dark:border-success-500/30',
-                            header: 'border-success-100 bg-success-50/80 dark:border-success-500/20 dark:bg-success-500/10',
-                            summary: 'border-success-100 bg-success-50 dark:border-success-500/20 dark:bg-success-500/10',
-                            panel: 'border-success-100 bg-success-50/50 dark:border-success-500/20 dark:bg-success-500/10',
-                            totalBox: 'border-success-200 bg-success-50/50 dark:border-success-500/30 dark:bg-success-500/10',
-                            labelText: 'text-success-700 dark:text-success-500',
-                            text: 'text-success-600 dark:text-success-500',
-                            button: 'bg-success-500 hover:bg-success-600'
+                            header: 'bg-success-600 dark:bg-success-700',
+                            badge: 'bg-white/15 text-white ring-1 ring-inset ring-white/25'
                         },
                         diesel: {
-                            bar: 'bg-warning-500',
-                            badge: 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
-                            dot: 'bg-warning-500',
-                            modalBorder: 'border-warning-200 dark:border-warning-500/30',
-                            header: 'border-warning-100 bg-warning-50/80 dark:border-warning-500/20 dark:bg-warning-500/10',
-                            summary: 'border-warning-100 bg-warning-50 dark:border-warning-500/20 dark:bg-warning-500/10',
-                            panel: 'border-warning-100 bg-warning-50/50 dark:border-warning-500/20 dark:bg-warning-500/10',
-                            totalBox: 'border-warning-200 bg-warning-50/50 dark:border-warning-500/30 dark:bg-warning-500/10',
-                            labelText: 'text-warning-700 dark:text-warning-400',
-                            text: 'text-warning-700 dark:text-warning-400',
-                            button: 'bg-warning-500 hover:bg-warning-600'
+                            header: 'bg-warning-600 dark:bg-warning-700',
+                            badge: 'bg-white/15 text-white ring-1 ring-inset ring-white/25'
                         },
                         default: {
-                            bar: 'bg-brand-500',
-                            badge: 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400',
-                            dot: 'bg-brand-500',
-                            modalBorder: 'border-brand-200 dark:border-brand-500/30',
-                            header: 'border-brand-100 bg-brand-50/80 dark:border-brand-500/20 dark:bg-brand-500/10',
-                            summary: 'border-brand-100 bg-brand-50 dark:border-brand-500/20 dark:bg-brand-500/10',
-                            panel: 'border-brand-100 bg-brand-50/50 dark:border-brand-500/20 dark:bg-brand-500/10',
-                            totalBox: 'border-brand-200 bg-brand-50/50 dark:border-brand-500/30 dark:bg-brand-500/10',
-                            labelText: 'text-brand-700 dark:text-brand-400',
-                            text: 'text-brand-600 dark:text-brand-400',
-                            button: 'bg-brand-500 hover:bg-brand-600'
+                            header: 'bg-brand-600 dark:bg-brand-700',
+                            badge: 'bg-white/15 text-white ring-1 ring-inset ring-white/25'
                         }
                     };
 
@@ -1242,13 +1260,13 @@
                 },
                 saleModeButtonClass(mode) {
                     if (this.sale.mode === mode) {
-                        return this.fuelTheme(this.sale.fuel_type).button + ' text-white shadow-theme-xs';
+                        return 'bg-brand-500 text-white shadow-theme-xs hover:bg-brand-600';
                     }
 
                     return 'text-gray-600 hover:bg-white dark:text-gray-300 dark:hover:bg-white/[0.05]';
                 },
                 saleSubmitButtonClass() {
-                    return this.fuelTheme(this.sale.fuel_type).button;
+                    return 'bg-brand-500 hover:bg-brand-600';
                 },
                 standardPrice() {
                     return Number(this.sale.standard_price || this.priceForFuel(this.sale.fuel_type));
@@ -1260,7 +1278,24 @@
 
                     return this.sale.walkin_customer_id ? this.customersById[String(this.sale.walkin_customer_id)] : null;
                 },
+                editingOriginalCustomer() {
+                    if (!this.sale.id) {
+                        return false;
+                    }
+
+                    const currentCustomerId = this.sale.mode === 'credit'
+                        ? String(this.sale.customer_id || '')
+                        : String(this.sale.walkin_customer_id || '');
+                    const originalMode = this.sale.original_payment_type === 'credit' ? 'credit' : 'walkin';
+
+                    return this.sale.mode === originalMode
+                        && currentCustomerId === String(this.sale.original_customer_id || '');
+                },
                 appliedPrice() {
+                    if (this.editingOriginalCustomer() && Number(this.sale.original_price_applied || 0) > 0) {
+                        return Number(this.sale.original_price_applied);
+                    }
+
                     const customer = this.pricingCustomer();
                     const fuel = this.sale.fuel_type;
 
@@ -1306,7 +1341,20 @@
                         return 0;
                     }
 
-                    return Number(this.selectedCreditCustomer.limit || 0) - Number(this.selectedCreditCustomer.balance || 0);
+                    return Number(this.selectedCreditCustomer.limit || 0) - this.balanceForCreditLimit(this.selectedCreditCustomer);
+                },
+                balanceForCreditLimit(customer) {
+                    let balance = Number(customer?.balance || 0);
+
+                    if (
+                        this.sale.id
+                        && this.sale.original_payment_type === 'credit'
+                        && String(this.sale.original_customer_id || '') === String(customer?.id || '')
+                    ) {
+                        balance -= Number(this.sale.original_amount || 0);
+                    }
+
+                    return balance;
                 },
                 async submitSale() {
                     this.touchSale();
