@@ -536,7 +536,9 @@
                                                 $afterField = "after_unloading_dipstick_{$fuel}";
                                                 $dispensedField = "total_dispensed_{$fuel}";
                                                 $totalField = "after_before_total_{$fuel}";
-                                                $summaryField = "delivery_summary_{$fuel}";
+                                                $summaryValue = $record->{$dispensedField} !== null && $record->{$totalField} !== null
+                                                    ? (float) $record->{$dispensedField} + (float) $record->{$totalField}
+                                                    : null;
                                             @endphp
                                             <tr>
                                                 <td class="{{ $tdPrimaryClass }}">{{ $label }}</td>
@@ -544,7 +546,7 @@
                                                 <td class="{{ $tdNumberClass }}">{{ $numberLabel($record->{$afterField}) }}</td>
                                                 <td class="{{ $tdNumberClass }}">{{ $numberLabel($record->{$dispensedField}) }}</td>
                                                 <td class="{{ $tdNumberClass }} font-semibold">{{ $numberLabel($record->{$totalField}) }}</td>
-                                                <td class="{{ $tdNumberClass }} font-semibold">{{ $numberLabel($record->{$summaryField}) }}</td>
+                                                <td class="{{ $tdNumberClass }} font-semibold">{{ $numberLabel($summaryValue) }}</td>
                                             </tr>
                                         @endforeach
                                     </tbody>
@@ -745,7 +747,7 @@
                     }
 
                     if (total !== null && dispensed !== null) {
-                        summary = total - dispensed;
+                        summary = dispensed + total;
                     }
 
                     if (totalField) {

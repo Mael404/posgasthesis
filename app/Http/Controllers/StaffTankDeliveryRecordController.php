@@ -318,7 +318,7 @@ class StaffTankDeliveryRecordController extends Controller
             $dispensed = $this->nullableDecimal($validated["total_dispensed_{$fuel}"] ?? null);
             $afterBeforeTotal = ($before !== null && $after !== null) ? round($after - $before, 2) : null;
             $deliverySummary = ($afterBeforeTotal !== null && $dispensed !== null)
-                ? round($afterBeforeTotal - $dispensed, 2)
+                ? round($dispensed + $afterBeforeTotal, 2)
                 : null;
 
             $recordData["before_unloading_dipstick_{$fuel}"] = $before;

@@ -214,7 +214,11 @@
                                 $afterField = "after_unloading_dipstick_{$fuel}";
                                 $dispensedField = "total_dispensed_{$fuel}";
                                 $totalField = "after_before_total_{$fuel}";
-                                $summaryField = "delivery_summary_{$fuel}";
+                                $summaryValue = $isEditing
+                                    && $record->{$dispensedField} !== null
+                                    && $record->{$totalField} !== null
+                                        ? (float) $record->{$dispensedField} + (float) $record->{$totalField}
+                                        : null;
                             @endphp
                             <tr>
                                 <td class="px-4 py-4 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $label }}</td>
@@ -265,7 +269,7 @@
                                     <input type="text" class="{{ $computedInput }}" data-tdr-total="{{ $fuel }}" value="{{ $isEditing ? $numberForInput($record->{$totalField}) : '' }}" readonly>
                                 </td>
                                 <td class="px-4 py-4">
-                                    <input type="text" class="{{ $computedInput }}" data-tdr-summary="{{ $fuel }}" value="{{ $isEditing ? $numberForInput($record->{$summaryField}) : '' }}" readonly>
+                                    <input type="text" class="{{ $computedInput }}" data-tdr-summary="{{ $fuel }}" value="{{ $numberForInput($summaryValue) }}" readonly>
                                 </td>
                             </tr>
                         @endforeach
