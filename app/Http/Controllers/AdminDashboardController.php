@@ -309,27 +309,7 @@ class AdminDashboardController extends Controller
     private function tankMovements(Carbon $start, Carbon $end): array
     {
         $tanks = $this->preparedTanks();
-        $salesByPumpFuel = collect();
-
-        if (
-            $this->hasTable('sales')
-            && $this->hasColumn('sales', 'pump_id')
-            && $this->hasColumn('sales', 'fuel_type')
-            && $this->hasColumn('sales', 'liters')
-        ) {
-            $netExpression = $this->salesNetExpression();
-            $salesByPumpFuel = $this->fuelSalesQuery($start, $end)
-                ->selectRaw("
-                    pump_id,
-                    fuel_type,
-                    COALESCE(SUM(liters), 0) as liters_sold,
-                    COALESCE(SUM({$netExpression}), 0) as net_sales
-                ")
-                ->where('pump_id', '>', 0)
-                ->groupBy('pump_id', 'fuel_type')
-                ->get()
-                ->keyBy(fn ($sale) => (int) $sale->pump_id . '|' . (string) $sale->fuel_type);
-        }
+        $consumedByTank = $this->shiftReadingConsumptionByTank($start, $end, $tanks);
 
         $deliveriesByTank = collect();
 
@@ -346,13 +326,8 @@ class AdminDashboardController extends Controller
                 ->pluck('liters_delivered', 'tank_id');
         }
 
-        return $tanks->map(function ($tank) use ($salesByPumpFuel, $deliveriesByTank) {
-            $soldLiters = $tank['connected_pump_numbers']->sum(function ($pumpNumber) use ($tank, $salesByPumpFuel) {
-                $sale = $salesByPumpFuel->get((int) $pumpNumber . '|' . $tank['fuel_type']);
-
-                return (float) ($sale->liters_sold ?? 0);
-            });
-
+        return $tanks->map(function ($tank) use ($consumedByTank, $deliveriesByTank) {
+            $consumedLiters = (float) ($consumedByTank[$tank['id']] ?? 0);
             $deliveredLiters = (float) ($deliveriesByTank[$tank['id']] ?? 0);
 
             return [
@@ -364,10 +339,85 @@ class AdminDashboardController extends Controller
                 'capacity' => $tank['capacity'],
                 'percentage' => $tank['percentage'],
                 'delivered_liters' => $this->liters($deliveredLiters),
-                'sold_liters' => $this->liters($soldLiters),
-                'net_liters' => $this->liters($deliveredLiters - $soldLiters),
+                'consumed_liters' => $this->liters($consumedLiters),
+                'sold_liters' => $this->liters($consumedLiters),
+                'net_liters' => $this->liters($deliveredLiters - $consumedLiters),
             ];
         })->values()->all();
+    }
+
+    private function shiftReadingConsumptionByTank(Carbon $start, Carbon $end, $tanks)
+    {
+        $consumedByTank = collect();
+        $query = $this->shiftReadingsForRange($start, $end);
+
+        if (! $query) {
+            return $consumedByTank;
+        }
+
+        $readings = $query
+            ->when(
+                $this->hasColumn('shift_readings', 'status'),
+                fn ($query) => $query->whereIn(DB::raw('LOWER(status)'), ['pending', 'verified', 'approved'])
+            )
+            ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
+            ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
+            ->get();
+
+        foreach ($readings as $reading) {
+            $storedDeductions = $this->storedInventoryDeductions($reading);
+
+            if ($storedDeductions !== []) {
+                foreach ($storedDeductions as $deduction) {
+                    $tankId = (int) $deduction['tank_id'];
+                    $consumedByTank->put(
+                        $tankId,
+                        (float) $consumedByTank->get($tankId, 0) + (float) $deduction['liters']
+                    );
+                }
+
+                continue;
+            }
+
+            $pumpLiters = $this->readingPumpLitersByPump($reading, $this->previousVerifiedReading($reading));
+
+            foreach ($tanks as $tank) {
+                $tankLiters = $tank['connected_pump_numbers']->sum(
+                    fn ($pumpNumber) => (float) ($pumpLiters[(int) $pumpNumber] ?? 0)
+                );
+
+                if ($tankLiters > 0) {
+                    $consumedByTank->put(
+                        $tank['id'],
+                        (float) $consumedByTank->get($tank['id'], 0) + $tankLiters
+                    );
+                }
+            }
+        }
+
+        return $consumedByTank;
+    }
+
+    private function storedInventoryDeductions(object $reading): array
+    {
+        if (! $this->hasColumn('shift_readings', 'inventory_deductions')) {
+            return [];
+        }
+
+        $decoded = json_decode((string) ($reading->inventory_deductions ?? ''), true);
+
+        if (! is_array($decoded)) {
+            return [];
+        }
+
+        return collect($decoded)
+            ->filter(fn ($row) => is_array($row) && (int) ($row['tank_id'] ?? 0) > 0 && (float) ($row['liters'] ?? 0) > 0)
+            ->map(fn ($row) => [
+                'tank_id' => (int) $row['tank_id'],
+                'liters' => max(0, (float) $row['liters']),
+            ])
+            ->values()
+            ->all();
     }
 
     private function pumpSalesForPeriods(array $ranges): array
@@ -570,7 +620,10 @@ class AdminDashboardController extends Controller
         }
 
         $readings = $query
-            ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', '<>', 'Voided'))
+            ->when(
+                $this->hasColumn('shift_readings', 'status'),
+                fn ($query) => $query->whereIn(DB::raw('LOWER(status)'), ['pending', 'verified', 'approved'])
+            )
             ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
             ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
             ->get();
@@ -587,7 +640,7 @@ class AdminDashboardController extends Controller
             $pumpLiters = $this->readingPumpLitersByPump($reading, $lastVerified);
             $liters = array_sum($pumpLiters);
 
-            if (($reading->status ?? null) === 'Verified') {
+            if (in_array(strtolower((string) ($reading->status ?? '')), ['verified', 'approved'], true)) {
                 $verifiedLiters += $liters;
                 $verifiedCount++;
                 $this->addPumpLiters($verifiedPumps, $pumpLiters);
@@ -662,7 +715,7 @@ class AdminDashboardController extends Controller
             $previousEnd = $lastVerified ? (float) ($lastVerified->$endField ?? 0) : 0;
             $startValue = $reading->$startField ?? $previousEnd;
 
-            $litersByPump[$pump] = (float) ($reading->$endField ?? 0) - (float) $startValue;
+            $litersByPump[$pump] = max(0, (float) ($reading->$endField ?? 0) - (float) $startValue);
         }
 
         return $litersByPump;

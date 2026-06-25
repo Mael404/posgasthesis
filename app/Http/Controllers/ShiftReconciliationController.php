@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ShiftReadingInventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,20 +15,16 @@ class ShiftReconciliationController extends Controller
 {
     private const PUMP_COUNT = 6;
 
-    private const PUMP_FUEL_TYPES = [
-        1 => 'Premium',
-        2 => 'Unleaded',
-        3 => 'Premium',
-        4 => 'Unleaded',
-        5 => 'Diesel',
-        6 => 'Diesel',
-    ];
-
     private array $lockedSalesPresence = [];
 
     private array $tablePresence = [];
 
     private array $columnPresence = [];
+
+    public function __construct(
+        private readonly ShiftReadingInventoryService $shiftReadingInventory
+    ) {
+    }
 
     public function index(): View
     {
@@ -133,7 +130,7 @@ class ShiftReconciliationController extends Controller
 
         try {
             DB::transaction(function () use ($validated) {
-                $reading = $this->findReadingForAction((int) $validated['id']);
+                $reading = $this->findReadingForAction((int) $validated['id'], true);
 
                 if (! $reading) {
                     throw new \RuntimeException('Shift reading not found.');
@@ -143,8 +140,8 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only pending settlements can be approved.');
                 }
 
-                [$lastVerified, $periodStart, $periodEnd] = $this->getReadingPeriodContext($reading);
-                $this->deductTankInventory($reading, $lastVerified);
+                [, $periodStart, $periodEnd] = $this->getReadingPeriodContext($reading);
+                $this->shiftReadingInventory->apply($reading);
                 $this->applyPendingCollections($reading, $periodStart, $periodEnd);
                 $this->lockSalesForReading($reading);
                 $this->updateReadingStatus((int) $validated['id'], 'Verified');
@@ -152,7 +149,7 @@ class ShiftReconciliationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Shift verified, inventory deducted, and payments applied.',
+                'message' => 'Shift verified. The inventory deducted on submission remains applied, and pending payments were posted.',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -171,7 +168,7 @@ class ShiftReconciliationController extends Controller
 
         try {
             DB::transaction(function () use ($validated) {
-                $reading = $this->findReadingForAction((int) $validated['id']);
+                $reading = $this->findReadingForAction((int) $validated['id'], true);
 
                 if (! $reading) {
                     throw new \RuntimeException('Shift reading not found.');
@@ -181,17 +178,8 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only pending settlements can be rejected.');
                 }
 
-                if ($this->hasTable('sales') && $this->hasColumn('sales', 'locked_by_shift_reading_id')) {
-                    $updates = ['locked_by_shift_reading_id' => null];
-
-                    if ($this->hasColumn('sales', 'locked_at')) {
-                        $updates['locked_at'] = null;
-                    }
-
-                    DB::table('sales')
-                        ->where('locked_by_shift_reading_id', (int) $validated['id'])
-                        ->update($updates);
-                }
+                $this->shiftReadingInventory->restore($reading);
+                $this->unlockSalesForReading($reading);
 
                 $updates = [];
 
@@ -208,7 +196,7 @@ class ShiftReconciliationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Shift rejected.',
+                'message' => 'Shift rejected. Its deducted tank inventory was restored and its transactions were unlocked.',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -239,7 +227,7 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only verified settlements can have their approval undone.');
                 }
 
-                $this->applyTankInventoryForReading($reading, 'add');
+                $this->shiftReadingInventory->restore($reading);
                 $reversedCollections = $this->reverseShiftApprovalCollections($reading);
                 $this->unlockSalesForReading($reading);
                 $this->updateShiftReading((int) $reading->id, $this->voidUpdatePayload($validated['void_reason']));
@@ -732,38 +720,6 @@ class ShiftReconciliationController extends Controller
         $query->update($updates);
     }
 
-    private function deductTankInventory(object $reading, $lastVerified): void
-    {
-        $this->applyTankInventoryForReading($reading, 'deduct', $lastVerified);
-    }
-
-    private function applyTankInventoryForReading(object $reading, string $action, $lastVerified = null): void
-    {
-        if (! $this->hasTable('tanks') || ! $this->hasColumn('tanks', 'current_volume')) {
-            return;
-        }
-
-        if (! in_array($action, ['deduct', 'add'], true)) {
-            throw new \InvalidArgumentException('Invalid tank inventory action.');
-        }
-
-        if (! $lastVerified) {
-            [$lastVerified] = $this->getReadingPeriodContext($reading);
-        }
-
-        for ($pump = 1; $pump <= self::PUMP_COUNT; $pump++) {
-            $startField = "pump{$pump}_liters_start";
-            $endField = "pump{$pump}_liters_end";
-            $start = $this->number($reading->$startField ?? ($lastVerified->$endField ?? 0));
-            $end = $this->number($reading->$endField ?? $start);
-            $dispensed = $end - $start;
-
-            if ($dispensed > 0) {
-                $this->updateTankVolume($pump, self::PUMP_FUEL_TYPES[$pump], $dispensed, $action);
-            }
-        }
-    }
-
     private function unlockSalesForReading(object $reading): void
     {
         if (
@@ -785,51 +741,6 @@ class ShiftReconciliationController extends Controller
             ->update($updates);
 
         unset($this->lockedSalesPresence[(int) $reading->id]);
-    }
-
-    private function updateTankVolume(int $pumpId, string $fuelType, float $liters, string $action): void
-    {
-        if (! $this->hasTable('tanks')) {
-            return;
-        }
-
-        $query = DB::table('tanks');
-
-        if ($this->hasColumn('tanks', 'fuel_type')) {
-            $query->where('fuel_type', $fuelType);
-        }
-
-        if ($this->hasColumn('tanks', 'status')) {
-            $query->where('status', 'Active');
-        }
-
-        $tanks = $query->get();
-        $targetTank = null;
-
-        if ($this->hasColumn('tanks', 'connected_pumps')) {
-            foreach ($tanks as $tank) {
-                $connectedPumps = array_map('trim', explode(',', (string) ($tank->connected_pumps ?? '')));
-
-                if (in_array('Pump ' . $pumpId, $connectedPumps, true)) {
-                    $targetTank = $tank;
-                    break;
-                }
-            }
-        }
-
-        $targetTank ??= $tanks->first();
-
-        if (! $targetTank || ! isset($targetTank->id) || ! $this->hasColumn('tanks', 'id')) {
-            return;
-        }
-
-        $tankQuery = DB::table('tanks')->where('id', $targetTank->id);
-
-        if ($action === 'deduct') {
-            $tankQuery->decrement('current_volume', $liters);
-        } else {
-            $tankQuery->increment('current_volume', $liters);
-        }
     }
 
     private function applyPendingCollections(object $reading, Carbon $periodStart, Carbon $periodEnd): void

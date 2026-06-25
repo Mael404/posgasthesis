@@ -370,7 +370,10 @@
 
                     <section class="{{ $cardClass }} col-span-12">
                         <div class="{{ $cardHeaderClass }}">
-                            <h2 class="{{ $cardTitleClass }}">Inventory Movement Per Tank</h2>
+                            <div>
+                                <h2 class="{{ $cardTitleClass }}">Inventory Movement Per Tank</h2>
+                                <p class="mt-1 {{ $captionClass }}">Submitted pending and verified shift readings only; voided and rejected readings are excluded.</p>
+                            </div>
                             <div class="{{ $segmentGroupClass }}" aria-label="Tank movement period">
                                 <button type="button" class="{{ $segmentButtonClass }}" data-period-target="tank-movements" data-period="today">Today</button>
                                 <button type="button" class="{{ $segmentButtonClass }}" data-period-target="tank-movements" data-period="weekly">Week</button>
@@ -384,7 +387,7 @@
                                         <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Tank</p></th>
                                         <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Current</p></th>
                                         <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Delivered</p></th>
-                                        <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Sold</p></th>
+                                        <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Consumed</p></th>
                                         <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Net</p></th>
                                     </tr>
                                 </thead>
@@ -806,7 +809,7 @@
                         </td>
                         <td class="${numberCellClass}" data-label="Current">${liters(row.current_volume)}</td>
                         <td class="${numberCellClass}" data-label="Delivered">${liters(row.delivered_liters)}</td>
-                        <td class="${numberCellClass}" data-label="Sold">${liters(row.sold_liters)}</td>
+                        <td class="${numberCellClass}" data-label="Consumed">${liters(row.consumed_liters ?? row.sold_liters)}</td>
                         <td class="${numberCellClass} ${netClass}" data-label="Net">${signedLiters(row.net_liters)}</td>
                     </tr>
                 `;

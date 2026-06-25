@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ShiftReadingInventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,11 @@ class StaffReadingController extends Controller
     private array $tablePresence = [];
 
     private array $columnPresence = [];
+
+    public function __construct(
+        private readonly ShiftReadingInventoryService $shiftReadingInventory
+    ) {
+    }
 
     public function index(): View
     {
@@ -60,7 +66,7 @@ class StaffReadingController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if ($missing = $this->missingTables(['shift_readings', 'shift_reading_images'])) {
+        if ($missing = $this->missingTables(['shift_readings', 'shift_reading_images', 'tanks'])) {
             return $this->jsonError('Missing table(s): ' . implode(', ', $missing) . '.', 422);
         }
 
@@ -117,6 +123,7 @@ class StaffReadingController extends Controller
 
                 if ($reading) {
                     $this->lockSalesForReading($reading);
+                    $this->shiftReadingInventory->apply($reading);
                 }
 
                 foreach ($this->meterPhotoFields() as $field) {
@@ -132,7 +139,7 @@ class StaffReadingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Periodical settlement submitted for verification.',
+                'message' => 'Settlement submitted. Its meter-recorded fuel was deducted from the connected tanks and is pending verification.',
                 'id' => $readingId,
             ]);
         } catch (ValidationException $e) {
@@ -243,13 +250,14 @@ class StaffReadingController extends Controller
                     throw new \RuntimeException('Only pending or rejected settlements can be voided here.');
                 }
 
+                $this->shiftReadingInventory->restore($settlement);
                 $this->unlockSalesForReading($settlement);
                 $this->updateShiftReading((int) $settlement->id, $this->voidUpdatePayload($validated['void_reason'] ?? null));
             });
 
             return response()->json([
                 'success' => true,
-                'message' => 'Settlement voided. Locked transactions are available for correction again.',
+                'message' => 'Settlement voided. Its tank inventory was restored and locked transactions are available for correction again.',
             ]);
         } catch (\Throwable $e) {
             return $this->jsonError($e->getMessage(), 500);

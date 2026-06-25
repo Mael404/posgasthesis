@@ -426,11 +426,11 @@
                     <p id="approveSettlementMeta" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400"></p>
                 </div>
                 <div class="p-5">
-                    <p class="text-theme-sm text-gray-600 dark:text-gray-400">This will finalize the variance, apply pending collections to customer ledgers, deduct dispensed liters from tanks, and mark the settlement as verified.</p>
+                    <p class="text-theme-sm text-gray-600 dark:text-gray-400">The meter-recorded liters were already deducted when the staff submitted this reading. Approval will finalize the variance, apply pending collections to customer ledgers, and mark the settlement as verified.</p>
                 </div>
                 <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
                     <button type="button" class="{{ $buttonClass }} h-11 text-theme-sm" data-close-modal="#approveModal">Cancel</button>
-                    <button type="submit" class="{{ $primaryButtonClass }} h-11 text-theme-sm" id="btnApprove">Approve & Apply</button>
+                    <button type="submit" class="{{ $primaryButtonClass }} h-11 text-theme-sm" id="btnApprove">Approve Settlement</button>
                 </div>
             </form>
         </div>
@@ -445,6 +445,7 @@
                     <p id="rejectSettlementMeta" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400"></p>
                 </div>
                 <div class="p-5">
+                    <p class="mb-4 text-theme-sm text-gray-600 dark:text-gray-400">Rejecting restores the fuel deducted when this reading was submitted and unlocks its transactions for correction.</p>
                     <label class="block">
                         <span class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">Reason for rejection</span>
                         <textarea id="rejectionReason" maxlength="2000" rows="5" class="mt-2 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" placeholder="Type the reason so staff can correct it."></textarea>

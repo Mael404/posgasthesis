@@ -1716,7 +1716,7 @@
                 async voidReading(id, label) {
                     const reason = await this.askConfirmation({
                         title: 'Void Settlement',
-                        message: 'Void this settlement and unlock its transactions?',
+                        message: 'Void this settlement, restore its deducted tank inventory, and unlock its transactions?',
                         details: label,
                         confirmText: 'Void Settlement',
                         tone: 'danger',

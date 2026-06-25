@@ -299,7 +299,8 @@
         $displayCustomer = ! empty($customer->business_name) && strtoupper((string) $customer->business_name) !== 'N/A'
             ? $customer->business_name
             : ($customer->owner_name ?? 'Customer #' . $customer->id);
-        $chargeTransactions = $filteredTransactions->filter(fn ($row) => (float) ($row->debit ?? 0) > 0 && ($row->type ?? null) !== 'Payment');
+        $chargeTransactions = $filteredTransactions->filter(fn ($row) => (float) ($row->debit ?? 0) > 0
+            && ! in_array($row->type ?? null, ['Payment', 'Void Payment'], true));
         $totalSavingsApplied = $chargeTransactions->sum(fn ($row) => (float) ($row->discount_amount ?? $row->discount ?? 0));
         $hasDiscountColumn = $totalSavingsApplied > 0;
         $displayPaymentsReceived = $invoicePaymentsReceived ?? $invoice->payments_received;
