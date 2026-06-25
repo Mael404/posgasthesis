@@ -429,7 +429,7 @@
                 </div>
                 <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                     <span>Customer</span>
-                    <select x-model="receiptCustomerId" x-on:change="receiptInvoiceNumber = ''" class="mt-1.5 {{ $selectClass }}">
+                    <select x-model="receiptCustomerId" x-on:change="receiptInvoiceNumber = ''; resetReceiptPage()" class="mt-1.5 {{ $selectClass }}">
                         <option value="">All customers</option>
                         <template x-for="customer in customers" :key="customer.id">
                             <option :value="String(customer.id)" x-text="customer.label"></option>
@@ -438,7 +438,7 @@
                 </label>
                 <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                     <span>Invoice #</span>
-                    <select x-model="receiptInvoiceNumber" class="mt-1.5 {{ $selectClass }}" :disabled="receiptInvoiceOptions().length === 0">
+                    <select x-model="receiptInvoiceNumber" x-on:change="resetReceiptPage()" class="mt-1.5 {{ $selectClass }}" :disabled="receiptInvoiceOptions().length === 0">
                         <option value="">All invoices</option>
                         <template x-for="invoiceNumber in receiptInvoiceOptions()" :key="invoiceNumber">
                             <option :value="invoiceNumber" x-text="invoiceNumber"></option>
@@ -448,7 +448,7 @@
                 <div class="grid grid-cols-2 gap-2">
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                         <span>Status</span>
-                        <select x-model="receiptIssueStatus" class="mt-1.5 {{ $selectClass }}">
+                        <select x-model="receiptIssueStatus" x-on:change="resetReceiptPage()" class="mt-1.5 {{ $selectClass }}">
                             <option value="">All</option>
                             <option value="issued">Issued</option>
                             <option value="pending">Pending</option>
@@ -486,7 +486,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                            <template x-for="receipt in filteredReceipts()" :key="receipt.receipt_key">
+                            <template x-for="receipt in paginatedReceipts()" :key="receipt.receipt_key">
                                 <tr>
                                     <td class="{{ $tdPrimaryClass }}">
                                         <div x-text="receipt.invoice_number"></div>
@@ -524,6 +524,53 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <div class="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <p class="{{ $captionClass }}">
+                        <span x-show="filteredReceipts().length > 0">
+                            Showing <span x-text="receiptFirstItem()"></span>-<span x-text="receiptLastItem()"></span>
+                            of <span x-text="filteredReceipts().length"></span> receipt<span x-show="filteredReceipts().length !== 1">s</span>.
+                        </span>
+                        <span x-show="filteredReceipts().length === 0">No receipts found.</span>
+                    </p>
+                    <label class="flex items-center gap-2">
+                        <span class="text-theme-sm text-gray-500 dark:text-gray-400">Rows</span>
+                        <select x-model.number="receiptPerPage" x-on:change="resetReceiptPage()" class="h-9 w-20 rounded-lg border border-gray-300 bg-transparent px-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800">
+                            <template x-for="option in receiptPerPageOptions" :key="option">
+                                <option :value="option" x-text="option"></option>
+                            </template>
+                        </select>
+                    </label>
+                </div>
+
+                <nav x-show="receiptTotalPages() > 1" class="flex flex-wrap items-center gap-2 lg:justify-end" role="navigation" aria-label="Receipt pagination">
+                    <button type="button" x-on:click="goToReceiptPage(receiptCurrentPage() - 1)" :disabled="receiptCurrentPage() === 1" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-gray-400 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06] dark:disabled:bg-transparent dark:disabled:text-gray-600">
+                        Prev
+                    </button>
+
+                    <template x-for="item in receiptPaginationItems()" :key="item.key">
+                        <span>
+                            <span x-show="item.ellipsis" class="inline-flex h-9 min-w-9 items-center justify-center px-1 text-theme-sm text-gray-400 dark:text-gray-600">...</span>
+                            <button
+                                x-show="!item.ellipsis"
+                                type="button"
+                                x-on:click="goToReceiptPage(item.page)"
+                                class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-3 text-theme-sm font-medium transition"
+                                :class="item.page === receiptCurrentPage()
+                                    ? 'bg-brand-500 text-white'
+                                    : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]'"
+                                :aria-current="item.page === receiptCurrentPage() ? 'page' : null"
+                                x-text="item.page">
+                            </button>
+                        </span>
+                    </template>
+
+                    <button type="button" x-on:click="goToReceiptPage(receiptCurrentPage() + 1)" :disabled="receiptCurrentPage() === receiptTotalPages()" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-gray-400 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06] dark:disabled:bg-transparent dark:disabled:text-gray-600">
+                        Next
+                    </button>
+                </nav>
             </div>
         </section>
 
@@ -780,6 +827,9 @@
                 receiptCustomerId: '',
                 receiptInvoiceNumber: '',
                 receiptIssueStatus: '',
+                receiptPage: 1,
+                receiptPerPage: 10,
+                receiptPerPageOptions: [10, 50, 100],
                 modal: null,
                 selectedInvoice: null,
                 generationForm: {
@@ -869,10 +919,63 @@
                     });
                 },
 
+                receiptTotalPages() {
+                    return Math.max(1, Math.ceil(this.filteredReceipts().length / this.receiptPerPage));
+                },
+
+                receiptCurrentPage() {
+                    return Math.min(Math.max(Number(this.receiptPage) || 1, 1), this.receiptTotalPages());
+                },
+
+                paginatedReceipts() {
+                    const page = this.receiptCurrentPage();
+                    const start = (page - 1) * this.receiptPerPage;
+
+                    return this.filteredReceipts().slice(start, start + this.receiptPerPage);
+                },
+
+                receiptFirstItem() {
+                    return this.filteredReceipts().length > 0
+                        ? ((this.receiptCurrentPage() - 1) * this.receiptPerPage) + 1
+                        : 0;
+                },
+
+                receiptLastItem() {
+                    return Math.min(this.receiptCurrentPage() * this.receiptPerPage, this.filteredReceipts().length);
+                },
+
+                receiptPaginationItems() {
+                    const current = this.receiptCurrentPage();
+                    const last = this.receiptTotalPages();
+                    const pages = [...new Set([1, current - 1, current, current + 1, last])]
+                        .filter((page) => page >= 1 && page <= last)
+                        .sort((a, b) => a - b);
+                    const items = [];
+
+                    pages.forEach((page, index) => {
+                        if (index > 0 && page > pages[index - 1] + 1) {
+                            items.push({ key: `ellipsis-${pages[index - 1]}-${page}`, ellipsis: true });
+                        }
+
+                        items.push({ key: `page-${page}`, page, ellipsis: false });
+                    });
+
+                    return items;
+                },
+
+                goToReceiptPage(page) {
+                    this.receiptPage = Math.min(Math.max(Number(page) || 1, 1), this.receiptTotalPages());
+                },
+
+                resetReceiptPage() {
+                    this.receiptPage = 1;
+                },
+
                 resetReceiptFilters() {
                     this.receiptCustomerId = '';
                     this.receiptInvoiceNumber = '';
                     this.receiptIssueStatus = '';
+                    this.resetReceiptPage();
                 },
 
                 openGenerate() {
