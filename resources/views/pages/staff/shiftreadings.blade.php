@@ -38,17 +38,17 @@
             ['key' => 'sales', 'label' => 'Sales Reading'],
         ];
         $denominations = [
-            ['key' => '1000', 'label' => '1000', 'value' => 1000, 'type' => 'Paper'],
-            ['key' => '500', 'label' => '500', 'value' => 500, 'type' => 'Paper'],
-            ['key' => '200', 'label' => '200', 'value' => 200, 'type' => 'Paper'],
-            ['key' => '100', 'label' => '100', 'value' => 100, 'type' => 'Paper'],
-            ['key' => '50', 'label' => '50', 'value' => 50, 'type' => 'Paper'],
-            ['key' => '20_paper', 'label' => '20', 'value' => 20, 'type' => 'Paper'],
-            ['key' => '20_coin', 'label' => '20', 'value' => 20, 'type' => 'Coin'],
-            ['key' => '10', 'label' => '10', 'value' => 10, 'type' => 'Coin'],
-            ['key' => '5', 'label' => '5', 'value' => 5, 'type' => 'Coin'],
-            ['key' => '1', 'label' => '1', 'value' => 1, 'type' => 'Coin'],
-            ['key' => '025', 'label' => '25 cents', 'value' => 0.25, 'type' => 'Coin'],
+            ['key' => '1000', 'label' => 'PHP 1,000', 'value' => 1000, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '500', 'label' => 'PHP 500', 'value' => 500, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '200', 'label' => 'PHP 200', 'value' => 200, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '100', 'label' => 'PHP 100', 'value' => 100, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '50', 'label' => 'PHP 50', 'value' => 50, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '20_paper', 'label' => 'PHP 20', 'value' => 20, 'type' => 'Banknote', 'unit' => 'bill'],
+            ['key' => '20_coin', 'label' => 'PHP 20', 'value' => 20, 'type' => 'Coin', 'unit' => 'coin'],
+            ['key' => '10', 'label' => 'PHP 10', 'value' => 10, 'type' => 'Coin', 'unit' => 'coin'],
+            ['key' => '5', 'label' => 'PHP 5', 'value' => 5, 'type' => 'Coin', 'unit' => 'coin'],
+            ['key' => '1', 'label' => 'PHP 1', 'value' => 1, 'type' => 'Coin', 'unit' => 'coin'],
+            ['key' => '025', 'label' => '25 centavos', 'value' => 0.25, 'type' => 'Coin', 'unit' => 'coin'],
         ];
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]';
@@ -333,19 +333,19 @@
             @endif
         </section>
 
-        <div x-show="modal === 'form'" x-cloak class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
+        <div x-show="modal === 'form'" x-cloak class="fixed inset-0 z-[100010] flex items-center justify-center overflow-hidden p-0 sm:p-3">
             <div class="fixed inset-0 bg-gray-950/75 backdrop-blur-md" x-on:click="if (!saving) closeForm()"></div>
-            <div class="relative w-full max-w-7xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+            <div class="relative flex h-screen w-screen flex-col overflow-hidden rounded-none border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)] sm:rounded-2xl">
                 <button type="button" x-on:click="closeForm()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close settlement form">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
 
-                <div class="border-b border-gray-100 bg-gray-50/70 p-5 pr-14 dark:border-gray-800 dark:bg-white/[0.02] md:p-6 md:pr-16">
+                <div class="shrink-0 border-b border-gray-100 bg-gray-50/70 p-4 pr-14 dark:border-gray-800 dark:bg-white/[0.02] md:px-6 md:py-5 md:pr-16">
                     <p class="{{ $labelClass }}">New Settlement</p>
                     <h2 class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">Submit Periodical Settlement</h2>
                 </div>
 
-                <form x-ref="form" x-on:submit.prevent="submitReading()" class="max-h-[82vh] overflow-y-auto p-5 custom-scrollbar md:p-6">
+                <form x-ref="form" x-on:submit.prevent="submitReading()" class="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar md:p-6">
                     <div class="mb-5 rounded-xl border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-500/25 dark:bg-brand-500/10">
                         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div class="min-w-0">
@@ -364,7 +364,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
                         <div class="space-y-5">
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <div class="mb-4">
@@ -523,8 +523,8 @@
                             </section>
                         </div>
 
-                        <aside class="space-y-5 xl:self-start">
-                            <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-theme-sm dark:border-gray-800 dark:bg-gray-900 xl:sticky xl:top-0 xl:z-20">
+                        <aside class="min-w-0 space-y-5 xl:self-start">
+                            <section class="relative z-0 rounded-xl border border-gray-200 bg-white p-4 shadow-theme-sm dark:border-gray-800 dark:bg-gray-900">
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Live Settlement Preview</h3>
@@ -578,18 +578,53 @@
 
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <div class="mb-3 flex items-center justify-between gap-3">
-                                    <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Cash Count</h3>
-                                    <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(cashTotal())"></span>
+                                    <div>
+                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Cash Denomination Count</h3>
+                                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Enter the number of bills or coins physically remitted.</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="{{ $labelClass }}">Cash Total</p>
+                                        <span class="mt-1 block text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(cashTotal())"></span>
+                                    </div>
                                 </div>
-                                <div class="space-y-2">
-                                    <template x-for="denomination in denominations" :key="denomination.key">
-                                        <div class="grid grid-cols-[minmax(0,1fr)_5rem_6.5rem] items-center gap-2">
-                                            <div class="min-w-0">
-                                                <p class="truncate text-theme-xs font-medium text-gray-700 dark:text-gray-300" x-text="denomination.label"></p>
-                                                <p class="text-[11px] uppercase text-gray-400" x-text="denomination.type"></p>
+
+                                <div class="space-y-4">
+                                    <template x-for="cashType in ['Banknote', 'Coin']" :key="cashType">
+                                        <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                                            <div class="flex items-center justify-between gap-3 bg-gray-50 px-3 py-2.5 dark:bg-white/[0.03]">
+                                                <div>
+                                                    <p class="text-theme-xs font-semibold uppercase text-gray-600 dark:text-gray-300" x-text="cashType === 'Banknote' ? 'Peso Bills' : 'Peso Coins'"></p>
+                                                    <p class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400" x-text="cashPieceCount(cashType).toLocaleString('en-PH') + ' total piece(s)'"></p>
+                                                </div>
+                                                <span class="text-theme-xs font-semibold tabular-nums text-gray-700 dark:text-gray-300" x-text="money(cashGroupTotal(cashType))"></span>
                                             </div>
-                                            <input type="number" min="0" step="1" x-model="form.cash[denomination.key]" x-bind:name="'cash_denominations[' + denomination.key + ']'" class="{{ $inputClass }} px-2 text-right">
-                                            <span class="text-right text-theme-xs font-semibold tabular-nums text-gray-700 dark:text-gray-300" x-text="money(denominationAmount(denomination))"></span>
+
+                                            <div class="grid grid-cols-[minmax(0,1fr)_5rem_6.75rem] gap-2 border-t border-gray-100 px-3 py-2 text-[11px] font-medium uppercase text-gray-400 dark:border-gray-800">
+                                                <span>Denomination</span>
+                                                <span class="text-center">Pieces</span>
+                                                <span class="text-right">Subtotal</span>
+                                            </div>
+
+                                            <div class="divide-y divide-gray-100 px-3 dark:divide-gray-800">
+                                                <template x-for="denomination in denominationsByType(cashType)" :key="denomination.key">
+                                                    <label class="grid grid-cols-[minmax(0,1fr)_5rem_6.75rem] items-center gap-2 py-2.5">
+                                                        <div class="min-w-0">
+                                                            <p class="truncate text-theme-xs font-medium text-gray-700 dark:text-gray-300" x-text="denomination.label"></p>
+                                                            <p class="text-[11px] text-gray-400" x-text="denomination.unit"></p>
+                                                        </div>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            inputmode="numeric"
+                                                            x-model="form.cash[denomination.key]"
+                                                            x-bind:name="'cash_denominations[' + denomination.key + ']'"
+                                                            x-bind:aria-label="'Number of ' + denomination.label + ' ' + denomination.unit + 's'"
+                                                            class="{{ $inputClass }} px-2 text-center tabular-nums">
+                                                        <span class="text-right text-theme-xs font-semibold tabular-nums text-gray-700 dark:text-gray-300" x-text="money(denominationAmount(denomination))"></span>
+                                                    </label>
+                                                </template>
+                                            </div>
                                         </div>
                                     </template>
                                 </div>
@@ -1245,6 +1280,21 @@
                 },
                 denominationAmount(denomination) {
                     return Math.max(0, Number(this.form.cash[denomination.key] || 0)) * Number(denomination.value || 0);
+                },
+                denominationsByType(type) {
+                    return this.denominations.filter((denomination) => denomination.type === type);
+                },
+                cashPieceCount(type) {
+                    return this.denominationsByType(type).reduce(
+                        (total, denomination) => total + Math.max(0, Math.trunc(Number(this.form.cash[denomination.key] || 0))),
+                        0
+                    );
+                },
+                cashGroupTotal(type) {
+                    return this.denominationsByType(type).reduce(
+                        (total, denomination) => total + this.denominationAmount(denomination),
+                        0
+                    );
                 },
                 cashTotal() {
                     return this.denominations.reduce((total, denomination) => total + this.denominationAmount(denomination), 0);
