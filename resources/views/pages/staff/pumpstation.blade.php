@@ -23,9 +23,14 @@
         $successButtonClass = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-success-200 bg-white px-3 py-2 text-theme-xs font-medium text-success-700 shadow-theme-xs transition hover:bg-success-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-success-500/30 dark:bg-gray-900 dark:text-success-400 dark:hover:bg-success-500/10';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $thCompactClass = 'px-3 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $thCompactNumberClass = 'px-3 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
+        $tdCompactClass = 'px-3 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
+        $tdCompactPrimaryClass = 'px-3 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
+        $tdCompactNumberClass = 'px-3 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
 
         $standardPrice = function ($fuel) use ($prices) {
             return (float) ($prices->get($fuel) ?? 0);
@@ -207,7 +212,7 @@
             font-size: 0.9375rem;
         }
 
-        .sale-transaction-modal .sale-modal-digital {
+        .sale-modal-digital {
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
             font-variant-numeric: tabular-nums;
             letter-spacing: -0.025em;
@@ -235,7 +240,10 @@
             csrfToken: @js(csrf_token())
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || confirmation.open || messageDialog.open || passwordDialog.open)"
+        x-effect="
+            document.body.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
+            document.documentElement.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
+        "
         class="space-y-6">
 
         @if ($missingPumpTables)
@@ -272,14 +280,12 @@
         </div>
 
         <section class="{{ $cardClass }}">
-            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-                <div class="min-w-0">
-                    <p class="{{ $labelClass }}">Staff Module</p>
-                    <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Pump Station Dashboard</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Log pump sales, pending account collections, and printable transaction batches for the current shift.</p>
+            <div class="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pump Lanes</h2>
+                    <p class="mt-1 {{ $captionClass }}">Open a pump to log a credit or walk-in sale.</p>
                 </div>
-
-                <div class="flex flex-col gap-2 sm:flex-row">
+                <div class="flex flex-col gap-2 sm:flex-row lg:shrink-0">
                     <a href="{{ route('staff.printed-transactions.index') }}" class="{{ $secondaryButtonClass }}">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M7 8V4.75C7 4.336 7.336 4 7.75 4h8.5c.414 0 .75.336.75.75V8M7 17.5H5.75A2.75 2.75 0 0 1 3 14.75v-3A2.75 2.75 0 0 1 5.75 9h12.5A2.75 2.75 0 0 1 21 11.75v3a2.75 2.75 0 0 1-2.75 2.75H17M7.75 14h8.5c.414 0 .75.336.75.75v4.5a.75.75 0 0 1-.75.75h-8.5a.75.75 0 0 1-.75-.75v-4.5c0-.414.336-.75.75-.75Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -292,15 +298,6 @@
                         </svg>
                         Receive Payment
                     </button>
-                </div>
-            </div>
-        </section>
-
-        <section class="{{ $cardClass }}">
-            <div class="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pump Lanes</h2>
-                    <p class="mt-1 {{ $captionClass }}">Open a pump to log a credit or walk-in sale.</p>
                 </div>
             </div>
 
@@ -395,27 +392,27 @@
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[1180px] w-full table-fixed">
+                    <table class="min-w-[1100px] w-full table-fixed">
                         <colgroup>
                             <col class="w-[5%]">
-                            <col class="w-[10%]">
-                            <col class="w-[8%]">
-                            <col class="w-[10%]">
-                            <col class="w-[11%]">
-                            <col class="w-[24%]">
-                            <col class="w-[8%]">
+                            <col class="w-[9%]">
+                            <col class="w-[7%]">
+                            <col class="w-[9%]">
+                            <col class="w-[9%]">
+                            <col class="w-[21%]">
+                            <col class="w-[7%]">
+                            <col class="w-[19%]">
                             <col class="w-[14%]">
-                            <col class="w-[10%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
                                 <th class="px-5 py-3 text-center text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Print</th>
-                                <th class="{{ $thClass }}">Time</th>
-                                <th class="{{ $thClass }}">Pump</th>
-                                <th class="{{ $thClass }}">Product</th>
-                                <th class="{{ $thClass }}">Type</th>
-                                <th class="{{ $thClass }}">Customer Details</th>
-                                <th class="{{ $thNumberClass }}">Liters</th>
+                                <th class="{{ $thCompactClass }}">Time</th>
+                                <th class="{{ $thCompactClass }}">Pump</th>
+                                <th class="{{ $thCompactClass }}">Product</th>
+                                <th class="{{ $thCompactClass }}">Type</th>
+                                <th class="{{ $thCompactClass }}">Customer Details</th>
+                                <th class="{{ $thCompactNumberClass }}">Liters</th>
                                 <th class="{{ $thNumberClass }}">Status / Amount</th>
                                 <th class="{{ $thClass }}">Action</th>
                             </tr>
@@ -435,6 +432,12 @@
                                     $registeredPrintCustomer = in_array($sale->payment_type, ['credit', 'Collection'], true) && !empty($printAccountCustomerId);
                                     $saleStyle = $fuelStyle($sale->fuel_type);
                                     $totalDiscount = (float) ($sale->discount ?? 0) + (float) ($sale->manual_discount ?? 0);
+                                    $customerPrimaryName = trim((string) ($sale->owner_name ?: ($sale->customer_name ?: '')));
+                                    $customerCompanyName = trim((string) ($sale->business_name ?: ''));
+                                    $customerPrimaryName = $customerPrimaryName !== '' ? $customerPrimaryName : 'No customer name';
+                                    $customerCompanyName = $customerCompanyName !== '' && strtoupper($customerCompanyName) !== 'N/A'
+                                        ? $customerCompanyName
+                                        : 'No company name';
 
                                     if ($registeredPrintCustomer) {
                                         $printCustomerKey = 'account-' . $printAccountCustomerId;
@@ -458,9 +461,9 @@
                                             @disabled($isVoidedPostedCollection)
                                             title="{{ $isVoidedPostedCollection ? 'Voided payments cannot be printed' : 'Select transaction' }}">
                                     </td>
-                                    <td class="{{ $tdClass }}">{{ $sale->created_at ? \Carbon\Carbon::parse($sale->created_at)->format('M d, h:i A') : 'N/A' }}</td>
-                                    <td class="{{ $tdClass }}">{{ $isCollection ? 'N/A' : 'Pump ' . $sale->pump_id }}</td>
-                                    <td class="{{ $tdClass }}">
+                                    <td class="{{ $tdCompactClass }}">{{ $sale->created_at ? \Carbon\Carbon::parse($sale->created_at)->format('M d, h:i A') : 'N/A' }}</td>
+                                    <td class="{{ $tdCompactClass }}">{{ $isCollection ? 'N/A' : 'Pump ' . $sale->pump_id }}</td>
+                                    <td class="{{ $tdCompactClass }}">
                                         @if ($isCollection)
                                             <span class="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">Payment</span>
                                         @else
@@ -470,7 +473,7 @@
                                             </span>
                                         @endif
                                     </td>
-                                    <td class="{{ $tdClass }}">
+                                    <td class="{{ $tdCompactClass }}">
                                         @if ($sale->payment_type === 'credit')
                                             <span class="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">Credit Sale</span>
                                         @elseif ($isCollection)
@@ -479,11 +482,11 @@
                                             <span class="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">Walk-In</span>
                                         @endif
                                     </td>
-                                    <td class="{{ $tdPrimaryClass }}">
+                                    <td class="{{ $tdCompactPrimaryClass }}">
                                         @if ($sale->payment_type === 'credit' || $isCollection)
-                                            <div class="max-w-full truncate">{{ $sale->business_name ?: ($sale->customer_name ?: 'No company name') }}</div>
+                                            <div class="max-w-full truncate font-semibold">{{ $customerPrimaryName }}</div>
                                             <div class="mt-1 truncate text-theme-xs font-normal text-gray-500 dark:text-gray-400">
-                                                {{ $sale->owner_name ?: ($isVoidedPostedCollection ? 'Payment voided from account' : ($isPostedCollection ? 'Payment already reflected' : 'No owner name')) }}
+                                                {{ $customerCompanyName }}
                                             </div>
                                         @else
                                             <div class="max-w-full truncate">{{ $sale->customer_name ?: 'Walk-In Customer' }}</div>
@@ -492,7 +495,7 @@
                                             @endif
                                         @endif
                                     </td>
-                                    <td class="{{ $tdNumberClass }}">{{ $isCollection ? '-' : number_format((float) $sale->liters, 2) . ' L' }}</td>
+                                    <td class="{{ $tdCompactNumberClass }}">{{ $isCollection ? '-' : number_format((float) $sale->liters, 2) . ' L' }}</td>
                                     <td class="{{ $tdNumberClass }}">
                                         <div class="{{ $isCollection ? 'text-success-700 dark:text-success-400' : 'text-gray-800 dark:text-white/90' }} font-semibold">
                                             {{ $isCollection ? '+' : '' }}&#8369;{{ number_format((float) $sale->amount, 2) }}
@@ -738,121 +741,178 @@
         </template>
 
         <template x-teleport="body">
-            <div x-show="paymentModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-y-auto bg-gray-950/75 p-4 backdrop-blur-md sm:p-6">
-                <div x-on:click.outside="if (!feedbackActive()) closePaymentModal()" class="w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
-                    <div class="h-1.5 bg-success-500"></div>
+            <div x-show="paymentModalOpen" x-cloak class="fixed inset-0 z-[100010] grid h-dvh place-items-center overflow-hidden bg-gray-950/75 p-2 backdrop-blur-md sm:p-4">
+                <div x-on:click.outside="if (!feedbackActive()) closePaymentModal()" class="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 max-w-6xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:rounded-2xl">
+                    <div class="h-1 bg-success-500"></div>
 
-                    <div class="flex items-start justify-between gap-4 border-b border-gray-100 bg-gray-50/80 px-5 py-4 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <div>
+                    <div class="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 sm:px-5">
+                        <div class="min-w-0">
                             <p class="{{ $labelClass }}">Account Collection</p>
-                            <h2 class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">Receive Payment</h2>
-                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400" x-text="selectedPaymentCustomer?.label || 'Select a credit customer to view payment details.'"></p>
+                            <h2 class="mt-0.5 text-lg font-semibold text-gray-800 dark:text-white/90">Receive Payment</h2>
                         </div>
-                        <button type="button" x-on:click="closePaymentModal" class="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
+                        <button type="button" x-on:click="closePaymentModal" class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white" aria-label="Close payment modal">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <path d="m6.75 6.75 10.5 10.5M17.25 6.75 6.75 17.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                             </svg>
                         </button>
                     </div>
 
-                    <form x-on:submit.prevent="submitPayment" class="max-h-[calc(100vh-8rem)] space-y-5 overflow-y-auto p-5">
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
-                            <div class="rounded-xl border border-brand-100 bg-brand-50 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
-                                <p class="text-theme-xs font-medium uppercase text-brand-700 dark:text-brand-300">Customer</p>
-                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedPaymentCustomer?.label || '-'"></p>
-                            </div>
-                            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                                <p class="{{ $labelClass }}">Balance</p>
-                                <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(selectedPaymentCustomer?.balance || 0)"></p>
-                            </div>
-                            <div class="rounded-xl border border-success-100 bg-success-50 p-3 dark:border-success-500/20 dark:bg-success-500/10">
-                                <p class="text-theme-xs font-medium uppercase text-success-700 dark:text-success-300">Receiving</p>
-                                <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(payment.amount || 0)"></p>
-                            </div>
-                            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                                <p class="{{ $labelClass }}">Method</p>
-                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="payment.payment_method || 'Cash'"></p>
+                    <form x-on:submit.prevent="submitPayment" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                        <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50/60 p-3 dark:bg-gray-950/30 sm:p-4 lg:p-5">
+                            <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+                                <div class="min-w-0 space-y-3">
+                                    <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <div>
+                                                <p class="{{ $labelClass }}">1. Select Credit Customer</p>
+                                                <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">Choose the account receiving the payment.</p>
+                                            </div>
+                                        </div>
+                                        <label class="mt-3 block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                            <span>Credit Customer</span>
+                                            <select x-model="payment.customer_id" x-on:change="loadInvoices" class="mt-1.5 {{ $selectClass }}" required>
+                                                <option value="">Select customer</option>
+                                                <template x-for="customer in customers" :key="customer.id">
+                                                    <option :value="customer.id" x-text="customer.label"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                    </div>
+
+                                    <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                                        <div class="flex min-w-0 items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="{{ $labelClass }}">2. Customer Balance</p>
+                                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedPaymentCustomer?.label || 'No customer selected'"></p>
+                                            </div>
+                                            <span class="shrink-0 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-theme-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Credit</span>
+                                        </div>
+
+                                        <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                            <div class="min-w-0 rounded-lg border border-error-100 bg-error-50/70 p-3 dark:border-error-500/25 dark:bg-error-500/10">
+                                                <p class="text-theme-xs font-medium uppercase text-error-600 dark:text-error-400">Current Balance</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-lg font-bold text-error-600 dark:text-error-400" x-text="money(selectedPaymentCustomer?.balance || 0)"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-brand-100 bg-brand-50/70 p-3 dark:border-brand-500/25 dark:bg-brand-500/10">
+                                                <p class="text-theme-xs font-medium uppercase text-brand-600 dark:text-brand-300">Credit Limit</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-lg font-bold text-brand-700 dark:text-brand-300" x-text="money(selectedPaymentCustomer?.limit || 0)"></p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                                        <p class="{{ $labelClass }}">3. Payment Details</p>
+                                        <div class="mt-3 space-y-3">
+                                            <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                                <span>Amount Paid</span>
+                                                <div class="mt-1.5 flex rounded-lg shadow-theme-xs ring-1 ring-success-500/10">
+                                                    <span class="inline-flex h-12 items-center rounded-l-lg border border-r-0 border-success-200 bg-success-50 px-3 text-theme-sm font-semibold text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400">&#8369;</span>
+                                                    <input x-ref="paymentAmountInput" type="number" x-model.number="payment.amount" min="1" step="0.01" class="sale-modal-digital h-12 min-w-0 w-full rounded-r-lg border border-success-200 bg-white px-4 py-2.5 text-right text-lg font-bold text-success-700 placeholder:text-gray-400 focus:border-success-400 focus:outline-hidden focus:ring-3 focus:ring-success-500/20 dark:border-success-500/30 dark:bg-gray-900 dark:text-success-400 dark:placeholder:text-white/30" placeholder="0.00" required>
+                                                </div>
+                                            </label>
+
+                                            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                                    <span>Method</span>
+                                                    <select x-model="payment.payment_method" class="mt-1.5 {{ $selectClass }}" required>
+                                                        <option value="Cash">Cash</option>
+                                                        <option value="Check">Check</option>
+                                                        <option value="Bank Transfer">Bank Transfer</option>
+                                                        <option value="GCash">GCash / E-Wallet</option>
+                                                    </select>
+                                                </label>
+                                                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                                    <span>OR Number</span>
+                                                    <input type="text" x-model="payment.or_number" class="mt-1.5 {{ $inputClass }}" placeholder="Optional">
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="min-w-0 space-y-3">
+                                    <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                                        <div class="flex min-w-0 items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="{{ $labelClass }}">4. Invoice Link</p>
+                                                <h3 class="mt-0.5 text-theme-sm font-semibold text-gray-800 dark:text-white/90">Optional invoice selection</h3>
+                                                <p class="truncate text-theme-xs text-gray-500 dark:text-gray-400">Keep manual payment selected when this is not tied to a specific invoice.</p>
+                                            </div>
+                                            <span x-show="loadingInvoices" class="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">Loading...</span>
+                                        </div>
+
+                                        <select x-model="payment.invoice_id" x-on:change="selectInvoice" class="mt-3 {{ $selectClass }}">
+                                            <option value="">Manual payment</option>
+                                            <template x-for="invoice in invoices" :key="invoice.id">
+                                                <option :value="invoice.id" x-text="invoiceLabel(invoice)"></option>
+                                            </template>
+                                        </select>
+
+                                        <div class="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">Invoice</p>
+                                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice?.invoice_number || 'Manual'"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">Status</p>
+                                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice?.status || 'Not linked'"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">Remaining</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice ? money(invoiceRemaining(selectedInvoice)) : money(selectedPaymentCustomer?.balance || 0)"></p>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-3 grid min-w-0 grid-cols-2 gap-2">
+                                            <button type="button" x-on:click="setPaymentType('partial')" class="{{ $secondaryButtonClass }} !h-10 !px-3 !text-xs" :disabled="!selectedPaymentCustomer">Partial Payment</button>
+                                            <button type="button" x-on:click="setPaymentType('full')" class="{{ $successButtonClass }} !h-10 !px-3" :disabled="!selectedPaymentCustomer">Full Payment</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                                        <p class="{{ $labelClass }}">5. Payment Summary</p>
+                                        <div class="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+                                            <div class="min-w-0 rounded-lg border border-error-100 bg-error-50/70 p-3 dark:border-error-500/25 dark:bg-error-500/10">
+                                                <p class="text-theme-xs font-medium uppercase text-error-600 dark:text-error-400">Balance</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-base font-bold text-error-600 dark:text-error-400" x-text="money(selectedPaymentCustomer?.balance || 0)"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-success-100 bg-success-50/70 p-3 dark:border-success-500/25 dark:bg-success-500/10">
+                                                <p class="text-theme-xs font-medium uppercase text-success-600 dark:text-success-400">Receiving</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-base font-bold text-success-700 dark:text-success-400" x-text="money(paymentAmountValue())"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">After Balance</p>
+                                                <p class="sale-modal-digital mt-1 truncate text-base font-bold" :class="paymentAfterBalanceClass()" x-text="money(paymentAfterBalance())"></p>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">Payment Type</p>
+                                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice ? 'Invoice payment' : 'Manual payment'"></p>
+                                            </div>
+                                            <div class="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                                <p class="{{ $labelClass }}">Method</p>
+                                                <p class="mt-1 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="payment.payment_method || 'Cash'"></p>
+                                            </div>
+                                        </div>
+
+                                        <div x-show="paymentHasOverage()" x-cloak class="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-theme-sm font-medium text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
+                                            Payment is higher than the current customer balance. Review before logging.
+                                        </div>
+                                        <div x-show="paymentAdvanceMessage" x-cloak class="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-theme-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400" x-text="paymentAdvanceMessage"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                            <span>Credit Customer</span>
-                            <select x-model="payment.customer_id" x-on:change="loadInvoices" class="mt-1.5 {{ $selectClass }}" required>
-                                <option value="">Select customer</option>
-                                <template x-for="customer in customers" :key="customer.id">
-                                    <option :value="customer.id" x-text="customer.label"></option>
-                                </template>
-                            </select>
-                        </label>
-
-                        <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
-                            <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Invoice Link</h3>
-                                    <p class="{{ $captionClass }}">Optional for manual payments.</p>
-                                </div>
-                                <span x-show="loadingInvoices" class="text-theme-xs text-gray-500 dark:text-gray-400">Loading...</span>
+                        <div class="shrink-0 border-t border-gray-100 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 sm:px-5">
+                            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                <button type="button" x-on:click="closePaymentModal" class="{{ $secondaryButtonClass }} !h-10 px-4 !text-sm">Cancel</button>
+                                <button type="submit" class="{{ $primaryButtonClass }} !h-10 px-4 !text-sm" :disabled="!canSubmitPayment()">
+                                    <span x-text="savingPayment ? 'Saving...' : 'Log Pending Payment for Review'"></span>
+                                </button>
                             </div>
-
-                            <select x-model="payment.invoice_id" x-on:change="selectInvoice" class="{{ $selectClass }}">
-                                <option value="">Manual payment</option>
-                                <template x-for="invoice in invoices" :key="invoice.id">
-                                    <option :value="invoice.id" x-text="invoiceLabel(invoice)"></option>
-                                </template>
-                            </select>
-
-                            <div x-show="selectedInvoice" x-cloak class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                <div class="rounded-xl bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                    <p class="{{ $labelClass }}">Invoice</p>
-                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice?.invoice_number || '-'"></p>
-                                </div>
-                                <div class="rounded-xl bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                    <p class="{{ $labelClass }}">Status</p>
-                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="selectedInvoice?.status || '-'"></p>
-                                </div>
-                                <div class="rounded-xl bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                    <p class="{{ $labelClass }}">Remaining</p>
-                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="money(invoiceRemaining(selectedInvoice))"></p>
-                                </div>
-                            </div>
-
-                            <div x-show="selectedInvoice" x-cloak class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                <button type="button" x-on:click="setPaymentType('partial')" class="{{ $secondaryButtonClass }}">Partial Payment</button>
-                                <button type="button" x-on:click="setPaymentType('full')" class="{{ $secondaryButtonClass }}">Full Payment</button>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                <span>Amount Paid</span>
-                                <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
-                                    <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                    <input type="number" x-model.number="payment.amount" min="1" step="0.01" class="h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-right text-theme-sm font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00" required>
-                                </div>
-                            </label>
-                            <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                <span>Payment Method</span>
-                                <select x-model="payment.payment_method" class="mt-1.5 {{ $selectClass }}" required>
-                                    <option value="Cash">Cash</option>
-                                    <option value="Check">Check</option>
-                                    <option value="Bank Transfer">Bank Transfer</option>
-                                    <option value="GCash">GCash / E-Wallet</option>
-                                </select>
-                            </label>
-                        </div>
-
-                        <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                            <span>OR Number</span>
-                            <input type="text" x-model="payment.or_number" class="mt-1.5 {{ $inputClass }}" placeholder="Optional">
-                        </label>
-
-                        <div x-show="paymentAdvanceMessage" x-cloak class="rounded-xl border border-brand-200 bg-brand-50 p-3 text-theme-sm text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300" x-text="paymentAdvanceMessage"></div>
-
-                        <div class="flex flex-col-reverse gap-3 border-t border-gray-100 pt-5 dark:border-gray-800 sm:flex-row sm:justify-end">
-                            <button type="button" x-on:click="closePaymentModal" class="{{ $secondaryButtonClass }}">Cancel</button>
-                            <button type="submit" class="{{ $primaryButtonClass }}" :disabled="savingPayment">
-                                <span x-text="savingPayment ? 'Saving...' : 'Log Pending Payment'"></span>
-                            </button>
                         </div>
                     </form>
                 </div>
@@ -1443,6 +1503,43 @@
                         ? 'Includes advance payment of ' + this.money(excess) + '.'
                         : '';
                 },
+                paymentAmountValue() {
+                    return Math.max(0, Number(this.payment.amount || 0));
+                },
+                paymentBalance() {
+                    return Math.max(0, Number(this.selectedPaymentCustomer?.balance || 0));
+                },
+                paymentAfterBalance() {
+                    return Math.max(0, this.paymentBalance() - this.paymentAmountValue());
+                },
+                paymentHasOverage() {
+                    return !!this.selectedPaymentCustomer && this.paymentAmountValue() > this.paymentBalance() + 0.01;
+                },
+                paymentAfterBalanceClass() {
+                    if (!this.selectedPaymentCustomer) {
+                        return 'text-gray-700 dark:text-gray-300';
+                    }
+
+                    return this.paymentAfterBalance() > 0.01
+                        ? 'text-warning-600 dark:text-warning-400'
+                        : 'text-success-700 dark:text-success-400';
+                },
+                validPaymentAmount() {
+                    return Number.isFinite(this.paymentAmountValue()) && this.paymentAmountValue() > 0;
+                },
+                canSubmitPayment() {
+                    return !this.savingPayment && !!this.payment.customer_id && this.validPaymentAmount();
+                },
+                focusPaymentAmount() {
+                    this.$nextTick(() => {
+                        const input = this.$refs.paymentAmountInput || document.querySelector('[x-model\\.number="payment.amount"]');
+
+                        if (input) {
+                            input.focus();
+                            input.select?.();
+                        }
+                    });
+                },
                 async loadInvoices() {
                     this.syncPaymentCustomer();
                     this.payment.invoice_id = '';
@@ -1453,6 +1550,7 @@
                         return;
                     }
 
+                    this.focusPaymentAmount();
                     this.loadingInvoices = true;
 
                     try {
@@ -1472,15 +1570,19 @@
                     this.syncPaymentAmount();
                 },
                 setPaymentType(type) {
-                    if (!this.selectedInvoice) {
+                    if (!this.selectedPaymentCustomer) {
                         return;
                     }
 
                     if (type === 'full') {
-                        this.payment.amount = this.invoiceRemaining(this.selectedInvoice).toFixed(2);
+                        const remaining = this.selectedInvoice
+                            ? this.invoiceRemaining(this.selectedInvoice)
+                            : this.paymentBalance();
+
+                        this.payment.amount = remaining.toFixed(2);
                     } else {
                         this.payment.amount = '';
-                        this.$nextTick(() => document.querySelector('[x-model\\.number="payment.amount"]')?.focus());
+                        this.focusPaymentAmount();
                     }
 
                     this.syncPaymentAmount();
@@ -1501,7 +1603,7 @@
                         return;
                     }
 
-                    if (!Number(this.payment.amount || 0)) {
+                    if (!this.validPaymentAmount()) {
                         this.showNotice('error', 'Please enter a valid payment amount.');
                         return;
                     }
