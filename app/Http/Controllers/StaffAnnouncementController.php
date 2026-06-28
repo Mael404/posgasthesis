@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
@@ -33,9 +34,14 @@ class StaffAnnouncementController extends Controller
             ->paginate(10)
             ->withQueryString();
 
+        $announcementItems = $announcements->getCollection();
+
         return view('pages.staff.announcements', [
             'title' => 'Notifications',
             'announcements' => $announcements,
+            'commentsByAnnouncement' => $this->commentsByAnnouncement(
+                $announcementItems->pluck('id')->map(fn ($id) => (int) $id)->all()
+            ),
             'unreadCount' => $this->unreadCount($userId),
         ]);
     }
@@ -114,9 +120,57 @@ class StaffAnnouncementController extends Controller
         ]);
     }
 
+    public function storeComment(Request $request, $announcement): JsonResponse
+    {
+        $this->ensureAnnouncementsTablesReady();
+        $this->trimCommentInput($request);
+
+        $announcementId = (int) $announcement;
+
+        if (! DB::table('announcements')->where('id', $announcementId)->exists()) {
+            abort(404);
+        }
+
+        $validated = $request->validate([
+            'comment' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $now = now();
+        $commentId = DB::table('announcement_comments')->insertGetId([
+            'announcement_id' => $announcementId,
+            'user_id' => (int) auth()->id(),
+            'comment' => $validated['comment'],
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $comment = DB::table('announcement_comments')
+            ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
+            ->select(
+                'announcement_comments.id',
+                'announcement_comments.announcement_id',
+                'announcement_comments.user_id',
+                'announcement_comments.comment',
+                'announcement_comments.created_at',
+                'users.name as staff_name'
+            )
+            ->where('announcement_comments.id', $commentId)
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Comment sent to admin.',
+            'comment' => $this->formatComment($comment),
+        ]);
+    }
+
     private function ensureAnnouncementsTablesReady(): void
     {
-        if (! Schema::hasTable('announcements') || ! Schema::hasTable('announcement_reads')) {
+        if (
+            ! Schema::hasTable('announcements')
+            || ! Schema::hasTable('announcement_reads')
+            || ! Schema::hasTable('announcement_comments')
+        ) {
             abort(500, 'Announcements tables are not ready. Please run php artisan migrate.');
         }
     }
@@ -131,5 +185,57 @@ class StaffAnnouncementController extends Controller
                     ->where('announcement_reads.user_id', $userId);
             })
             ->count();
+    }
+
+    private function trimCommentInput(Request $request): void
+    {
+        $request->merge([
+            'comment' => trim((string) $request->input('comment', '')),
+        ]);
+    }
+
+    private function commentsByAnnouncement(array $announcementIds): array
+    {
+        if (
+            empty($announcementIds)
+            || ! Schema::hasTable('announcement_comments')
+            || ! Schema::hasTable('users')
+        ) {
+            return [];
+        }
+
+        return DB::table('announcement_comments')
+            ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
+            ->select(
+                'announcement_comments.id',
+                'announcement_comments.announcement_id',
+                'announcement_comments.user_id',
+                'announcement_comments.comment',
+                'announcement_comments.created_at',
+                'users.name as staff_name'
+            )
+            ->whereIn('announcement_comments.announcement_id', $announcementIds)
+            ->orderBy('announcement_comments.created_at')
+            ->orderBy('announcement_comments.id')
+            ->get()
+            ->groupBy('announcement_id')
+            ->map(function ($comments) {
+                return $comments->map(fn ($comment) => $this->formatComment($comment))->values()->all();
+            })
+            ->all();
+    }
+
+    private function formatComment($comment): array
+    {
+        return [
+            'id' => (int) $comment->id,
+            'announcement_id' => (int) $comment->announcement_id,
+            'user_id' => (int) $comment->user_id,
+            'staff_name' => $comment->staff_name ?: 'Staff #' . $comment->user_id,
+            'comment' => (string) $comment->comment,
+            'created_at' => $comment->created_at
+                ? Carbon::parse($comment->created_at)->format('M d, Y h:i A')
+                : 'N/A',
+        ];
     }
 }

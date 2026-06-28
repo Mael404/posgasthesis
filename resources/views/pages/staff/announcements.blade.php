@@ -3,7 +3,8 @@
 @section('content')
     @php
         $announcementItems = $announcements->getCollection();
-        $announcementPayload = $announcementItems->map(function ($announcement) {
+        $commentsByAnnouncement = $commentsByAnnouncement ?? [];
+        $announcementPayload = $announcementItems->map(function ($announcement) use ($commentsByAnnouncement) {
             $adminName = $announcement->admin_name ?: 'Admin #' . $announcement->admin_id;
             $createdAt = $announcement->created_at
                 ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
@@ -11,6 +12,7 @@
             $readAt = $announcement->read_at
                 ? \Carbon\Carbon::parse($announcement->read_at)->format('M d, Y h:i A')
                 : null;
+            $comments = collect($commentsByAnnouncement[$announcement->id] ?? [])->values();
 
             return [
                 'id' => (int) $announcement->id,
@@ -20,7 +22,9 @@
                 'created_at' => $createdAt,
                 'read_at' => $readAt,
                 'is_read' => (bool) $readAt,
-                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName),
+                'comments' => $comments->all(),
+                'comment_count' => $comments->count(),
+                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName . ' ' . $comments->pluck('comment')->implode(' ') . ' ' . $comments->pluck('staff_name')->implode(' ')),
             ];
         })->values();
 
@@ -28,6 +32,7 @@
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $textareaClass = 'min-h-28 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
     @endphp
 
@@ -38,11 +43,39 @@
             announcements: @js($announcementPayload),
             unreadCount: @js((int) $unreadCount),
             csrfToken: @js(csrf_token()),
-            markReadUrlTemplate: @js(route('staff.notifications.read', ['announcement' => '__ID__']))
+            markReadUrlTemplate: @js(route('staff.notifications.read', ['announcement' => '__ID__'])),
+            commentUrlTemplate: @js(route('staff.notifications.comments.store', ['announcement' => '__ID__']))
         })"
         x-init="init()"
         class="space-y-6">
         <style>[x-cloak] { display: none !important; }</style>
+
+        <div
+            x-show="toast.open"
+            x-cloak
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0 translate-y-2 scale-95"
+            x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+            x-transition:leave="transition ease-in duration-200"
+            x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+            x-transition:leave-end="opacity-0 translate-y-2 scale-95"
+            class="fixed right-4 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-white/10 p-4 text-white shadow-theme-lg sm:right-6"
+            style="top: 5.5rem; z-index: 100300; background-color: #047857;"
+            role="status"
+            aria-live="polite">
+            <div class="flex items-start gap-3">
+                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6.75 12.25 3.25 3.25 7.25-7.25" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                </span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-theme-sm font-semibold text-white">Success</p>
+                    <p class="mt-1 text-theme-sm text-white/90" x-text="toast.message"></p>
+                </div>
+                <button type="button" x-on:click="closeToast()" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 hover:text-white" aria-label="Close success message">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+            </div>
+        </div>
 
         <section class="{{ $cardClass }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
@@ -111,9 +144,12 @@
                         </div>
 
                         <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <p class="min-w-0 break-words text-theme-xs text-gray-500 dark:text-gray-400">
-                                Posted by <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $adminName }}</span>
-                            </p>
+                            <div class="min-w-0 space-y-2">
+                                <p class="break-words text-theme-xs text-gray-500 dark:text-gray-400">
+                                    Posted by <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $adminName }}</span>
+                                </p>
+                                <span class="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" x-text="commentLabel('{{ $announcement->id }}')"></span>
+                            </div>
                             <button type="button" x-on:click.stop="openDetails('{{ $announcement->id }}')" class="{{ $primaryButtonClass }}">
                                 <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
                                 Open
@@ -144,7 +180,7 @@
             class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
             style="z-index: 100240;">
             <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeModal()"></div>
-            <div class="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+            <div class="relative max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
                 <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close details">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
@@ -164,6 +200,44 @@
                     <p class="mt-2 break-words text-theme-sm text-gray-500 dark:text-gray-400" x-text="selected ? ('Posted by ' + selected.admin_name + ' | ' + selected.created_at) : ''"></p>
                     <p x-show="selected && selected.read_at" x-cloak class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="'Read on ' + selected.read_at"></p>
                     <div class="mt-5 max-h-[55vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm leading-6 text-gray-700 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-300" x-text="selected ? selected.message : ''"></div>
+
+                    <div class="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Comments</h3>
+                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" x-text="selected ? ((selected.comments || []).length + ' ' + ((selected.comments || []).length === 1 ? 'comment' : 'comments')) : '0 comments'"></span>
+                        </div>
+
+                        <div class="mt-4 space-y-3">
+                            <template x-if="selected && (!selected.comments || selected.comments.length === 0)">
+                                <div class="rounded-xl border border-dashed border-gray-300 p-5 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                    No comments yet.
+                                </div>
+                            </template>
+
+                            <template x-for="comment in (selected ? selected.comments : [])" :key="comment.id">
+                                <article class="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                        <p class="break-words text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="comment.staff_name"></p>
+                                        <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="comment.created_at"></p>
+                                    </div>
+                                    <p class="mt-2 whitespace-pre-line break-words text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="comment.comment"></p>
+                                </article>
+                            </template>
+                        </div>
+
+                        <form x-on:submit.prevent="submitComment()" class="mt-5 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                            <label class="block">
+                                <span class="{{ $labelClass }}">Add Comment</span>
+                                <textarea x-model.trim="commentForm.comment" class="mt-1.5 {{ $textareaClass }}" maxlength="2000" placeholder="Write a comment for the admin"></textarea>
+                            </label>
+                            <div class="flex justify-end">
+                                <button type="submit" class="{{ $primaryButtonClass }}" :disabled="savingComment">
+                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-7-8-1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m12 13 4-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                    <span x-text="savingComment ? 'Sending...' : 'Send Comment'"></span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -207,6 +281,9 @@
                 modal: null,
                 selected: null,
                 markingRead: {},
+                commentForm: { comment: '' },
+                savingComment: false,
+                toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, message: '' },
 
                 init() {
@@ -222,6 +299,12 @@
                 isRead(id) {
                     const item = this.announcementsById[String(id)];
                     return !!(item && item.is_read);
+                },
+
+                commentLabel(id) {
+                    const item = this.announcementsById[String(id)];
+                    const count = Number(item && Array.isArray(item.comments) ? item.comments.length : (item ? item.comment_count : 0));
+                    return count.toLocaleString() + ' ' + (count === 1 ? 'comment' : 'comments');
                 },
 
                 openDetails(id) {
@@ -240,6 +323,7 @@
                     if (this.messageDialog.open) return;
                     this.modal = null;
                     this.selected = null;
+                    this.commentForm.comment = '';
                 },
 
                 async markRead(id) {
@@ -280,6 +364,72 @@
 
                 markReadUrl(id) {
                     return config.markReadUrlTemplate.replace('__ID__', encodeURIComponent(id));
+                },
+
+                async submitComment() {
+                    if (!this.selected) return;
+
+                    const comment = String(this.commentForm.comment || '').trim();
+
+                    if (!comment) {
+                        this.showMessage('Please write a comment before sending.');
+                        return;
+                    }
+
+                    this.savingComment = true;
+
+                    try {
+                        const response = await fetch(this.commentUrl(this.selected.id), {
+                            method: 'POST',
+                            headers: {
+                                'X-CSRF-TOKEN': config.csrfToken,
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ comment })
+                        });
+                        const data = await response.json();
+
+                        if (!response.ok || !data.success || !data.comment) {
+                            const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
+                            this.showMessage(data.message || firstError || 'Unable to send comment.');
+                            return;
+                        }
+
+                        const item = this.announcementsById[String(this.selected.id)];
+
+                        if (item) {
+                            item.comments = Array.isArray(item.comments) ? item.comments : [];
+                            item.comments.push(data.comment);
+                            item.comment_count = item.comments.length;
+                            this.selected = item;
+                        }
+
+                        this.commentForm.comment = '';
+                        this.showToast(data.message || 'Comment sent to admin.');
+                    } catch (error) {
+                        this.showMessage('An unexpected error occurred.');
+                    } finally {
+                        this.savingComment = false;
+                    }
+                },
+
+                commentUrl(id) {
+                    return config.commentUrlTemplate.replace('__ID__', encodeURIComponent(id));
+                },
+
+                showToast(message) {
+                    this.closeToast();
+                    this.toast.message = message;
+                    this.toast.open = true;
+                    this.toast.timer = window.setTimeout(() => this.closeToast(), 3000);
+                },
+
+                closeToast() {
+                    if (this.toast.timer) {
+                        window.clearTimeout(this.toast.timer);
+                    }
+                    this.toast = { open: false, message: '', timer: null };
                 },
 
                 showMessage(message) {

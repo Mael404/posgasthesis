@@ -3,7 +3,9 @@
 @section('content')
     @php
         $announcementItems = $announcements->getCollection();
-        $announcementPayload = $announcementItems->map(function ($announcement) {
+        $commentsByAnnouncement = $commentsByAnnouncement ?? [];
+        $totalComments = (int) ($totalComments ?? 0);
+        $announcementPayload = $announcementItems->map(function ($announcement) use ($commentsByAnnouncement) {
             $adminName = $announcement->admin_name ?: 'Admin #' . $announcement->admin_id;
             $createdAt = $announcement->created_at
                 ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
@@ -11,6 +13,8 @@
             $updatedAt = $announcement->updated_at
                 ? \Carbon\Carbon::parse($announcement->updated_at)->format('M d, Y h:i A')
                 : $createdAt;
+            $comments = collect($commentsByAnnouncement[$announcement->id] ?? [])->values();
+            $latestComment = $comments->last();
 
             return [
                 'id' => (int) $announcement->id,
@@ -19,7 +23,10 @@
                 'admin_name' => $adminName,
                 'created_at' => $createdAt,
                 'updated_at' => $updatedAt,
-                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName),
+                'comments' => $comments->all(),
+                'comment_count' => $comments->count(),
+                'latest_commenter' => $latestComment['staff_name'] ?? null,
+                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName . ' ' . $comments->pluck('comment')->implode(' ') . ' ' . $comments->pluck('staff_name')->implode(' ')),
             ];
         })->values();
 
@@ -48,7 +55,8 @@
             csrfToken: @js(csrf_token()),
             storeUrl: @js(route('admin.announcements.store')),
             updateUrlTemplate: @js(route('admin.announcements.update', ['announcement' => '__ID__'])),
-            deleteUrlTemplate: @js(route('admin.announcements.destroy', ['announcement' => '__ID__']))
+            deleteUrlTemplate: @js(route('admin.announcements.destroy', ['announcement' => '__ID__'])),
+            initialAnnouncementId: @js((string) request('announcement', ''))
         })"
         x-init="init()"
         class="space-y-6">
@@ -102,7 +110,7 @@
                     <p class="mt-2 max-w-3xl {{ $captionClass }}">Post station updates for staff accounts and keep old notices editable from one place.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 sm:min-w-80">
+                <div class="grid grid-cols-1 gap-3 sm:min-w-[28rem] sm:grid-cols-3">
                     <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                         <p class="{{ $labelClass }}">Total Posted</p>
                         <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($announcements->total()) }}</p>
@@ -110,6 +118,10 @@
                     <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                         <p class="{{ $labelClass }}">Latest</p>
                         <p class="mt-2 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $latestPostedAt }}</p>
+                    </article>
+                    <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                        <p class="{{ $labelClass }}">Staff Comments</p>
+                        <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($totalComments) }}</p>
                     </article>
                 </div>
             </div>
@@ -149,7 +161,7 @@
                 <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,340px)] lg:items-end">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Posted Announcements</h2>
-                        <p class="mt-1 {{ $captionClass }}">Newest announcements appear first.</p>
+                        <p class="mt-1 {{ $captionClass }}">Newest announcements appear first. Staff comments are shown in each detail view.</p>
                     </div>
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                         <span>Search</span>
@@ -164,8 +176,10 @@
                             $createdAt = $announcement->created_at
                                 ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
                                 : 'N/A';
+                            $commentCount = count($commentsByAnnouncement[$announcement->id] ?? []);
                         @endphp
                         <article
+                            id="announcement-{{ $announcement->id }}"
                             x-show="matches('{{ $announcement->id }}')"
                             x-on:click="openDetails('{{ $announcement->id }}')"
                             x-on:keydown.enter.prevent="openDetails('{{ $announcement->id }}')"
@@ -181,9 +195,14 @@
                             </div>
 
                             <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <p class="min-w-0 break-words text-theme-xs text-gray-500 dark:text-gray-400">
-                                    Posted by <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $adminName }}</span>
-                                </p>
+                                <div class="min-w-0 space-y-2">
+                                    <p class="break-words text-theme-xs text-gray-500 dark:text-gray-400">
+                                        Posted by <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $adminName }}</span>
+                                    </p>
+                                    <span class="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                                        {{ number_format($commentCount) }} {{ \Illuminate\Support\Str::plural('comment', $commentCount) }}
+                                    </span>
+                                </div>
                                 <div class="flex shrink-0 items-center gap-2" x-on:click.stop="false">
                                     <button type="button" x-on:click="openDetails('{{ $announcement->id }}')" class="{{ $viewIconButtonClass }}" title="View announcement" aria-label="View announcement">
                                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8"/></svg>
@@ -222,7 +241,7 @@
             class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
             style="z-index: 100240;">
             <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeModal()"></div>
-            <div class="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+            <div class="relative max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
                 <button type="button" x-on:click="closeModal()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close details">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
@@ -231,6 +250,31 @@
                     <h2 class="break-words text-xl font-semibold text-gray-800 dark:text-white/90" x-text="selected ? selected.subject : 'Announcement'"></h2>
                     <p class="mt-2 break-words text-theme-sm text-gray-500 dark:text-gray-400" x-text="selected ? ('Posted by ' + selected.admin_name + ' | ' + selected.created_at) : ''"></p>
                     <div class="mt-5 max-h-[55vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm leading-6 text-gray-700 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-300" x-text="selected ? selected.message : ''"></div>
+
+                    <div class="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Staff Comments</h3>
+                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" x-text="selected ? ((selected.comments || []).length + ' ' + ((selected.comments || []).length === 1 ? 'comment' : 'comments')) : '0 comments'"></span>
+                        </div>
+
+                        <div class="mt-4 space-y-3">
+                            <template x-if="selected && (!selected.comments || selected.comments.length === 0)">
+                                <div class="rounded-xl border border-dashed border-gray-300 p-5 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                    No staff comments yet.
+                                </div>
+                            </template>
+
+                            <template x-for="comment in (selected ? selected.comments : [])" :key="comment.id">
+                                <article class="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                        <p class="break-words text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="comment.staff_name"></p>
+                                        <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="comment.created_at"></p>
+                                    </div>
+                                    <p class="mt-2 whitespace-pre-line break-words text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="comment.comment"></p>
+                                </article>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -365,6 +409,10 @@
                 init() {
                     this.announcementsById = Object.fromEntries(this.announcements.map(item => [String(item.id), item]));
                     this.showStoredToast();
+
+                    if (config.initialAnnouncementId) {
+                        this.$nextTick(() => this.openDetails(config.initialAnnouncementId));
+                    }
                 },
 
                 matches(id) {

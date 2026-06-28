@@ -1,14 +1,16 @@
 {{-- Notification Dropdown Component --}}
 @once
     <script>
-        window.shiftReadingNotificationDropdown = function(initialNotifications, notificationUrl) {
+        window.headerNotificationDropdown = function(initialNotifications, notificationUrl) {
             return {
                 dropdownOpen: false,
                 notifications: Array.isArray(initialNotifications) ? initialNotifications : [],
                 notificationUrl: notificationUrl || null,
-                lastSeenId: Number(localStorage.getItem('shiftReadingNotificationLastSeenId') || 0),
+                seenKeys: [],
 
                 init() {
+                    this.seenKeys = this.loadSeenKeys();
+                    this.normalizeNotifications();
                     this.refreshNotifications();
 
                     if (this.notificationUrl) {
@@ -16,16 +18,14 @@
                     }
                 },
 
-                get latestId() {
-                    return this.notifications.reduce((latest, notification) => {
-                        return Math.max(latest, Number(notification.id || 0));
-                    }, 0);
+                get notificationKeys() {
+                    return this.notifications
+                        .map((notification) => String(notification.id || ''))
+                        .filter(Boolean);
                 },
 
                 get unreadCount() {
-                    return this.notifications.filter((notification) => {
-                        return Number(notification.id || 0) > this.lastSeenId;
-                    }).length;
+                    return this.notificationKeys.filter((key) => !this.seenKeys.includes(key)).length;
                 },
 
                 get notifying() {
@@ -45,9 +45,19 @@
                 },
 
                 markCurrentAsSeen() {
-                    if (this.latestId > this.lastSeenId) {
-                        this.lastSeenId = this.latestId;
-                        localStorage.setItem('shiftReadingNotificationLastSeenId', String(this.latestId));
+                    if (this.notificationKeys.length === 0) {
+                        return;
+                    }
+
+                    this.seenKeys = Array.from(new Set([
+                        ...this.seenKeys,
+                        ...this.notificationKeys,
+                    ])).slice(-80);
+
+                    try {
+                        localStorage.setItem('adminHeaderNotificationSeenKeys', JSON.stringify(this.seenKeys));
+                    } catch (error) {
+                        //
                     }
                 },
 
@@ -58,6 +68,22 @@
                         .slice(0, 2)
                         .map((part) => part.charAt(0).toUpperCase())
                         .join('') || 'S';
+                },
+
+                loadSeenKeys() {
+                    try {
+                        const keys = JSON.parse(localStorage.getItem('adminHeaderNotificationSeenKeys') || '[]');
+                        return Array.isArray(keys) ? keys.map((key) => String(key)) : [];
+                    } catch (error) {
+                        return [];
+                    }
+                },
+
+                normalizeNotifications() {
+                    this.notifications = this.notifications.map((notification) => ({
+                        ...notification,
+                        id: String(notification.id || ''),
+                    })).filter((notification) => notification.id);
                 },
 
                 async refreshNotifications() {
@@ -81,9 +107,10 @@
 
                         if (Array.isArray(data.notifications)) {
                             this.notifications = data.notifications;
+                            this.normalizeNotifications();
                         }
                     } catch (error) {
-                        console.warn('Could not refresh shift reading notifications.', error);
+                        console.warn('Could not refresh admin notifications.', error);
                     }
                 },
 
@@ -103,7 +130,7 @@
 
 <div
     class="relative"
-    x-data="shiftReadingNotificationDropdown(@js($notifications), @js($notificationsUrl))"
+    x-data="headerNotificationDropdown(@js($notifications), @js($notificationsUrl))"
     x-init="init()"
     @click.away="closeDropdown()"
 >
@@ -156,10 +183,10 @@
         <!-- Dropdown Header -->
         <div class="flex shrink-0 items-center justify-between border-b border-brand-100 bg-brand-50 px-4 py-4 dark:border-brand-800/60 dark:bg-brand-950/30">
             <div>
-                <h5 class="text-lg font-semibold text-brand-900 dark:text-brand-100">Shift Reading Notifications</h5>
+                <h5 class="text-lg font-semibold text-brand-900 dark:text-brand-100">Notifications</h5>
                 <p class="text-xs font-medium text-brand-700 dark:text-brand-300">
                     <span x-text="notifications.length"></span>
-                    pending for verification
+                    recent admin alerts
                 </p>
             </div>
 
@@ -192,8 +219,8 @@
                             <path d="M8 16.25C8.23444 16.9704 9.02944 17.5 10 17.5C10.9706 17.5 11.7656 16.9704 12 16.25H8Z" fill="currentColor"/>
                         </svg>
                     </span>
-                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">No pending shift readings</span>
-                    <span class="mt-1 text-xs text-gray-500 dark:text-gray-400">New staff submissions will appear here.</span>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">No new notifications</span>
+                    <span class="mt-1 text-xs text-gray-500 dark:text-gray-400">Staff comments and pending readings will appear here.</span>
                 </li>
             </template>
 
@@ -204,22 +231,23 @@
                         :href="notification.url || '{{ route('admin.reconcile.index') }}'"
                     >
                         <span class="relative flex h-10 w-10 max-w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-950/40 dark:text-brand-200">
-                            <span x-text="initials(notification.staffName)"></span>
+                            <span x-text="initials(notification.actorName)"></span>
                             <span class="absolute bottom-0 right-0 z-10 h-2.5 w-full max-w-2.5 rounded-full border-[1.5px] border-white bg-brand-500 dark:border-gray-900"></span>
                         </span>
 
                         <span class="block min-w-0">
                             <span class="mb-1.5 block text-theme-sm text-gray-500 dark:text-gray-400">
-                                <span class="font-medium text-gray-800 dark:text-white/90" x-text="notification.staffName"></span>
-                                submitted a shift reading for
-                                <span class="font-medium text-gray-800 dark:text-white/90" x-text="notification.period"></span>
+                                <span class="font-medium text-gray-800 dark:text-white/90" x-text="notification.actorName"></span>
+                                <span x-text="notification.summary"></span>
+                                <span class="font-medium text-gray-800 dark:text-white/90" x-text="notification.context"></span>
                             </span>
 
                             <span class="flex items-center gap-2 text-gray-500 text-theme-xs dark:text-gray-400">
-                                <span x-text="notification.status"></span>
+                                <span x-text="notification.badge"></span>
                                 <span class="w-1 h-1 bg-gray-400 rounded-full"></span>
                                 <span x-text="notification.time"></span>
                             </span>
+                            <span x-show="notification.body" class="mt-1.5 line-clamp-2 block break-words text-theme-xs text-gray-500 dark:text-gray-400" x-text="notification.body"></span>
                         </span>
                     </a>
                 </li>
@@ -227,13 +255,20 @@
         </ul>
 
         <!-- View All Button -->
-        <div class="shrink-0 border-t border-gray-100 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-dark">
+        <div class="grid shrink-0 grid-cols-2 gap-2 border-t border-gray-100 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-dark">
             <a
                 href="{{ route('admin.reconcile.index') }}"
                 class="flex justify-center rounded-lg border border-brand-200 bg-white p-3 text-theme-sm font-semibold text-brand-800 shadow-theme-xs hover:bg-brand-50 hover:text-brand-900 dark:border-brand-800 dark:bg-gray-800 dark:text-brand-200 dark:hover:bg-brand-950/30"
                 @click="handleViewAllClick()"
             >
-                View All Shift Readings
+                Shift Readings
+            </a>
+            <a
+                href="{{ route('admin.announcements.index') }}"
+                class="flex justify-center rounded-lg border border-brand-200 bg-white p-3 text-theme-sm font-semibold text-brand-800 shadow-theme-xs hover:bg-brand-50 hover:text-brand-900 dark:border-brand-800 dark:bg-gray-800 dark:text-brand-200 dark:hover:bg-brand-950/30"
+                @click="handleViewAllClick()"
+            >
+                Announcements
             </a>
         </div>
     </div>

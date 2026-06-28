@@ -16,10 +16,8 @@ use App\Http\Controllers\StaffTankDeliveryRecordController;
 use App\Http\Controllers\StaffPumpController;
 use App\Http\Controllers\StaffReadingController;
 use App\Http\Controllers\StaffSalesController;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
+use App\Support\AdminHeaderNotifications;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 
 Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
 Route::get('/signin', [AuthenticatedSessionController::class, 'create'])->name('signin');
@@ -117,60 +115,13 @@ Route::middleware('auth')->group(function () {
             })->name('reading.reject');
         });
 
-        Route::get('/admin/shift-readings/notifications', function () {
-            try {
-                if (! Schema::hasTable('shift_readings') || ! Schema::hasTable('users')) {
-                    return response()->json([
-                        'notifications' => [],
-                        'unread_count' => 0,
-                    ]);
-                }
+        Route::get('/admin/shift-readings/notifications', function (AdminHeaderNotifications $notifications) {
+            $items = $notifications->get();
 
-                $notifications = DB::table('shift_readings')
-                    ->join('users', 'shift_readings.user_id', '=', 'users.id')
-                    ->select(
-                        'shift_readings.id',
-                        'shift_readings.period_from',
-                        'shift_readings.period_to',
-                        'shift_readings.status',
-                        'shift_readings.created_at',
-                        'users.name as staff_name'
-                    )
-                    ->where('shift_readings.status', 'Pending')
-                    ->orderByDesc('shift_readings.created_at')
-                    ->limit(10)
-                    ->get()
-                    ->map(function ($reading) {
-                        $from = $reading->period_from
-                            ? Carbon::parse($reading->period_from)->format('M d, Y')
-                            : null;
-                        $to = $reading->period_to
-                            ? Carbon::parse($reading->period_to)->format('M d, Y')
-                            : $from;
-
-                        return [
-                            'id' => (int) $reading->id,
-                            'staffName' => $reading->staff_name ?: 'Staff',
-                            'period' => $from && $from !== $to ? "{$from} - {$to}" : ($from ?: 'No period selected'),
-                            'status' => 'Pending Verification',
-                            'time' => $reading->created_at
-                                ? Carbon::parse($reading->created_at)->diffForHumans()
-                                : '',
-                            'url' => route('admin.reconcile.index', [], false),
-                        ];
-                    })
-                    ->values();
-
-                return response()->json([
-                    'notifications' => $notifications,
-                    'unread_count' => $notifications->count(),
-                ]);
-            } catch (\Throwable) {
-                return response()->json([
-                    'notifications' => [],
-                    'unread_count' => 0,
-                ]);
-            }
+            return response()->json([
+                'notifications' => $items,
+                'unread_count' => count($items),
+            ]);
         })->name('admin.shift-readings.notifications');
 
         Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
@@ -291,6 +242,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/', [StaffAnnouncementController::class, 'index'])->name('index');
             Route::post('/mark-all-read', [StaffAnnouncementController::class, 'markAllRead'])->name('mark-all-read');
             Route::post('/{announcement}/read', [StaffAnnouncementController::class, 'markRead'])->name('read');
+            Route::post('/{announcement}/comments', [StaffAnnouncementController::class, 'storeComment'])->name('comments.store');
         });
 
         Route::prefix('announcements')->name('announcements.')->group(function () {
@@ -299,6 +251,7 @@ Route::middleware('auth')->group(function () {
             })->name('index');
             Route::post('/mark-all-read', [StaffAnnouncementController::class, 'markAllRead'])->name('mark-all-read');
             Route::post('/{announcement}/read', [StaffAnnouncementController::class, 'markRead'])->name('mark-read');
+            Route::post('/{announcement}/comments', [StaffAnnouncementController::class, 'storeComment'])->name('comments.store');
         });
     });
 
