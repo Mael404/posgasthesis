@@ -4,7 +4,12 @@
     @php
         $announcementItems = $announcements->getCollection();
         $commentsByAnnouncement = $commentsByAnnouncement ?? [];
-        $announcementPayload = $announcementItems->map(function ($announcement) use ($commentsByAnnouncement) {
+        $flattenComments = function ($comments) use (&$flattenComments) {
+            return collect($comments)->flatMap(function ($comment) use (&$flattenComments) {
+                return collect([$comment])->merge($flattenComments($comment['replies'] ?? []));
+            })->values();
+        };
+        $announcementPayload = $announcementItems->map(function ($announcement) use ($commentsByAnnouncement, $flattenComments) {
             $adminName = $announcement->admin_name ?: 'Admin #' . $announcement->admin_id;
             $createdAt = $announcement->created_at
                 ? \Carbon\Carbon::parse($announcement->created_at)->format('M d, Y h:i A')
@@ -13,6 +18,7 @@
                 ? \Carbon\Carbon::parse($announcement->read_at)->format('M d, Y h:i A')
                 : null;
             $comments = collect($commentsByAnnouncement[$announcement->id] ?? [])->values();
+            $flatComments = $flattenComments($comments);
 
             return [
                 'id' => (int) $announcement->id,
@@ -23,8 +29,8 @@
                 'read_at' => $readAt,
                 'is_read' => (bool) $readAt,
                 'comments' => $comments->all(),
-                'comment_count' => $comments->count(),
-                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName . ' ' . $comments->pluck('comment')->implode(' ') . ' ' . $comments->pluck('staff_name')->implode(' ')),
+                'comment_count' => $flatComments->count(),
+                'search' => strtolower($announcement->subject . ' ' . $announcement->message . ' ' . $adminName . ' ' . $flatComments->pluck('comment')->implode(' ') . ' ' . $flatComments->pluck('author_name')->implode(' ') . ' ' . $flatComments->pluck('staff_name')->implode(' ')),
             ];
         })->values();
 
@@ -34,6 +40,7 @@
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $textareaClass = 'min-h-28 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
+        $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Notifications" />
@@ -44,7 +51,8 @@
             unreadCount: @js((int) $unreadCount),
             csrfToken: @js(csrf_token()),
             markReadUrlTemplate: @js(route('staff.notifications.read', ['announcement' => '__ID__'])),
-            commentUrlTemplate: @js(route('staff.notifications.comments.store', ['announcement' => '__ID__']))
+            commentUrlTemplate: @js(route('staff.notifications.comments.store', ['announcement' => '__ID__'])),
+            initialAnnouncementId: @js((string) request('announcement', ''))
         })"
         x-init="init()"
         class="space-y-6">
@@ -203,32 +211,79 @@
 
                     <div class="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
                         <div class="flex flex-wrap items-center justify-between gap-3">
-                            <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Comments</h3>
-                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" x-text="selected ? ((selected.comments || []).length + ' ' + ((selected.comments || []).length === 1 ? 'comment' : 'comments')) : '0 comments'"></span>
+                            <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Comment Thread</h3>
+                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" x-text="commentCountLabel(selected)"></span>
                         </div>
 
                         <div class="mt-4 space-y-3">
-                            <template x-if="selected && (!selected.comments || selected.comments.length === 0)">
+                            <template x-if="selected && commentCount(selected) === 0">
                                 <div class="rounded-xl border border-dashed border-gray-300 p-5 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                                     No comments yet.
                                 </div>
                             </template>
 
-                            <template x-for="comment in (selected ? selected.comments : [])" :key="comment.id">
-                                <article class="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                                        <p class="break-words text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="comment.staff_name"></p>
-                                        <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="comment.created_at"></p>
-                                    </div>
-                                    <p class="mt-2 whitespace-pre-line break-words text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="comment.comment"></p>
-                                </article>
+                            <template x-for="comment in visibleThreadComments(selected)" :key="comment.id">
+                                <div class="space-y-2" :style="threadIndentStyle(comment.depth)">
+                                    <article
+                                        class="rounded-xl border bg-white p-4 dark:bg-white/[0.02]"
+                                        :class="comment.depth > 0 ? 'border-brand-100 dark:border-brand-500/20' : 'border-gray-200 dark:border-gray-800'">
+                                        <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                            <div class="min-w-0">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <p class="break-words text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="comment.author_name || comment.staff_name"></p>
+                                                    <span
+                                                        class="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase"
+                                                        :class="comment.author_label === 'Admin'
+                                                            ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+                                                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'"
+                                                        x-text="comment.author_label || 'Staff'"></span>
+                                                </div>
+                                            </div>
+                                            <p class="shrink-0 text-theme-xs text-gray-500 dark:text-gray-400" x-text="comment.created_at"></p>
+                                        </div>
+                                        <p class="mt-2 whitespace-pre-line break-words text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="comment.comment"></p>
+                                        <div class="mt-3 flex flex-wrap items-center gap-3">
+                                            <button
+                                                type="button"
+                                                x-show="comment.reply_count > 0"
+                                                x-cloak
+                                                x-on:click.stop="toggleThread(comment)"
+                                                class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-theme-xs font-semibold text-gray-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 dark:border-gray-800 dark:text-gray-300 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10 dark:hover:text-brand-300">
+                                                <svg class="size-3.5 transition-transform" :class="isThreadCollapsed(comment.id) ? '' : 'rotate-90'" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                                    <path d="m7.5 4.5 5 5.5-5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                </svg>
+                                                <span x-text="threadToggleLabel(comment)"></span>
+                                            </button>
+                                            <button type="button" x-on:click="startReply(comment)" class="text-theme-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">
+                                                Reply
+                                            </button>
+                                        </div>
+                                    </article>
+
+                                    <form
+                                        x-show="isReplyingTo(comment.id)"
+                                        x-cloak
+                                        x-on:submit.prevent="submitComment(comment.id)"
+                                        class="rounded-xl border border-brand-100 bg-brand-50/40 p-4 dark:border-brand-500/20 dark:bg-brand-500/[0.06]">
+                                        <p class="text-theme-xs font-medium text-gray-600 dark:text-gray-300">
+                                            Replying to <span class="font-semibold text-gray-800 dark:text-white/90" x-text="comment.author_name || comment.staff_name"></span>
+                                        </p>
+                                        <textarea x-model.trim="replyForm.comment" class="mt-2 {{ $textareaClass }}" maxlength="2000" placeholder="Write a reply"></textarea>
+                                        <div class="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                            <button type="button" x-on:click="cancelReply()" class="{{ $secondaryButtonClass }}">Cancel</button>
+                                            <button type="submit" class="{{ $primaryButtonClass }}" :disabled="isSavingReply(comment.id)">
+                                                <span x-text="isSavingReply(comment.id) ? 'Sending...' : 'Send Reply'"></span>
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
                             </template>
                         </div>
 
                         <form x-on:submit.prevent="submitComment()" class="mt-5 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                             <label class="block">
                                 <span class="{{ $labelClass }}">Add Comment</span>
-                                <textarea x-model.trim="commentForm.comment" class="mt-1.5 {{ $textareaClass }}" maxlength="2000" placeholder="Write a comment for the admin"></textarea>
+                                <textarea x-model.trim="commentForm.comment" class="mt-1.5 {{ $textareaClass }}" maxlength="2000" placeholder="Write a comment for the thread"></textarea>
                             </label>
                             <div class="flex justify-end">
                                 <button type="submit" class="{{ $primaryButtonClass }}" :disabled="savingComment">
@@ -282,12 +337,19 @@
                 selected: null,
                 markingRead: {},
                 commentForm: { comment: '' },
+                replyForm: { parentId: null, comment: '' },
                 savingComment: false,
+                savingReplies: {},
+                collapsedThreads: {},
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, message: '' },
 
                 init() {
                     this.announcementsById = Object.fromEntries(this.announcements.map(item => [String(item.id), item]));
+
+                    if (config.initialAnnouncementId) {
+                        this.$nextTick(() => this.openDetails(config.initialAnnouncementId));
+                    }
                 },
 
                 matches(id) {
@@ -303,7 +365,7 @@
 
                 commentLabel(id) {
                     const item = this.announcementsById[String(id)];
-                    const count = Number(item && Array.isArray(item.comments) ? item.comments.length : (item ? item.comment_count : 0));
+                    const count = item ? this.commentCount(item) : 0;
                     return count.toLocaleString() + ' ' + (count === 1 ? 'comment' : 'comments');
                 },
 
@@ -324,6 +386,8 @@
                     this.modal = null;
                     this.selected = null;
                     this.commentForm.comment = '';
+                    this.collapsedThreads = {};
+                    this.cancelReply();
                 },
 
                 async markRead(id) {
@@ -366,17 +430,23 @@
                     return config.markReadUrlTemplate.replace('__ID__', encodeURIComponent(id));
                 },
 
-                async submitComment() {
+                async submitComment(parentId = null) {
                     if (!this.selected) return;
 
-                    const comment = String(this.commentForm.comment || '').trim();
+                    const isReply = !!parentId;
+                    const source = isReply ? this.replyForm : this.commentForm;
+                    const comment = String(source.comment || '').trim();
 
                     if (!comment) {
-                        this.showMessage('Please write a comment before sending.');
+                        this.showMessage(isReply ? 'Please write a reply before sending.' : 'Please write a comment before sending.');
                         return;
                     }
 
-                    this.savingComment = true;
+                    if (isReply) {
+                        this.setReplySaving(parentId, true);
+                    } else {
+                        this.savingComment = true;
+                    }
 
                     try {
                         const response = await fetch(this.commentUrl(this.selected.id), {
@@ -386,7 +456,10 @@
                                 'Accept': 'application/json',
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({ comment })
+                            body: JSON.stringify({
+                                comment,
+                                parent_id: isReply ? Number(parentId) : null
+                            })
                         });
                         const data = await response.json();
 
@@ -399,23 +472,190 @@
                         const item = this.announcementsById[String(this.selected.id)];
 
                         if (item) {
-                            item.comments = Array.isArray(item.comments) ? item.comments : [];
-                            item.comments.push(data.comment);
-                            item.comment_count = item.comments.length;
+                            this.addCommentToItem(item, data.comment);
                             this.selected = item;
                         }
 
-                        this.commentForm.comment = '';
-                        this.showToast(data.message || 'Comment sent to admin.');
+                        if (isReply) {
+                            this.cancelReply();
+                        } else {
+                            this.commentForm.comment = '';
+                        }
+
+                        this.showToast(data.message || (isReply ? 'Reply sent to admin.' : 'Comment sent to admin.'));
                     } catch (error) {
                         this.showMessage('An unexpected error occurred.');
                     } finally {
-                        this.savingComment = false;
+                        if (isReply) {
+                            this.setReplySaving(parentId, false);
+                        } else {
+                            this.savingComment = false;
+                        }
                     }
                 },
 
                 commentUrl(id) {
                     return config.commentUrlTemplate.replace('__ID__', encodeURIComponent(id));
+                },
+
+                startReply(comment) {
+                    if (!comment || !comment.id) return;
+                    this.replyForm = { parentId: comment.id, comment: '' };
+                },
+
+                cancelReply() {
+                    this.replyForm = { parentId: null, comment: '' };
+                },
+
+                isReplyingTo(id) {
+                    return String(this.replyForm.parentId || '') === String(id);
+                },
+
+                isSavingReply(id) {
+                    return !!this.savingReplies[String(id)];
+                },
+
+                setReplySaving(id, value) {
+                    const key = String(id);
+                    const next = { ...this.savingReplies };
+
+                    if (value) {
+                        next[key] = true;
+                    } else {
+                        delete next[key];
+                    }
+
+                    this.savingReplies = next;
+                },
+
+                addCommentToItem(item, comment) {
+                    const normalized = this.normalizeComment(comment);
+                    item.comments = Array.isArray(item.comments) ? item.comments : [];
+
+                    if (normalized.parent_id) {
+                        const parent = this.findComment(item.comments, normalized.parent_id);
+
+                        if (parent) {
+                            parent.replies = Array.isArray(parent.replies) ? parent.replies : [];
+                            parent.replies.push(normalized);
+                            this.expandThread(parent.id);
+                        } else {
+                            item.comments.push(normalized);
+                        }
+                    } else {
+                        item.comments.push(normalized);
+                    }
+
+                    item.comment_count = this.commentCount(item);
+                    item.search = [
+                        item.search || '',
+                        normalized.comment || '',
+                        normalized.author_name || normalized.staff_name || ''
+                    ].join(' ').toLowerCase();
+                },
+
+                normalizeComment(comment) {
+                    return {
+                        ...comment,
+                        replies: Array.isArray(comment.replies) ? comment.replies : []
+                    };
+                },
+
+                findComment(comments, id) {
+                    const targetId = String(id);
+
+                    for (const comment of Array.isArray(comments) ? comments : []) {
+                        if (String(comment.id) === targetId) {
+                            return comment;
+                        }
+
+                        const found = this.findComment(comment.replies || [], id);
+
+                        if (found) {
+                            return found;
+                        }
+                    }
+
+                    return null;
+                },
+
+                visibleThreadComments(item) {
+                    const output = [];
+
+                    const walk = (comments, depth = 0) => {
+                        (Array.isArray(comments) ? comments : []).forEach((comment) => {
+                            const replyCount = this.commentListCount(comment.replies || []);
+
+                            output.push({
+                                ...comment,
+                                depth,
+                                reply_count: replyCount
+                            });
+
+                            if (replyCount > 0 && !this.isThreadCollapsed(comment.id)) {
+                                walk(comment.replies || [], depth + 1);
+                            }
+                        });
+                    };
+
+                    walk(item ? item.comments : []);
+
+                    return output;
+                },
+
+                commentCount(item) {
+                    return this.commentListCount(item ? item.comments : []);
+                },
+
+                commentListCount(comments) {
+                    return (Array.isArray(comments) ? comments : []).reduce((total, comment) => {
+                        return total + 1 + this.commentListCount(comment.replies || []);
+                    }, 0);
+                },
+
+                commentCountLabel(item) {
+                    const count = this.commentCount(item);
+                    return count.toLocaleString() + ' ' + (count === 1 ? 'comment' : 'comments');
+                },
+
+                toggleThread(comment) {
+                    if (!comment || !comment.id || Number(comment.reply_count || 0) < 1) return;
+
+                    const key = String(comment.id);
+                    const next = { ...this.collapsedThreads };
+
+                    if (next[key]) {
+                        delete next[key];
+                    } else {
+                        next[key] = true;
+                    }
+
+                    this.collapsedThreads = next;
+                },
+
+                expandThread(id) {
+                    const key = String(id || '');
+                    if (!key || !this.collapsedThreads[key]) return;
+
+                    const next = { ...this.collapsedThreads };
+                    delete next[key];
+                    this.collapsedThreads = next;
+                },
+
+                isThreadCollapsed(id) {
+                    return !!this.collapsedThreads[String(id)];
+                },
+
+                threadToggleLabel(comment) {
+                    const count = Number(comment.reply_count || 0);
+                    const action = this.isThreadCollapsed(comment.id) ? 'Show' : 'Hide';
+
+                    return action + ' ' + count.toLocaleString() + ' ' + (count === 1 ? 'reply' : 'replies');
+                },
+
+                threadIndentStyle(depth) {
+                    const indentation = Math.min(Number(depth || 0), 5) * 18;
+                    return indentation > 0 ? `margin-left: ${indentation}px;` : '';
                 },
 
                 showToast(message) {

@@ -12,6 +12,8 @@ use Illuminate\View\View;
 
 class StaffAnnouncementController extends Controller
 {
+    private const ADMIN_ROLES = ['admin', 'vp_admin', 'semiadmin'];
+
     public function index(): View
     {
         $this->ensureAnnouncementsTablesReady();
@@ -35,6 +37,28 @@ class StaffAnnouncementController extends Controller
             ->withQueryString();
 
         $announcementItems = $announcements->getCollection();
+        $focusedAnnouncementId = (int) request('announcement', 0);
+
+        if ($focusedAnnouncementId > 0 && ! $announcementItems->contains('id', $focusedAnnouncementId)) {
+            $focusedAnnouncement = DB::table('announcements')
+                ->leftJoin('users', 'announcements.admin_id', '=', 'users.id')
+                ->leftJoin('announcement_reads', function ($join) use ($userId) {
+                    $join->on('announcement_reads.announcement_id', '=', 'announcements.id')
+                        ->where('announcement_reads.user_id', '=', $userId);
+                })
+                ->select(
+                    'announcements.*',
+                    'users.name as admin_name',
+                    'announcement_reads.read_at'
+                )
+                ->where('announcements.id', $focusedAnnouncementId)
+                ->first();
+
+            if ($focusedAnnouncement) {
+                $announcementItems->prepend($focusedAnnouncement);
+                $announcements->setCollection($announcementItems);
+            }
+        }
 
         return view('pages.staff.announcements', [
             'title' => 'Notifications',
@@ -133,34 +157,24 @@ class StaffAnnouncementController extends Controller
 
         $validated = $request->validate([
             'comment' => ['required', 'string', 'max:2000'],
+            'parent_id' => ['nullable', 'integer', 'min:1'],
         ]);
 
+        $parentId = $this->validatedParentCommentId($announcementId, $validated['parent_id'] ?? null);
         $now = now();
         $commentId = DB::table('announcement_comments')->insertGetId([
             'announcement_id' => $announcementId,
+            'parent_id' => $parentId,
             'user_id' => (int) auth()->id(),
             'comment' => $validated['comment'],
             'created_at' => $now,
             'updated_at' => $now,
         ]);
 
-        $comment = DB::table('announcement_comments')
-            ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
-            ->select(
-                'announcement_comments.id',
-                'announcement_comments.announcement_id',
-                'announcement_comments.user_id',
-                'announcement_comments.comment',
-                'announcement_comments.created_at',
-                'users.name as staff_name'
-            )
-            ->where('announcement_comments.id', $commentId)
-            ->first();
-
         return response()->json([
             'success' => true,
-            'message' => 'Comment sent to admin.',
-            'comment' => $this->formatComment($comment),
+            'message' => $parentId ? 'Reply sent to admin.' : 'Comment sent to admin.',
+            'comment' => $this->formatComment($this->commentById($commentId)),
         ]);
     }
 
@@ -170,6 +184,7 @@ class StaffAnnouncementController extends Controller
             ! Schema::hasTable('announcements')
             || ! Schema::hasTable('announcement_reads')
             || ! Schema::hasTable('announcement_comments')
+            || ! Schema::hasColumn('announcement_comments', 'parent_id')
         ) {
             abort(500, 'Announcements tables are not ready. Please run php artisan migrate.');
         }
@@ -204,15 +219,19 @@ class StaffAnnouncementController extends Controller
             return [];
         }
 
+        $hasParentColumn = Schema::hasColumn('announcement_comments', 'parent_id');
+
         return DB::table('announcement_comments')
             ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
             ->select(
                 'announcement_comments.id',
                 'announcement_comments.announcement_id',
+                $hasParentColumn ? 'announcement_comments.parent_id' : DB::raw('NULL as parent_id'),
                 'announcement_comments.user_id',
                 'announcement_comments.comment',
                 'announcement_comments.created_at',
-                'users.name as staff_name'
+                'users.name as author_name',
+                'users.role as author_role'
             )
             ->whereIn('announcement_comments.announcement_id', $announcementIds)
             ->orderBy('announcement_comments.created_at')
@@ -220,22 +239,108 @@ class StaffAnnouncementController extends Controller
             ->get()
             ->groupBy('announcement_id')
             ->map(function ($comments) {
-                return $comments->map(fn ($comment) => $this->formatComment($comment))->values()->all();
+                return $this->threadComments($comments);
             })
             ->all();
     }
 
     private function formatComment($comment): array
     {
+        $role = (string) ($comment->author_role ?? '');
+        $userId = (int) $comment->user_id;
+        $isAdmin = in_array($role, self::ADMIN_ROLES, true);
+        $authorName = $comment->author_name ?: (($isAdmin ? 'Admin #' : 'Staff #') . $userId);
+
         return [
             'id' => (int) $comment->id,
             'announcement_id' => (int) $comment->announcement_id,
-            'user_id' => (int) $comment->user_id,
-            'staff_name' => $comment->staff_name ?: 'Staff #' . $comment->user_id,
+            'parent_id' => $comment->parent_id ? (int) $comment->parent_id : null,
+            'user_id' => $userId,
+            'author_name' => $authorName,
+            'author_role' => $role,
+            'author_label' => $isAdmin ? 'Admin' : 'Staff',
+            'staff_name' => $authorName,
             'comment' => (string) $comment->comment,
             'created_at' => $comment->created_at
                 ? Carbon::parse($comment->created_at)->format('M d, Y h:i A')
                 : 'N/A',
+            'replies' => [],
         ];
+    }
+
+    private function threadComments($comments): array
+    {
+        $formatted = collect($comments)
+            ->map(fn ($comment) => $this->formatComment($comment))
+            ->values();
+
+        $commentIds = $formatted
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        $grouped = $formatted->groupBy(function (array $comment) use ($commentIds) {
+            $parentId = $comment['parent_id'] ? (string) $comment['parent_id'] : null;
+
+            return $parentId && in_array($parentId, $commentIds, true) ? $parentId : 'root';
+        });
+
+        $attachReplies = function (?int $parentId) use (&$attachReplies, $grouped) {
+            $key = $parentId ? (string) $parentId : 'root';
+
+            return collect($grouped->get($key, []))
+                ->map(function (array $comment) use (&$attachReplies) {
+                    $comment['replies'] = $attachReplies((int) $comment['id']);
+
+                    return $comment;
+                })
+                ->values()
+                ->all();
+        };
+
+        return $attachReplies(null);
+    }
+
+    private function validatedParentCommentId(int $announcementId, $parentId): ?int
+    {
+        $parentId = (int) $parentId;
+
+        if ($parentId < 1) {
+            return null;
+        }
+
+        $parentExists = DB::table('announcement_comments')
+            ->where('id', $parentId)
+            ->where('announcement_id', $announcementId)
+            ->exists();
+
+        if (! $parentExists) {
+            abort(response()->json([
+                'message' => 'The selected comment could not be found.',
+                'errors' => [
+                    'parent_id' => ['The selected comment could not be found.'],
+                ],
+            ], 422));
+        }
+
+        return $parentId;
+    }
+
+    private function commentById(int $commentId)
+    {
+        return DB::table('announcement_comments')
+            ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
+            ->select(
+                'announcement_comments.id',
+                'announcement_comments.announcement_id',
+                'announcement_comments.parent_id',
+                'announcement_comments.user_id',
+                'announcement_comments.comment',
+                'announcement_comments.created_at',
+                'users.name as author_name',
+                'users.role as author_role'
+            )
+            ->where('announcement_comments.id', $commentId)
+            ->first();
     }
 }

@@ -1,11 +1,16 @@
 {{-- Notification Dropdown Component --}}
 @once
     <script>
-        window.headerNotificationDropdown = function(initialNotifications, notificationUrl) {
+        window.headerNotificationDropdown = function(initialNotifications, notificationUrl, options = {}) {
             return {
                 dropdownOpen: false,
                 notifications: Array.isArray(initialNotifications) ? initialNotifications : [],
                 notificationUrl: notificationUrl || null,
+                storageKey: options.storageKey || 'adminHeaderNotificationSeenKeys',
+                summaryLabel: options.summaryLabel || 'recent admin alerts',
+                emptyTitle: options.emptyTitle || 'No new notifications',
+                emptySubtitle: options.emptySubtitle || 'Staff comments and pending readings will appear here.',
+                defaultUrl: options.defaultUrl || '#',
                 seenKeys: [],
 
                 init() {
@@ -55,7 +60,7 @@
                     ])).slice(-80);
 
                     try {
-                        localStorage.setItem('adminHeaderNotificationSeenKeys', JSON.stringify(this.seenKeys));
+                        localStorage.setItem(this.storageKey, JSON.stringify(this.seenKeys));
                     } catch (error) {
                         //
                     }
@@ -72,7 +77,7 @@
 
                 loadSeenKeys() {
                     try {
-                        const keys = JSON.parse(localStorage.getItem('adminHeaderNotificationSeenKeys') || '[]');
+                        const keys = JSON.parse(localStorage.getItem(this.storageKey) || '[]');
                         return Array.isArray(keys) ? keys.map((key) => String(key)) : [];
                     } catch (error) {
                         return [];
@@ -110,7 +115,7 @@
                             this.normalizeNotifications();
                         }
                     } catch (error) {
-                        console.warn('Could not refresh admin notifications.', error);
+                        console.warn('Could not refresh header notifications.', error);
                     }
                 },
 
@@ -130,7 +135,13 @@
 
 <div
     class="relative"
-    x-data="headerNotificationDropdown(@js($notifications), @js($notificationsUrl))"
+    x-data="headerNotificationDropdown(@js($notifications), @js($notificationsUrl), {
+        storageKey: @js($seenStorageKey),
+        summaryLabel: @js($summaryLabel),
+        emptyTitle: @js($emptyTitle),
+        emptySubtitle: @js($emptySubtitle),
+        defaultUrl: @js($defaultUrl)
+    })"
     x-init="init()"
     @click.away="closeDropdown()"
 >
@@ -183,10 +194,10 @@
         <!-- Dropdown Header -->
         <div class="flex shrink-0 items-center justify-between border-b border-brand-100 bg-brand-50 px-4 py-4 dark:border-brand-800/60 dark:bg-brand-950/30">
             <div>
-                <h5 class="text-lg font-semibold text-brand-900 dark:text-brand-100">Notifications</h5>
+                <h5 class="text-lg font-semibold text-brand-900 dark:text-brand-100">{{ $title }}</h5>
                 <p class="text-xs font-medium text-brand-700 dark:text-brand-300">
                     <span x-text="notifications.length"></span>
-                    recent admin alerts
+                    <span x-text="summaryLabel"></span>
                 </p>
             </div>
 
@@ -219,8 +230,8 @@
                             <path d="M8 16.25C8.23444 16.9704 9.02944 17.5 10 17.5C10.9706 17.5 11.7656 16.9704 12 16.25H8Z" fill="currentColor"/>
                         </svg>
                     </span>
-                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">No new notifications</span>
-                    <span class="mt-1 text-xs text-gray-500 dark:text-gray-400">Staff comments and pending readings will appear here.</span>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300" x-text="emptyTitle"></span>
+                    <span class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="emptySubtitle"></span>
                 </li>
             </template>
 
@@ -228,7 +239,7 @@
                 <li @click="handleItemClick()">
                     <a
                         class="mb-2 flex gap-3 rounded-lg border border-gray-100 bg-white px-4 py-3 hover:bg-brand-25 dark:border-gray-800 dark:bg-transparent dark:hover:bg-brand-950/20"
-                        :href="notification.url || '{{ route('admin.reconcile.index') }}'"
+                        :href="notification.url || defaultUrl"
                     >
                         <span class="relative flex h-10 w-10 max-w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-950/40 dark:text-brand-200">
                             <span x-text="initials(notification.actorName)"></span>
@@ -255,22 +266,19 @@
         </ul>
 
         <!-- View All Button -->
-        <div class="grid shrink-0 grid-cols-2 gap-2 border-t border-gray-100 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-dark">
+        @if (! empty($viewLinks))
+        <div class="grid shrink-0 {{ count($viewLinks) > 1 ? 'grid-cols-2' : 'grid-cols-1' }} gap-2 border-t border-gray-100 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-dark">
+            @foreach ($viewLinks as $link)
             <a
-                href="{{ route('admin.reconcile.index') }}"
+                href="{{ $link['url'] }}"
                 class="flex justify-center rounded-lg border border-brand-200 bg-white p-3 text-theme-sm font-semibold text-brand-800 shadow-theme-xs hover:bg-brand-50 hover:text-brand-900 dark:border-brand-800 dark:bg-gray-800 dark:text-brand-200 dark:hover:bg-brand-950/30"
                 @click="handleViewAllClick()"
             >
-                Shift Readings
+                {{ $link['label'] }}
             </a>
-            <a
-                href="{{ route('admin.announcements.index') }}"
-                class="flex justify-center rounded-lg border border-brand-200 bg-white p-3 text-theme-sm font-semibold text-brand-800 shadow-theme-xs hover:bg-brand-50 hover:text-brand-900 dark:border-brand-800 dark:bg-gray-800 dark:text-brand-200 dark:hover:bg-brand-950/30"
-                @click="handleViewAllClick()"
-            >
-                Announcements
-            </a>
+            @endforeach
         </div>
+        @endif
     </div>
     <!-- Dropdown End -->
 </div>

@@ -17,6 +17,7 @@ use App\Http\Controllers\StaffPumpController;
 use App\Http\Controllers\StaffReadingController;
 use App\Http\Controllers\StaffSalesController;
 use App\Support\AdminHeaderNotifications;
+use App\Support\StaffHeaderNotifications;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -90,6 +91,7 @@ Route::middleware('auth')->group(function () {
         Route::prefix('admin/announcements')->name('admin.announcements.')->group(function () {
             Route::get('/', [AnnouncementController::class, 'index'])->name('index');
             Route::post('/', [AnnouncementController::class, 'store'])->name('store');
+            Route::post('/{announcement}/comments', [AnnouncementController::class, 'storeComment'])->name('comments.store');
             Route::put('/{announcement}', [AnnouncementController::class, 'update'])->name('update');
             Route::delete('/{announcement}', [AnnouncementController::class, 'destroy'])->name('destroy');
         });
@@ -240,6 +242,14 @@ Route::middleware('auth')->group(function () {
 
         Route::prefix('notifications')->name('notifications.')->group(function () {
             Route::get('/', [StaffAnnouncementController::class, 'index'])->name('index');
+            Route::get('/header', function (StaffHeaderNotifications $notifications) {
+                $items = $notifications->get((int) auth()->id());
+
+                return response()->json([
+                    'notifications' => $items,
+                    'unread_count' => count($items),
+                ]);
+            })->name('header');
             Route::post('/mark-all-read', [StaffAnnouncementController::class, 'markAllRead'])->name('mark-all-read');
             Route::post('/{announcement}/read', [StaffAnnouncementController::class, 'markRead'])->name('read');
             Route::post('/{announcement}/comments', [StaffAnnouncementController::class, 'storeComment'])->name('comments.store');

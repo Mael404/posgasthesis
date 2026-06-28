@@ -11,6 +11,8 @@ use Throwable;
 
 class AdminHeaderNotifications
 {
+    private const ADMIN_ROLES = ['admin', 'vp_admin', 'semiadmin'];
+
     public function get(int $limit = 10): array
     {
         try {
@@ -83,17 +85,25 @@ class AdminHeaderNotifications
             return [];
         }
 
+        $hasParentColumn = Schema::hasColumn('announcement_comments', 'parent_id');
+
         return DB::table('announcement_comments')
             ->join('announcements', 'announcement_comments.announcement_id', '=', 'announcements.id')
             ->leftJoin('users', 'announcement_comments.user_id', '=', 'users.id')
             ->select(
                 'announcement_comments.id',
                 'announcement_comments.announcement_id',
+                $hasParentColumn ? 'announcement_comments.parent_id' : DB::raw('NULL as parent_id'),
                 'announcement_comments.comment',
                 'announcement_comments.created_at',
                 'announcements.subject',
-                'users.name as staff_name'
+                'users.name as actor_name',
+                'users.role as actor_role'
             )
+            ->where(function ($query) {
+                $query->whereNull('users.role')
+                    ->orWhereNotIn('users.role', self::ADMIN_ROLES);
+            })
             ->orderByDesc('announcement_comments.created_at')
             ->limit($limit)
             ->get()
@@ -106,11 +116,11 @@ class AdminHeaderNotifications
                 return [
                     'id' => 'announcement-comment-' . (int) $comment->id,
                     'type' => 'announcement_comment',
-                    'actorName' => $comment->staff_name ?: 'Staff',
-                    'summary' => 'commented on',
+                    'actorName' => $comment->actor_name ?: 'Staff',
+                    'summary' => $comment->parent_id ? 'replied on' : 'commented on',
                     'context' => $comment->subject ?: 'Announcement',
                     'body' => Str::limit((string) $comment->comment, 120),
-                    'badge' => 'Comment',
+                    'badge' => $comment->parent_id ? 'Reply' : 'Comment',
                     'time' => $createdAt ? $createdAt->diffForHumans() : '',
                     'url' => $announcementUrl,
                     'sort_timestamp' => $createdAt ? $createdAt->timestamp : 0,
