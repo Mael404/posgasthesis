@@ -2,7 +2,10 @@
 
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\AdminPriceManagementController;
 use App\Http\Controllers\AdminReportController;
+use App\Http\Controllers\AdminStockInController;
+use App\Http\Controllers\AdminTankManagementController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CustomerController;
@@ -127,8 +130,11 @@ Route::middleware('auth')->group(function () {
         })->name('admin.shift-readings.notifications');
 
         Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
-        Route::post('/inventory/stock-in', [InventoryController::class, 'stockIn'])->name('inventory.stockIn');
-        Route::post('/inventory/prices', [InventoryController::class, 'updatePrice'])->name('inventory.updatePrice');
+        Route::get('/inventory/tank-management', [AdminTankManagementController::class, 'index'])->name('inventory.tanks.index');
+        Route::get('/inventory/stock-in', [AdminStockInController::class, 'index'])->name('inventory.stock.index');
+        Route::post('/inventory/stock-in', [AdminStockInController::class, 'store'])->name('inventory.stockIn');
+        Route::get('/inventory/price-management', [AdminPriceManagementController::class, 'index'])->name('inventory.prices.index');
+        Route::post('/inventory/prices', [AdminPriceManagementController::class, 'update'])->name('inventory.updatePrice');
 
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
         Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');

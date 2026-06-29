@@ -186,8 +186,23 @@ class MenuHelper
             [
                 'icon' => 'task',
                 'name' => 'Inventory & Tanks',
-                'path' => self::routePath('inventory.index', '/inventory'),
-                'activePatterns' => ['/inventory', '/inventory/*'],
+                'subItems' => [
+                    [
+                        'name' => 'Tank Management',
+                        'path' => self::routePath('inventory.tanks.index', '/inventory/tank-management'),
+                        'activePatterns' => ['/inventory/tank-management'],
+                    ],
+                    [
+                        'name' => 'Stock In',
+                        'path' => self::routePath('inventory.stock.index', '/inventory/stock-in'),
+                        'activePatterns' => ['/inventory/stock-in'],
+                    ],
+                    [
+                        'name' => 'Price Management',
+                        'path' => self::routePath('inventory.prices.index', '/inventory/price-management'),
+                        'activePatterns' => ['/inventory/price-management'],
+                    ],
+                ],
             ],
             [
                 'icon' => 'user-profile',

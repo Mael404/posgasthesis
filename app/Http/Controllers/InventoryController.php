@@ -9,7 +9,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\View\View;
 
 class InventoryController extends Controller
 {
@@ -25,13 +24,29 @@ class InventoryController extends Controller
     private array $tablePresence = [];
     private array $columnPresence = [];
 
-    public function index(Request $request): View
+    public function index(Request $request)
+    {
+        $route = match ($request->query('tab')) {
+            'stock' => 'inventory.stock.index',
+            'pricing' => 'inventory.prices.index',
+            default => 'inventory.tanks.index',
+        };
+
+        return redirect()->route($route, $request->except('tab'));
+    }
+
+    protected function inventoryViewData(
+        Request $request,
+        string $inventoryPage,
+        string $inventoryTitle,
+        string $inventoryDescription,
+        string $filterRouteName
+    ): array
     {
         $request->validate([
             'date_filter' => 'nullable|in:today,weekly,monthly',
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
-            'tab' => 'nullable|in:tanks,stock,pricing',
         ]);
 
         $dateRange = $this->dateRangeFromRequest($request);
@@ -42,8 +57,13 @@ class InventoryController extends Controller
         $tankTransactions = $this->tankTransactions($tanks, $dateRange);
         $summary = $this->summary($tanks, $deliveryLogs, $tankTransactions);
 
-        return view('pages.admin.inventoryandtanks', [
-            'title' => 'Inventory & Tanks',
+        return [
+            'title' => $inventoryTitle,
+            'inventoryPage' => $inventoryPage,
+            'inventoryTitle' => $inventoryTitle,
+            'inventoryDescription' => $inventoryDescription,
+            'filterRoute' => route($filterRouteName),
+            'resetRoute' => route($filterRouteName),
             'tanks' => $tanks,
             'suppliers' => $suppliers,
             'prices' => $prices,
@@ -53,7 +73,7 @@ class InventoryController extends Controller
             'dateRange' => $dateRange,
             'canManagePrices' => auth()->check() && auth()->user()->role !== 'semiadmin',
             'missingInventoryTables' => $this->missingTables(['tanks', 'suppliers', 'fuel_prices', 'inventory_logs']),
-        ]);
+        ];
     }
 
     public function stockIn(Request $request): JsonResponse
