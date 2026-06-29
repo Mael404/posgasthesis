@@ -1,7 +1,16 @@
     @php
         $tanks = collect($tanks ?? []);
         $deliveryLogs = collect($deliveryLogs ?? []);
-        $tankTransactions = collect($tankTransactions ?? []);
+        $tankTransactionPaginator = $tankTransactions ?? collect();
+        $tankTransactionRows = $tankTransactionPaginator instanceof \Illuminate\Contracts\Pagination\Paginator
+            ? collect($tankTransactionPaginator->items())
+            : collect($tankTransactionPaginator);
+        $tankTransactionStats = collect($tankTransactionStats ?? []);
+        $tankTransactionPerPageOptions = $tankTransactionPerPageOptions ?? [10, 20, 50, 100];
+        $tankTransactionPerPage = (int) ($tankTransactionPerPage ?? 10);
+        $tankTransactionPerPage = in_array($tankTransactionPerPage, $tankTransactionPerPageOptions, true)
+            ? $tankTransactionPerPage
+            : 10;
         $prices = collect($prices ?? []);
         $missingInventoryTables = $missingInventoryTables ?? [];
         $canManagePrices = $canManagePrices ?? false;
@@ -11,7 +20,8 @@
             ? $inventoryPage
             : (in_array(request('tab'), ['tanks', 'stock', 'pricing'], true) ? request('tab') : 'tanks');
         $activeTab = $activeTab === 'pricing' && ! $canManagePrices ? 'tanks' : $activeTab;
-        $activeTankId = (string) optional($tanks->first())->id;
+        $activeTankId = (string) ($activeTankId ?? optional($tanks->first())->id);
+        $activeTank = $tanks->first(fn ($tank) => (string) $tank->id === $activeTankId) ?? $tanks->first();
         $inventoryTitle = $inventoryTitle ?? match ($activeTab) {
             'stock' => 'Stock In',
             'pricing' => 'Price Management',
@@ -28,6 +38,21 @@
             default => 'inventory.tanks.index',
         });
         $resetRoute = $resetRoute ?? $filterRoute;
+        $tankTransactionTotal = method_exists($tankTransactionPaginator, 'total') ? $tankTransactionPaginator->total() : $tankTransactionRows->count();
+        $tankTransactionFirstItem = method_exists($tankTransactionPaginator, 'firstItem') ? $tankTransactionPaginator->firstItem() : ($tankTransactionTotal > 0 ? 1 : null);
+        $tankTransactionLastItem = method_exists($tankTransactionPaginator, 'lastItem') ? $tankTransactionPaginator->lastItem() : $tankTransactionRows->count();
+        $tankTransactionQuery = collect(request()->except(['tank_transaction_page', 'tank_id', 'tank_per_page']))
+            ->filter(fn ($value) => is_scalar($value) && (string) $value !== '');
+        $tankTransactionUrl = function ($tankId) use ($filterRoute, $tankTransactionPerPage, $tankTransactionQuery) {
+            $params = $tankTransactionQuery
+                ->merge([
+                    'tank_id' => $tankId,
+                    'tank_per_page' => $tankTransactionPerPage,
+                ])
+                ->all();
+
+            return $filterRoute . (empty($params) ? '' : '?' . http_build_query($params));
+        };
         $summary = $summary ?? [
             'tank_count' => 0,
             'current_volume' => 0,
@@ -181,6 +206,11 @@
 
         <section class="{{ $cardClass }}">
             <form method="GET" action="{{ $filterRoute }}" class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,520px)] xl:items-end">
+                @if ($activeTab === 'tanks' && $activeTankId !== '')
+                    <input type="hidden" name="tank_id" value="{{ $activeTankId }}">
+                    <input type="hidden" name="tank_per_page" value="{{ $tankTransactionPerPage }}">
+                @endif
+
                 <div class="min-w-0">
                     <p class="{{ $labelClass }}">Date Filter</p>
                     <div class="mt-3 flex flex-wrap gap-2">
@@ -304,46 +334,46 @@
                     <div class="mb-5 flex gap-2 overflow-x-auto pb-1">
                         @foreach ($tanks as $tank)
                             @php
-                                $transactions = $tankTransactions[$tank->id] ?? collect();
+                                $stats = $tankTransactionStats->get((int) $tank->id, ['count' => 0, 'liters' => 0, 'amount' => 0]);
                                 $style = $fuelStyle($tank->fuel_type);
+                                $isActiveTank = $activeTank && (string) $activeTank->id === (string) $tank->id;
                             @endphp
-                            <button type="button" x-on:click="activeTank = @js((string) $tank->id)" class="shrink-0 rounded-xl border px-4 py-3 text-left text-theme-sm font-medium transition"
-                                :class="activeTank === @js((string) $tank->id) ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-500/15 dark:text-brand-400' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03]'">
+                            <a href="{{ $tankTransactionUrl($tank->id) }}" class="shrink-0 rounded-xl border px-4 py-3 text-left text-theme-sm font-medium transition {{ $isActiveTank ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-500/15 dark:text-brand-400' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03]' }}">
                                 <span class="block text-gray-800 dark:text-white/90">{{ $tank->name }}</span>
                                 <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs {{ $style['badge'] }}">
                                     <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
-                                    {{ $transactions->count() }} transactions
+                                    {{ number_format((int) $stats['count']) }} transactions
                                 </span>
-                            </button>
+                            </a>
                         @endforeach
                     </div>
                 @endif
 
-                @foreach ($tanks as $tank)
+                @if ($activeTank)
                     @php
-                        $transactions = $tankTransactions[$tank->id] ?? collect();
-                        $style = $fuelStyle($tank->fuel_type);
-                        $totalLiters = $transactions->sum('liters');
-                        $totalAmount = $transactions->sum('amount');
+                        $style = $fuelStyle($activeTank->fuel_type);
+                        $activeTankStats = $tankTransactionStats->get((int) $activeTank->id, ['count' => 0, 'liters' => 0, 'amount' => 0]);
+                        $totalLiters = (float) $activeTankStats['liters'];
+                        $totalAmount = (float) $activeTankStats['amount'];
                     @endphp
 
-                    <div x-show="activeTank === @js((string) $tank->id)" x-cloak class="space-y-4">
+                    <div class="space-y-4">
                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                                 <div>
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $tank->name }}</h3>
+                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $activeTank->name }}</h3>
                                         <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs font-medium {{ $style['badge'] }}">
                                             <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
-                                            {{ $tank->fuel_type }}
+                                            {{ $activeTank->fuel_type }}
                                         </span>
                                     </div>
-                                    <p class="mt-1 {{ $captionClass }}">{{ $tank->connected_pumps_display }}</p>
+                                    <p class="mt-1 {{ $captionClass }}">{{ $activeTank->connected_pumps_display }}</p>
                                 </div>
                                 <div class="grid grid-cols-3 gap-3 text-right">
                                     <div>
                                         <p class="{{ $labelClass }}">Count</p>
-                                        <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ $transactions->count() }}</p>
+                                        <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((int) $activeTankStats['count']) }}</p>
                                     </div>
                                     <div>
                                         <p class="{{ $labelClass }}">Liters</p>
@@ -385,7 +415,7 @@
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                                        @forelse ($transactions as $transaction)
+                                        @forelse ($tankTransactionRows as $transaction)
                                             <tr>
                                                 <td class="{{ $tdClass }}">{{ $transaction->created_at ? \Carbon\Carbon::parse($transaction->created_at)->format('M d, Y h:i A') : 'N/A' }}</td>
                                                 <td class="{{ $tdPrimaryClass }}">{{ $transaction->or_number ?: 'TXN-' . $transaction->id }}</td>
@@ -412,8 +442,76 @@
                                 </table>
                             </div>
                         </div>
+
+                        <div class="flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                <p class="{{ $captionClass }}">
+                                    @if ($tankTransactionTotal > 0 && $tankTransactionFirstItem)
+                                        Showing {{ number_format($tankTransactionFirstItem) }}-{{ number_format($tankTransactionLastItem) }} of {{ number_format($tankTransactionTotal) }} transaction{{ $tankTransactionTotal === 1 ? '' : 's' }}.
+                                    @else
+                                        No pump transactions found.
+                                    @endif
+                                </p>
+                                <form method="GET" action="{{ $filterRoute }}" class="flex items-center gap-2">
+                                    @foreach ($tankTransactionQuery as $name => $value)
+                                        <input type="hidden" name="{{ $name }}" value="{{ $value }}">
+                                    @endforeach
+                                    <input type="hidden" name="tank_id" value="{{ $activeTankId }}">
+                                    <label for="tank-transaction-per-page" class="text-theme-sm text-gray-500 dark:text-gray-400">Rows</label>
+                                    <select id="tank-transaction-per-page" name="tank_per_page" class="h-9 w-20 rounded-lg border border-gray-300 bg-transparent px-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800" onchange="this.form.submit()">
+                                        @foreach ($tankTransactionPerPageOptions as $option)
+                                            <option value="{{ $option }}" {{ (int) $tankTransactionPerPage === (int) $option ? 'selected' : '' }}>{{ $option }}</option>
+                                        @endforeach
+                                    </select>
+                                </form>
+                            </div>
+
+                            @if (method_exists($tankTransactionPaginator, 'hasPages') && $tankTransactionPaginator->hasPages())
+                                @php
+                                    $tankTransactionCurrentPage = method_exists($tankTransactionPaginator, 'currentPage') ? (int) $tankTransactionPaginator->currentPage() : 1;
+                                    $tankTransactionLastPageNumber = method_exists($tankTransactionPaginator, 'lastPage') ? (int) $tankTransactionPaginator->lastPage() : $tankTransactionCurrentPage;
+                                    $tankTransactionPageNumbers = collect([1, $tankTransactionCurrentPage - 1, $tankTransactionCurrentPage, $tankTransactionCurrentPage + 1, $tankTransactionLastPageNumber])
+                                        ->filter(fn ($page) => $page >= 1 && $page <= $tankTransactionLastPageNumber)
+                                        ->unique()
+                                        ->sort()
+                                        ->values();
+                                    $previousTankTransactionPage = null;
+                                @endphp
+                                <nav class="flex flex-wrap items-center gap-2 lg:justify-end" role="navigation" aria-label="Tank transaction pagination">
+                                    @if ($tankTransactionPaginator->onFirstPage())
+                                        <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Prev</span>
+                                    @else
+                                        <a href="{{ $tankTransactionPaginator->previousPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Prev</a>
+                                    @endif
+
+                                    @foreach ($tankTransactionPageNumbers as $page)
+                                        @if ($previousTankTransactionPage && $page > $previousTankTransactionPage + 1)
+                                            <span class="inline-flex h-9 min-w-9 items-center justify-center px-1 text-theme-sm text-gray-400 dark:text-gray-600">...</span>
+                                        @endif
+
+                                        @if ($page === $tankTransactionCurrentPage)
+                                            <span class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-sm font-medium text-white" aria-current="page">{{ $page }}</span>
+                                        @else
+                                            <a href="{{ $tankTransactionPaginator->url($page) }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">{{ $page }}</a>
+                                        @endif
+
+                                        @php $previousTankTransactionPage = $page; @endphp
+                                    @endforeach
+
+                                    @if ($tankTransactionPaginator->hasMorePages())
+                                        <a href="{{ $tankTransactionPaginator->nextPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Next</a>
+                                    @else
+                                        <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Next</span>
+                                    @endif
+                                </nav>
+                            @endif
+                        </div>
                     </div>
-                @endforeach
+                @else
+                    <div class="rounded-xl border border-gray-200 px-5 py-8 text-center text-theme-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                        No tanks found.
+                    </div>
+                @endif
             </section>
         </div>
         @endif

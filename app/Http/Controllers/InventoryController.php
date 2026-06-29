@@ -6,6 +6,7 @@ use App\Models\InventoryLog;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -50,12 +51,19 @@ class InventoryController extends Controller
         ]);
 
         $dateRange = $this->dateRangeFromRequest($request);
+        $tankTransactionPerPageOptions = [10, 20, 50, 100];
+        $tankTransactionPerPage = (int) $request->query('tank_per_page', 10);
+        $tankTransactionPerPage = in_array($tankTransactionPerPage, $tankTransactionPerPageOptions, true)
+            ? $tankTransactionPerPage
+            : 10;
         $tanks = $this->prepareTanks($this->tankRows());
+        $activeTankId = $this->activeTankId($request, $tanks);
         $suppliers = $this->supplierRows();
         $prices = $this->fuelPriceRows($tanks);
         $deliveryLogs = $this->deliveryLogs($dateRange);
-        $tankTransactions = $this->tankTransactions($tanks, $dateRange);
-        $summary = $this->summary($tanks, $deliveryLogs, $tankTransactions);
+        $tankTransactionStats = $this->tankTransactionStats($tanks, $dateRange);
+        $tankTransactions = $this->tankTransactions($request, $tanks, $activeTankId, $dateRange, $tankTransactionPerPage);
+        $summary = $this->summary($tanks, $deliveryLogs, $tankTransactionStats);
 
         return [
             'title' => $inventoryTitle,
@@ -69,6 +77,10 @@ class InventoryController extends Controller
             'prices' => $prices,
             'deliveryLogs' => $deliveryLogs,
             'tankTransactions' => $tankTransactions,
+            'tankTransactionStats' => $tankTransactionStats,
+            'activeTankId' => $activeTankId,
+            'tankTransactionPerPage' => $tankTransactionPerPage,
+            'tankTransactionPerPageOptions' => $tankTransactionPerPageOptions,
             'summary' => $summary,
             'dateRange' => $dateRange,
             'canManagePrices' => auth()->check() && auth()->user()->role !== 'semiadmin',
@@ -266,27 +278,95 @@ class InventoryController extends Controller
         return $query->get();
     }
 
-    private function tankTransactions($tanks, ?array $dateRange)
+    private function activeTankId(Request $request, $tanks): ?string
     {
-        if (
-            ! $this->hasTable('sales')
-            || ! $this->hasColumn('sales', 'pump_id')
-            || ! $this->hasColumn('sales', 'fuel_type')
-            || ! $this->hasColumn('sales', 'liters')
-        ) {
-            return collect();
+        if ($tanks->isEmpty()) {
+            return null;
+        }
+
+        $requestedTankId = trim((string) $request->query('tank_id', ''));
+
+        if ($requestedTankId !== '') {
+            $requestedTank = $tanks->first(fn ($tank) => (string) $tank->id === $requestedTankId);
+
+            if ($requestedTank) {
+                return (string) $requestedTank->id;
+            }
+        }
+
+        return (string) $tanks->first()->id;
+    }
+
+    private function tankTransactionStats($tanks, ?array $dateRange)
+    {
+        if (! $this->hasTankTransactionSource()) {
+            return $this->emptyTankTransactionStats($tanks);
         }
 
         $pumpNumbers = $tanks
             ->flatMap(fn ($tank) => $tank->connected_pump_numbers)
+            ->map(fn ($pumpNumber) => (int) $pumpNumber)
+            ->filter(fn ($pumpNumber) => $pumpNumber > 0)
             ->unique()
             ->values();
 
         if ($pumpNumbers->isEmpty()) {
-            return collect();
+            return $this->emptyTankTransactionStats($tanks);
         }
 
-        $query = DB::table('sales')
+        $rows = $this->tankTransactionBaseQuery($pumpNumbers->all(), $dateRange)
+            ->select(
+                'sales.pump_id',
+                'sales.fuel_type',
+                DB::raw('COUNT(*) as transaction_count'),
+                DB::raw('COALESCE(SUM(sales.liters), 0) as total_liters'),
+                DB::raw('COALESCE(SUM(sales.amount), 0) as total_amount')
+            )
+            ->groupBy('sales.pump_id', 'sales.fuel_type')
+            ->get();
+
+        return $tanks->mapWithKeys(function ($tank) use ($rows) {
+            $tankPumpNumbers = $tank->connected_pump_numbers
+                ->map(fn ($pumpNumber) => (int) $pumpNumber)
+                ->all();
+            $tankFuelType = $this->normalizeFuelType($tank->fuel_type);
+            $matches = $rows->filter(function ($row) use ($tankPumpNumbers, $tankFuelType) {
+                return in_array((int) $row->pump_id, $tankPumpNumbers, true)
+                    && $this->normalizeFuelType($row->fuel_type) === $tankFuelType;
+            });
+
+            return [
+                (int) $tank->id => [
+                    'count' => (int) $matches->sum('transaction_count'),
+                    'liters' => (float) $matches->sum('total_liters'),
+                    'amount' => (float) $matches->sum('total_amount'),
+                ],
+            ];
+        });
+    }
+
+    private function tankTransactions(Request $request, $tanks, ?string $activeTankId, ?array $dateRange, int $perPage): LengthAwarePaginator
+    {
+        if (! $this->hasTankTransactionSource() || ! $activeTankId) {
+            return $this->emptyTankTransactionPaginator($request, $perPage);
+        }
+
+        $activeTank = $tanks->first(fn ($tank) => (string) $tank->id === (string) $activeTankId);
+
+        if (! $activeTank) {
+            return $this->emptyTankTransactionPaginator($request, $perPage);
+        }
+
+        $pumpNumbers = $activeTank->connected_pump_numbers
+            ->map(fn ($pumpNumber) => (int) $pumpNumber)
+            ->filter(fn ($pumpNumber) => $pumpNumber > 0)
+            ->values();
+
+        if ($pumpNumbers->isEmpty()) {
+            return $this->emptyTankTransactionPaginator($request, $perPage);
+        }
+
+        $query = $this->tankTransactionBaseQuery($pumpNumbers->all(), $dateRange)
             ->join('users', 'sales.user_id', '=', 'users.id')
             ->leftJoin('customers', 'sales.customer_id', '=', 'customers.id')
             ->leftJoin('customers as posted_customers', 'sales.posted_customer_id', '=', 'posted_customers.id')
@@ -302,8 +382,29 @@ class InventoryController extends Controller
                 'sales.created_at',
                 DB::raw("COALESCE(users.name, CONCAT(users.first_name, ' ', users.last_name), 'Staff') as staff_name"),
                 DB::raw("COALESCE(customers.business_name, posted_customers.business_name, customers.owner_name, posted_customers.owner_name, sales.customer_name, 'Walk-In Customer') as customer_display")
-            )
-            ->whereIn('sales.pump_id', $pumpNumbers->all())
+            );
+
+        $this->applyTankFuelFilter($query, $this->normalizeFuelType($activeTank->fuel_type));
+
+        return $query
+            ->orderByDesc('sales.created_at')
+            ->orderByDesc('sales.id')
+            ->paginate($perPage, ['*'], 'tank_transaction_page')
+            ->withQueryString();
+    }
+
+    private function hasTankTransactionSource(): bool
+    {
+        return $this->hasTable('sales')
+            && $this->hasColumn('sales', 'pump_id')
+            && $this->hasColumn('sales', 'fuel_type')
+            && $this->hasColumn('sales', 'liters');
+    }
+
+    private function tankTransactionBaseQuery(array $pumpNumbers, ?array $dateRange)
+    {
+        $query = DB::table('sales')
+            ->whereIn('sales.pump_id', $pumpNumbers)
             ->where('sales.liters', '>', 0)
             ->where(function ($query) {
                 $query->whereNull('sales.payment_type')
@@ -330,33 +431,77 @@ class InventoryController extends Controller
             });
         }
 
-        $transactions = $query
-            ->orderByDesc('sales.created_at')
-            ->orderByDesc('sales.id')
-            ->get();
-
-        return $tanks->mapWithKeys(function ($tank) use ($transactions) {
-            $tankPumpNumbers = $tank->connected_pump_numbers
-                ->map(fn ($pumpNumber) => (int) $pumpNumber)
-                ->all();
-            $tankFuelType = $this->normalizeFuelType($tank->fuel_type);
-
-            return [
-                $tank->id => $transactions
-                    ->filter(function ($transaction) use ($tankPumpNumbers, $tankFuelType) {
-                        return in_array((int) $transaction->pump_id, $tankPumpNumbers, true)
-                            && $this->normalizeFuelType($transaction->fuel_type) === $tankFuelType;
-                    })
-                    ->values(),
-            ];
-        });
+        return $query;
     }
 
-    private function summary($tanks, $deliveryLogs, $tankTransactions): array
+    private function applyTankFuelFilter($query, string $fuelType): void
+    {
+        $fuelType = $this->normalizeFuelType($fuelType);
+
+        if ($fuelType === 'Diesel') {
+            $query->whereRaw('LOWER(sales.fuel_type) LIKE ?', ['%diesel%']);
+            return;
+        }
+
+        if ($fuelType === 'Unleaded') {
+            $query->where(function ($query) {
+                $query->whereRaw('LOWER(sales.fuel_type) LIKE ?', ['%unleaded%'])
+                    ->orWhereRaw('LOWER(sales.fuel_type) LIKE ?', ['%regular%']);
+            });
+            return;
+        }
+
+        if ($fuelType === 'Premium') {
+            $query->whereRaw('LOWER(sales.fuel_type) LIKE ?', ['%premium%']);
+            return;
+        }
+
+        if ($fuelType === 'N/A') {
+            $query->where(function ($query) {
+                $query->whereNull('sales.fuel_type')
+                    ->orWhereRaw("TRIM(sales.fuel_type) = ''")
+                    ->orWhereRaw('LOWER(TRIM(sales.fuel_type)) = ?', ['n/a']);
+            });
+            return;
+        }
+
+        $query->whereRaw('LOWER(TRIM(sales.fuel_type)) = ?', [strtolower($fuelType)]);
+    }
+
+    private function emptyTankTransactionStats($tanks)
+    {
+        return $tanks->mapWithKeys(fn ($tank) => [
+            (int) $tank->id => [
+                'count' => 0,
+                'liters' => 0.0,
+                'amount' => 0.0,
+            ],
+        ]);
+    }
+
+    private function emptyTankTransactionPaginator(Request $request, int $perPage): LengthAwarePaginator
+    {
+        $paginator = new LengthAwarePaginator(
+            collect(),
+            0,
+            $perPage,
+            max((int) $request->query('tank_transaction_page', 1), 1),
+            [
+                'path' => $request->url(),
+                'pageName' => 'tank_transaction_page',
+            ]
+        );
+
+        $paginator->appends($request->except('tank_transaction_page'));
+
+        return $paginator;
+    }
+
+    private function summary($tanks, $deliveryLogs, $tankTransactionStats): array
     {
         $capacity = (float) $tanks->sum('capacity');
         $currentVolume = (float) $tanks->sum('current_volume');
-        $transactions = collect($tankTransactions)->flatten(1);
+        $transactionStats = collect($tankTransactionStats);
 
         return [
             'tank_count' => $tanks->count(),
@@ -365,8 +510,8 @@ class InventoryController extends Controller
             'fill_percentage' => $capacity > 0 ? round(($currentVolume / $capacity) * 100, 1) : 0,
             'low_tanks' => $tanks->filter(fn ($tank) => (float) $tank->fill_percentage <= 25)->count(),
             'delivered_liters' => round((float) $deliveryLogs->sum('liters_delivered'), 2),
-            'sold_liters' => round((float) $transactions->sum('liters'), 2),
-            'sold_amount' => round((float) $transactions->sum('amount'), 2),
+            'sold_liters' => round((float) $transactionStats->sum('liters'), 2),
+            'sold_amount' => round((float) $transactionStats->sum('amount'), 2),
         ];
     }
 
