@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Schema;
 
 class InventoryController extends Controller
 {
+    private const MAX_BULK_DELIVERIES = 3;
+
     private const DEFAULT_FUEL_BY_PUMP = [
         1 => 'Premium',
         2 => 'Unleaded',
@@ -98,14 +100,22 @@ class InventoryController extends Controller
         }
 
         $validated = $request->validate([
-            'tank_id' => 'required|exists:tanks,id',
             'supplier_name' => 'required|string|max:255',
-            'liters' => 'required|numeric|min:1',
-            'cost' => 'required|numeric|min:1',
             'delivery_date' => 'required|date',
+            'deliveries' => ['nullable', 'array', 'min:1', 'max:' . self::MAX_BULK_DELIVERIES],
+            'deliveries.*.tank_id' => ['required_with:deliveries', 'integer', 'exists:tanks,id', 'distinct'],
+            'deliveries.*.liters' => ['required_with:deliveries', 'numeric', 'min:1'],
+            'deliveries.*.cost' => ['required_with:deliveries', 'numeric', 'min:1'],
+            'tank_id' => ['required_without:deliveries', 'integer', 'exists:tanks,id'],
+            'liters' => ['required_without:deliveries', 'numeric', 'min:1'],
+            'cost' => ['required_without:deliveries', 'numeric', 'min:1'],
+        ], [
+            'deliveries.max' => 'A bulk delivery can include up to ' . self::MAX_BULK_DELIVERIES . ' tank entries only.',
+            'deliveries.*.tank_id.distinct' => 'Each bulk delivery row must use a different tank.',
         ]);
 
         $supplierName = $this->normalizeSupplierName($validated['supplier_name']);
+        $deliveries = $this->deliveryRowsFromValidated($validated);
 
         if ($supplierName === '') {
             return response()->json([
@@ -115,12 +125,15 @@ class InventoryController extends Controller
         }
 
         try {
-            $deliveryCode = $this->saveDeliveryWithGeneratedCode($validated, $supplierName);
+            $result = $this->saveDeliveryWithGeneratedCode($deliveries, $supplierName, $validated['delivery_date']);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Delivery saved. Tank volume updated.',
-                'delivery_code' => $deliveryCode,
+                'message' => $result['delivery_count'] > 1
+                    ? $result['delivery_count'] . ' delivery entries saved. Tank volumes updated.'
+                    : 'Delivery saved. Tank volume updated.',
+                'delivery_code' => $result['delivery_code'],
+                'delivery_count' => $result['delivery_count'],
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -257,17 +270,96 @@ class InventoryController extends Controller
             return collect();
         }
 
+        $hasTankDeliveryRecords = $this->hasTable('tank_delivery_records');
+        $hasUsersTable = $this->hasTable('users');
+        $recordColumns = [
+            'tank_delivery_record_id',
+            'staff_id',
+            'record_date',
+            'record_time',
+            'plate_number',
+            'security_seals_passed',
+            'product_level_passed',
+            'ethanol_blend_passed',
+            'free_of_water_passed',
+            'fully_drained_compartment_passed',
+            'before_unloading_dipstick_premium',
+            'after_unloading_dipstick_premium',
+            'total_dispensed_premium',
+            'after_before_total_premium',
+            'delivery_summary_premium',
+            'before_unloading_dipstick_unleaded',
+            'after_unloading_dipstick_unleaded',
+            'total_dispensed_unleaded',
+            'after_before_total_unleaded',
+            'delivery_summary_unleaded',
+            'before_unloading_dipstick_diesel',
+            'after_unloading_dipstick_diesel',
+            'total_dispensed_diesel',
+            'after_before_total_diesel',
+            'delivery_summary_diesel',
+            'staff_name',
+        ];
+        $selectColumns = [
+            'inventory_logs.*',
+            'tanks.name as tank_name',
+            'tanks.fuel_type',
+            'suppliers.name as supplier_name',
+        ];
+
+        if ($hasTankDeliveryRecords) {
+            $selectColumns = array_merge($selectColumns, [
+                'tank_delivery_records.id as tank_delivery_record_id',
+                'tank_delivery_records.staff_id',
+                'tank_delivery_records.record_date',
+                'tank_delivery_records.record_time',
+                'tank_delivery_records.plate_number',
+                'tank_delivery_records.security_seals_passed',
+                'tank_delivery_records.product_level_passed',
+                'tank_delivery_records.ethanol_blend_passed',
+                'tank_delivery_records.free_of_water_passed',
+                'tank_delivery_records.fully_drained_compartment_passed',
+                'tank_delivery_records.before_unloading_dipstick_premium',
+                'tank_delivery_records.after_unloading_dipstick_premium',
+                'tank_delivery_records.total_dispensed_premium',
+                'tank_delivery_records.after_before_total_premium',
+                'tank_delivery_records.delivery_summary_premium',
+                'tank_delivery_records.before_unloading_dipstick_unleaded',
+                'tank_delivery_records.after_unloading_dipstick_unleaded',
+                'tank_delivery_records.total_dispensed_unleaded',
+                'tank_delivery_records.after_before_total_unleaded',
+                'tank_delivery_records.delivery_summary_unleaded',
+                'tank_delivery_records.before_unloading_dipstick_diesel',
+                'tank_delivery_records.after_unloading_dipstick_diesel',
+                'tank_delivery_records.total_dispensed_diesel',
+                'tank_delivery_records.after_before_total_diesel',
+                'tank_delivery_records.delivery_summary_diesel',
+            ]);
+
+            $selectColumns[] = $hasUsersTable
+                ? 'users.name as staff_name'
+                : DB::raw('null as staff_name');
+        } else {
+            $selectColumns = array_merge(
+                $selectColumns,
+                array_map(fn ($column) => DB::raw('null as ' . $column), $recordColumns)
+            );
+        }
+
         $query = DB::table('inventory_logs')
             ->join('tanks', 'inventory_logs.tank_id', '=', 'tanks.id')
             ->join('suppliers', 'inventory_logs.supplier_id', '=', 'suppliers.id')
-            ->select(
-                'inventory_logs.*',
-                'tanks.name as tank_name',
-                'tanks.fuel_type',
-                'suppliers.name as supplier_name'
-            )
+            ->select($selectColumns)
             ->orderByDesc('inventory_logs.delivery_date')
             ->orderByDesc('inventory_logs.created_at');
+
+        if ($hasTankDeliveryRecords) {
+            $query->leftJoin('tank_delivery_records', 'inventory_logs.id', '=', 'tank_delivery_records.inventory_log_id');
+
+            if ($hasUsersTable) {
+                $query->leftJoin('users', 'tank_delivery_records.staff_id', '=', 'users.id');
+            }
+        }
 
         $this->applyDateRange($query, 'inventory_logs.delivery_date', $dateRange, true);
 
@@ -588,52 +680,89 @@ class InventoryController extends Controller
         return (int) DB::table('suppliers')->insertGetId(['name' => $supplierName]);
     }
 
-    private function saveDeliveryWithGeneratedCode(array $validated, string $supplierName): string
+    private function deliveryRowsFromValidated(array $validated): array
+    {
+        $rows = $validated['deliveries'] ?? [[
+            'tank_id' => $validated['tank_id'] ?? null,
+            'liters' => $validated['liters'] ?? null,
+            'cost' => $validated['cost'] ?? null,
+        ]];
+
+        return collect($rows)
+            ->map(fn ($row) => [
+                'tank_id' => (int) ($row['tank_id'] ?? 0),
+                'liters' => (float) ($row['liters'] ?? 0),
+                'cost' => (float) ($row['cost'] ?? 0),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function saveDeliveryWithGeneratedCode(array $deliveries, string $supplierName, string $deliveryDate): array
     {
         $lastDuplicate = null;
 
         for ($attempt = 1; $attempt <= 5; $attempt++) {
             try {
-                return DB::transaction(function () use ($validated, $supplierName) {
-                    $tank = DB::table('tanks')
-                        ->where('id', $validated['tank_id'])
-                        ->lockForUpdate()
-                        ->first();
+                return DB::transaction(function () use ($deliveries, $supplierName, $deliveryDate) {
+                    $tankIds = collect($deliveries)->pluck('tank_id')->unique()->values();
 
-                    if (! $tank) {
-                        throw new \RuntimeException('The selected tank was not found.');
+                    if ($tankIds->isEmpty() || $tankIds->count() !== count($deliveries)) {
+                        throw new \RuntimeException('Each delivery entry must use a different tank.');
                     }
 
-                    $liters = (float) $validated['liters'];
-                    $capacity = (float) ($tank->capacity ?? 0);
-                    $currentVolume = (float) ($tank->current_volume ?? 0);
-                    $newTotalVolume = $currentVolume + $liters;
+                    if ($tankIds->count() > self::MAX_BULK_DELIVERIES) {
+                        throw new \RuntimeException('A bulk delivery can include up to ' . self::MAX_BULK_DELIVERIES . ' tank entries only.');
+                    }
 
-                    if ($capacity > 0 && $newTotalVolume > $capacity) {
-                        $excess = $newTotalVolume - $capacity;
-                        throw new \RuntimeException('OVERFILL ALERT! This delivery exceeds the tank capacity by ' . number_format($excess, 2) . ' liters.');
+                    $tanks = DB::table('tanks')
+                        ->whereIn('id', $tankIds->all())
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get()
+                        ->keyBy('id');
+
+                    if ($tanks->count() !== $tankIds->count()) {
+                        throw new \RuntimeException('One or more selected tanks were not found.');
                     }
 
                     $createdAt = now();
                     $deliveryCode = $this->generateDeliveryCode($createdAt);
                     $supplierId = $this->findOrCreateSupplier($supplierName);
+                    $parsedDeliveryDate = Carbon::parse($deliveryDate)->toDateString();
 
-                    DB::table('inventory_logs')->insert([
+                    foreach ($deliveries as $delivery) {
+                        $tank = $tanks->get($delivery['tank_id']);
+                        $liters = (float) $delivery['liters'];
+                        $capacity = (float) ($tank->capacity ?? 0);
+                        $currentVolume = (float) ($tank->current_volume ?? 0);
+                        $newTotalVolume = $currentVolume + $liters;
+
+                        if ($capacity > 0 && $newTotalVolume > $capacity) {
+                            $excess = $newTotalVolume - $capacity;
+                            throw new \RuntimeException('OVERFILL ALERT! Delivery for ' . ($tank->name ?? 'the selected tank') . ' exceeds tank capacity by ' . number_format($excess, 2) . ' liters.');
+                        }
+
+                        DB::table('inventory_logs')->insert([
+                            'delivery_code' => $deliveryCode,
+                            'delivery_status' => InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD,
+                            'tank_id' => $delivery['tank_id'],
+                            'supplier_id' => $supplierId,
+                            'liters_delivered' => $liters,
+                            'total_cost' => (float) $delivery['cost'],
+                            'delivery_date' => $parsedDeliveryDate,
+                            'created_at' => $createdAt,
+                        ]);
+
+                        DB::table('tanks')
+                            ->where('id', $delivery['tank_id'])
+                            ->update(['current_volume' => $newTotalVolume]);
+                    }
+
+                    return [
                         'delivery_code' => $deliveryCode,
-                        'delivery_status' => InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD,
-                        'tank_id' => $validated['tank_id'],
-                        'supplier_id' => $supplierId,
-                        'liters_delivered' => $liters,
-                        'total_cost' => (float) $validated['cost'],
-                        'delivery_date' => Carbon::parse($validated['delivery_date'])->toDateString(),
-                        'created_at' => $createdAt,
-                    ]);
-
-                    DB::table('tanks')
-                        ->where('id', $validated['tank_id'])
-                        ->update(['current_volume' => $newTotalVolume]);
-
-                    return $deliveryCode;
+                        'delivery_count' => count($deliveries),
+                    ];
                 });
             } catch (QueryException $e) {
                 if (! $this->isDuplicateDeliveryCodeError($e)) {

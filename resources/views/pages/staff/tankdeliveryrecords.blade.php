@@ -105,9 +105,61 @@
             return ['badge' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400', 'dot' => 'bg-brand-500'];
         };
 
+        $batchLabel = function ($row) {
+            $count = (int) ($row->delivery_batch_count ?? 1);
+
+            if ($count <= 1) {
+                return null;
+            }
+
+            $line = max(1, (int) ($row->delivery_batch_line ?? 1));
+
+            return "Batch line {$line} of {$count}";
+        };
+
+        $checklistLabelForFuel = function ($field, $label, $fuelType) {
+            $fuelType = strtolower((string) $fuelType);
+
+            if ($field === 'ethanol_blend_passed' && str_contains($fuelType, 'diesel')) {
+                return 'Visual Appearance';
+            }
+
+            return $label;
+        };
+
+        $fuelKeyForFuelType = function ($fuelType) use ($fuelTypes) {
+            $fuelType = strtolower(trim((string) $fuelType));
+
+            if ($fuelType === '') {
+                return null;
+            }
+
+            if (str_contains($fuelType, 'regular')) {
+                return 'unleaded';
+            }
+
+            foreach ($fuelTypes as $fuel => $label) {
+                $fuelLabel = strtolower((string) $label);
+
+                if ($fuelType === $fuel || $fuelType === $fuelLabel || str_contains($fuelType, $fuel) || str_contains($fuelType, $fuelLabel)) {
+                    return $fuel;
+                }
+            }
+
+            return null;
+        };
+
+        $fuelTypesForDelivery = function ($delivery) use ($fuelTypes, $fuelKeyForFuelType) {
+            $fuel = $fuelKeyForFuelType($delivery->fuel_type ?? null);
+
+            return $fuel && array_key_exists($fuel, $fuelTypes)
+                ? [$fuel => $fuelTypes[$fuel]]
+                : $fuelTypes;
+        };
+
         $totalRecords = method_exists($records, 'total') ? $records->total() : $recordItems->count();
         $completedOnPage = $recordItems->filter(fn ($record) => ($record->delivery_status ?? null) === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED)->count();
-        $selectedModal = request()->filled('delivery_code') && $selectedDelivery ? 'create-' . $selectedDelivery->id : null;
+        $selectedModal = (request()->filled('delivery_id') || request()->filled('delivery_code')) && $selectedDelivery ? 'create-' . $selectedDelivery->id : null;
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Tank Delivery Record" />
@@ -116,11 +168,13 @@
         x-data="tankDeliveryRecordsModule({
             fuels: @js(array_keys($fuelTypes)),
             sessionMessage: @js(session('success') ?: session('status')),
+            initialError: @js($errors->first()),
+            selectedMissingMessage: @js((request('delivery_id') || request('delivery_code')) && ! $selectedDelivery ? 'The selected delivery code is no longer pending or has already been completed.' : ''),
             reopenForm: @js(old('_tdr_form')),
             selectedModal: @js($selectedModal)
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', modal !== null)"
+        x-effect="document.body.classList.toggle('overflow-hidden', modal !== null || confirmation.open || messageDialog.open)"
         x-on:keydown.escape.window="closeModal()"
         class="tdr-module space-y-6">
         <style>
@@ -167,18 +221,6 @@
                 </button>
             </div>
         </div>
-
-        @if ($errors->any())
-            <div class="rounded-xl border border-error-200 bg-error-50 p-4 text-theme-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-                {{ $errors->first() }}
-            </div>
-        @endif
-
-        @if (request('delivery_code') && ! $selectedDelivery)
-            <div class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
-                The selected delivery code is no longer pending or has already been completed.
-            </div>
-        @endif
 
         <section class="{{ $cardClass }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
@@ -228,11 +270,12 @@
                 </label>
                 <label class="block">
                     <span class="{{ $labelClass }}">Delivery Code</span>
-                    <select name="delivery_code" id="pendingDeliverySelect" class="mt-1.5 {{ $selectClass }}" x-on:change="openDeliveryFromSelect($event)">
+                    <select name="delivery_id" id="pendingDeliverySelect" class="mt-1.5 {{ $selectClass }}" x-on:change="openDeliveryFromSelect($event)">
                         <option value="">Choose pending delivery code</option>
                         @foreach ($pendingDeliveries as $delivery)
-                            <option value="{{ $delivery->delivery_code }}" data-modal-id="create-{{ $delivery->id }}" {{ request('delivery_code') === $delivery->delivery_code ? 'selected' : '' }}>
-                                {{ $delivery->delivery_code }} - {{ $dateLabel($delivery->delivery_date) }} - {{ $delivery->supplier_name }} - {{ $delivery->tank_name }} ({{ $delivery->fuel_type }})
+                            @php $deliveryBatchLabel = $batchLabel($delivery); @endphp
+                            <option value="{{ $delivery->id }}" data-modal-id="create-{{ $delivery->id }}" {{ (string) request('delivery_id') === (string) $delivery->id ? 'selected' : '' }}>
+                                {{ $delivery->delivery_code }}{{ $deliveryBatchLabel ? ' - ' . $deliveryBatchLabel : '' }} - {{ $dateLabel($delivery->delivery_date) }} - {{ $delivery->supplier_name }} - {{ $delivery->tank_name }} ({{ $delivery->fuel_type }})
                             </option>
                         @endforeach
                     </select>
@@ -252,11 +295,17 @@
             @else
                 <div class="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-3">
                     @foreach ($pendingDeliveries as $delivery)
-                        @php $style = $fuelStyle($delivery->fuel_type); @endphp
+                        @php
+                            $style = $fuelStyle($delivery->fuel_type);
+                            $deliveryBatchLabel = $batchLabel($delivery);
+                        @endphp
                         <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
                                     <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $delivery->delivery_code }}</span>
+                                    @if ($deliveryBatchLabel)
+                                        <span class="mt-2 inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-semibold text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{{ $deliveryBatchLabel }}</span>
+                                    @endif
                                     <h3 class="mt-3 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $delivery->supplier_name }}</h3>
                                     <p class="mt-1 {{ $captionClass }}">{{ $dateLabel($delivery->delivery_date) }}</p>
                                 </div>
@@ -323,10 +372,14 @@
                         @forelse ($records as $record)
                             @php
                                 $style = $fuelStyle($record->fuel_type);
+                                $recordBatchLabel = $batchLabel($record);
                             @endphp
                             <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                                 <td class="{{ $tdPrimaryClass }}">
                                     <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $record->delivery_code }}</span>
+                                    @if ($recordBatchLabel)
+                                        <span class="mt-2 inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-semibold text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{{ $recordBatchLabel }}</span>
+                                    @endif
                                 </td>
                                 <td class="{{ $tdClass }}">
                                     <span class="block font-medium text-gray-800 dark:text-white/90">{{ $dateLabel($record->record_date) }}</span>
@@ -359,7 +412,7 @@
                                                 <path d="m13.75 7.75 2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
                                             </svg>
                                         </button>
-                                        <button type="button" class="{{ $deleteIconButtonClass }}" x-on:click="openModal('delete-{{ $record->id }}')" title="Delete" aria-label="Delete {{ $record->delivery_code }}">
+                                        <button type="button" class="{{ $deleteIconButtonClass }}" x-on:click="confirmDeleteRecord('delete-record-{{ $record->id }}', @js($record->delivery_code))" title="Delete" aria-label="Delete {{ $record->delivery_code }}">
                                             <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                                 <path d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.414.336-.75.75-.75h3c.414 0 .75.336.75.75v1.75M9 10.75v6M12 10.75v6M15 10.75v6M7.5 7.25l.58 11.03c.05.83.73 1.47 1.56 1.47h4.72c.83 0 1.51-.64 1.56-1.47l.58-11.03" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
                                             </svg>
@@ -384,7 +437,10 @@
         </section>
 
         @foreach ($pendingDeliveries as $delivery)
-            @php $createFormKey = 'create-' . $delivery->id; @endphp
+            @php
+                $createFormKey = 'create-' . $delivery->id;
+                $deliveryBatchLabel = $batchLabel($delivery);
+            @endphp
             <div
                 x-show="modal === 'create-{{ $delivery->id }}'"
                 x-cloak
@@ -397,6 +453,9 @@
                         <div class="min-w-0">
                             <p class="{{ $labelClass }}">Complete Delivery</p>
                             <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $delivery->delivery_code }}</h2>
+                            @if ($deliveryBatchLabel)
+                                <p class="mt-1 text-theme-xs font-semibold text-gray-500 dark:text-gray-400">{{ $deliveryBatchLabel }} - {{ $delivery->tank_name }} / {{ $delivery->fuel_type }}</p>
+                            @endif
                         </div>
                         <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeModal()" aria-label="Close modal">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -404,7 +463,7 @@
                             </svg>
                         </button>
                     </div>
-                    <form method="POST" action="{{ route('staff.tank-delivery-records.store') }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit="if (!validateTdrForm($event.target)) { $event.preventDefault(); $event.stopPropagation(); }">
+                    <form method="POST" action="{{ route('staff.tank-delivery-records.store') }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit.prevent="confirmTdrSubmit($event.target, 'Submit Tank Delivery Record', 'Submit this tank delivery record?', 'Submit Record', 'success')">
                         @csrf
                         <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
                             @include('pages.staff.partials.tank-delivery-record-form', [
@@ -496,9 +555,12 @@
                             <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Inspection Checklist</h3>
                             <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
                                 @foreach ($checklistItems as $field => $label)
-                                    @php $passed = (bool) $record->{$field}; @endphp
+                                    @php
+                                        $displayLabel = $checklistLabelForFuel($field, $label, $record->fuel_type);
+                                        $passed = (bool) $record->{$field};
+                                    @endphp
                                     <div class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
-                                        <span class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">{{ $label }}</span>
+                                        <span class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">{{ $displayLabel }}</span>
                                         <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $passed ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400' }}">
                                             {{ $passed ? 'Passed' : 'Not Passed' }}
                                         </span>
@@ -530,7 +592,7 @@
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                                        @foreach ($fuelTypes as $fuel => $label)
+                                        @foreach ($fuelTypesForDelivery($record) as $fuel => $label)
                                             @php
                                                 $beforeField = "before_unloading_dipstick_{$fuel}";
                                                 $afterField = "after_unloading_dipstick_{$fuel}";
@@ -579,7 +641,7 @@
                             </svg>
                         </button>
                     </div>
-                    <form method="POST" action="{{ route('staff.tank-delivery-records.update', $record->id) }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit="if (!validateTdrForm($event.target)) { $event.preventDefault(); $event.stopPropagation(); }">
+                    <form method="POST" action="{{ route('staff.tank-delivery-records.update', $record->id) }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit.prevent="confirmTdrSubmit($event.target, 'Update Tank Delivery Record', 'Apply these updates to this tank delivery record?', 'Update Record', 'brand')">
                         @csrf
                         @method('PUT')
                         <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
@@ -605,46 +667,101 @@
                 </div>
             </div>
 
-            <div
-                x-show="modal === 'delete-{{ $record->id }}'"
-                x-cloak
-                x-transition.opacity
-                class="fixed inset-0 overflow-y-auto bg-gray-900/55 px-4 py-6 backdrop-blur-[2px]"
-                style="z-index: 100200;"
-                x-on:click.self="closeModal()">
-                <div class="mx-auto w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900" data-modal-panel="delete-{{ $record->id }}">
-                    <form method="POST" action="{{ route('staff.tank-delivery-records.destroy', $record->id) }}">
-                        @csrf
-                        @method('DELETE')
-                        <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-                            <div class="flex items-start gap-3">
-                                <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-error-50 text-error-600 dark:bg-error-500/10 dark:text-error-400">
-                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                        <path d="M12 8v5M12 16.5h.01M10.64 4.78 3.42 17.2a1.75 1.75 0 0 0 1.51 2.63h14.14a1.75 1.75 0 0 0 1.51-2.63L13.36 4.78a1.57 1.57 0 0 0-2.72 0Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                                    </svg>
-                                </span>
-                                <div class="min-w-0">
-                                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Delete Tank Delivery Record</h2>
-                                    <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">{{ $record->delivery_code }}</p>
-                                </div>
-                            </div>
+            <form id="delete-record-{{ $record->id }}" method="POST" action="{{ route('staff.tank-delivery-records.destroy', $record->id) }}" class="hidden">
+                @csrf
+                @method('DELETE')
+            </form>
+        @endforeach
+
+        <div
+            x-show="messageDialog.open"
+            x-cloak
+            x-on:keydown.escape.window="closeMessageDialog()"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100"
+            x-transition:leave="transition ease-in duration-150"
+            x-transition:leave-start="opacity-100"
+            x-transition:leave-end="opacity-0"
+            class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+            style="z-index: 100250;">
+            <div class="fixed inset-0 bg-gray-950/80 backdrop-blur-md" x-on:click="closeMessageDialog()"></div>
+            <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                <button type="button" x-on:click="closeMessageDialog()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close message">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                </button>
+
+                <div class="p-6 pr-14">
+                    <div class="flex items-start gap-4">
+                        <span
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+                            :class="messageDialog.type === 'info'
+                                ? 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400'
+                                : 'bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-400'">
+                            <svg class="size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8.25h.01M11.25 11.25h1.5v5h-1.5z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                        </span>
+                        <div class="min-w-0">
+                            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90" x-text="messageDialog.title"></h2>
+                            <p class="mt-2 text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="messageDialog.message"></p>
                         </div>
-                        <div class="px-5 py-4">
-                            <p class="text-theme-sm text-gray-700 dark:text-gray-300">Delete this record and return the delivery to the pending list?</p>
-                        </div>
-                        <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
-                            <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeModal()">Cancel</button>
-                            <button type="submit" class="{{ $dangerButtonClass }}">
-                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.414.336-.75.75-.75h3c.414 0 .75.336.75.75v1.75M9 10.75v6M12 10.75v6M15 10.75v6M7.5 7.25l.58 11.03c.05.83.73 1.47 1.56 1.47h4.72c.83 0 1.51-.64 1.56-1.47l.58-11.03" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                                </svg>
-                                Delete
-                            </button>
-                        </div>
-                    </form>
+                    </div>
+
+                    <div class="mt-6 flex justify-end">
+                        <button type="button" x-on:click="closeMessageDialog()" class="{{ $primaryButtonClass }}">OK</button>
+                    </div>
                 </div>
             </div>
-        @endforeach
+        </div>
+
+        <div
+            x-show="confirmation.open"
+            x-cloak
+            x-on:keydown.escape.window="resolveConfirmation(false)"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100"
+            x-transition:leave="transition ease-in duration-150"
+            x-transition:leave-start="opacity-100"
+            x-transition:leave-end="opacity-0"
+            class="fixed inset-0 flex items-center justify-center overflow-y-auto p-4"
+            style="z-index: 100260;">
+            <div class="fixed inset-0 bg-gray-950/85 backdrop-blur-md" x-on:click="resolveConfirmation(false)"></div>
+            <div class="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                <div class="p-6">
+                    <div class="flex items-start gap-4">
+                        <span
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+                            :class="confirmation.tone === 'danger'
+                                ? 'bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-400'
+                                : confirmation.tone === 'success'
+                                    ? 'bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500'
+                                    : 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400'">
+                            <svg class="size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8.5v4.25M12 16h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                        </span>
+                        <div class="min-w-0">
+                            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90" x-text="confirmation.title"></h2>
+                            <p class="mt-2 text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="confirmation.message"></p>
+                            <p x-show="confirmation.details" x-cloak class="mt-2 text-theme-sm leading-6 text-gray-600 dark:text-gray-400" x-text="confirmation.details"></p>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button type="button" x-on:click="resolveConfirmation(false)" class="{{ $secondaryButtonClass }}" x-text="confirmation.cancelText"></button>
+                        <button
+                            type="button"
+                            x-ref="confirmPrimary"
+                            x-on:click="resolveConfirmation(true)"
+                            class="inline-flex h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition disabled:cursor-not-allowed disabled:opacity-60"
+                            :class="confirmation.tone === 'danger'
+                                ? 'bg-error-500 hover:bg-error-600'
+                                : confirmation.tone === 'success'
+                                    ? 'bg-success-500 hover:bg-success-600'
+                                    : 'bg-brand-500 hover:bg-brand-600'"
+                            x-text="confirmation.confirmText"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 @endsection
 
@@ -654,6 +771,18 @@
             return {
                 modal: null,
                 toast: { open: false, message: '', timer: null },
+                messageDialog: { open: false, type: 'error', title: '', message: '' },
+                confirmation: {
+                    open: false,
+                    title: '',
+                    message: '',
+                    details: '',
+                    confirmText: 'Confirm',
+                    cancelText: 'Cancel',
+                    tone: 'brand',
+                    resolver: null
+                },
+                feedbackClosing: false,
                 init() {
                     this.$nextTick(() => {
                         this.calculateAllForms();
@@ -669,6 +798,12 @@
 
                         if (config.selectedModal) {
                             this.openModal(config.selectedModal);
+                        }
+
+                        if (config.initialError) {
+                            this.showMessage('error', config.initialError);
+                        } else if (config.selectedMissingMessage) {
+                            this.showMessage('info', config.selectedMissingMessage, 'Delivery Not Available');
                         }
                     });
                 },
@@ -694,6 +829,10 @@
                     });
                 },
                 closeModal() {
+                    if (this.confirmation.open || this.messageDialog.open || this.feedbackClosing) {
+                        return;
+                    }
+
                     this.modal = null;
                 },
                 submitPendingFilters(event) {
@@ -703,7 +842,7 @@
                         return;
                     }
 
-                    const deliverySelect = form.querySelector('[name="delivery_code"]');
+                    const deliverySelect = form.querySelector('[name="delivery_id"]');
                     if (deliverySelect) {
                         deliverySelect.value = '';
                     }
@@ -901,7 +1040,110 @@
 
                     firstInvalidInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     firstInvalidInput.focus({ preventScroll: true });
+                    this.showMessage('error', 'Please complete the highlighted Tank Delivery Record fields.');
                     return false;
+                },
+                async confirmTdrSubmit(form, title, message, confirmText, tone) {
+                    if (!form) {
+                        this.showMessage('error', 'Unable to find the Tank Delivery Record form.');
+                        return;
+                    }
+
+                    if (!form.reportValidity()) {
+                        this.showMessage('error', 'Please complete all required Tank Delivery Record fields.');
+                        return;
+                    }
+
+                    if (!this.validateTdrForm(form)) {
+                        return;
+                    }
+
+                    const confirmed = await this.askConfirmation({
+                        title,
+                        message,
+                        confirmText,
+                        tone
+                    });
+
+                    if (!confirmed) {
+                        return;
+                    }
+
+                    this.submitForm(form);
+                },
+                async confirmDeleteRecord(formId, deliveryCode) {
+                    const confirmed = await this.askConfirmation({
+                        title: 'Delete Tank Delivery Record',
+                        message: 'Delete this record and return the delivery to the pending list?',
+                        details: deliveryCode ? deliveryCode : '',
+                        confirmText: 'Delete',
+                        tone: 'danger'
+                    });
+
+                    if (!confirmed) {
+                        return;
+                    }
+
+                    this.submitForm(document.getElementById(formId));
+                },
+                submitForm(form) {
+                    if (!form) {
+                        this.showMessage('error', 'Unable to submit the requested Tank Delivery Record action.');
+                        return;
+                    }
+
+                    HTMLFormElement.prototype.submit.call(form);
+                },
+                showMessage(type, message, title = '') {
+                    const dialogType = type === 'info' ? 'info' : 'error';
+                    this.messageDialog = {
+                        open: true,
+                        type: dialogType,
+                        title: title || (dialogType === 'info' ? 'Information' : 'Unable to Continue'),
+                        message
+                    };
+                },
+                closeMessageDialog() {
+                    this.feedbackClosing = true;
+                    this.messageDialog.open = false;
+
+                    this.$nextTick(() => {
+                        this.feedbackClosing = false;
+                    });
+                },
+                askConfirmation(options = {}) {
+                    return new Promise(resolve => {
+                        this.confirmation = {
+                            open: true,
+                            title: options.title || 'Confirm Action',
+                            message: options.message || 'Please confirm this action.',
+                            details: options.details || '',
+                            confirmText: options.confirmText || 'Confirm',
+                            cancelText: options.cancelText || 'Cancel',
+                            tone: options.tone || 'brand',
+                            resolver: resolve
+                        };
+
+                        this.$nextTick(() => {
+                            if (this.$refs.confirmPrimary) {
+                                this.$refs.confirmPrimary.focus();
+                            }
+                        });
+                    });
+                },
+                resolveConfirmation(confirmed) {
+                    const resolver = this.confirmation.resolver;
+                    this.feedbackClosing = true;
+                    this.confirmation.open = false;
+                    this.confirmation.resolver = null;
+
+                    if (resolver) {
+                        resolver(confirmed);
+                    }
+
+                    this.$nextTick(() => {
+                        this.feedbackClosing = false;
+                    });
                 },
                 showToast(message) {
                     this.closeToast();

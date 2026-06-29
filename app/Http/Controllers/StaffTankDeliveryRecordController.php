@@ -34,7 +34,11 @@ class StaffTankDeliveryRecordController extends Controller
         $pendingDeliveries = $this->pendingDeliveriesQuery($pendingDate, $pendingTankType)->get();
         $selectedDelivery = null;
 
-        if ($request->filled('delivery_code')) {
+        if ($request->filled('delivery_id')) {
+            $selectedDelivery = $this->pendingDeliveriesQuery()
+                ->where('inventory_logs.id', $request->integer('delivery_id'))
+                ->first();
+        } elseif ($request->filled('delivery_code')) {
             $selectedDelivery = $this->pendingDeliveriesQuery()
                 ->where('inventory_logs.delivery_code', $request->delivery_code)
                 ->first();
@@ -51,6 +55,8 @@ class StaffTankDeliveryRecordController extends Controller
                 'inventory_logs.delivery_status',
                 'inventory_logs.liters_delivered',
                 'inventory_logs.total_cost',
+                DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_count'),
+                DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.id <= inventory_logs.id) as delivery_batch_line'),
                 'tanks.name as tank_name',
                 'tanks.fuel_type',
                 'suppliers.name as supplier_name',
@@ -246,10 +252,15 @@ class StaffTankDeliveryRecordController extends Controller
             $rules[$field] = ['required', 'in:0,1'];
         }
 
+        $deliveryFuel = $this->fuelKeyForType($this->fuelTypeForInventoryLogId((int) $request->input('inventory_log_id')));
+        $requiredFuelKeys = $deliveryFuel ? [$deliveryFuel] : array_keys(TankDeliveryRecord::FUEL_TYPES);
+
         foreach (array_keys(TankDeliveryRecord::FUEL_TYPES) as $fuel) {
-            $rules["before_unloading_dipstick_{$fuel}"] = ['required', 'numeric', 'min:0'];
-            $rules["after_unloading_dipstick_{$fuel}"] = ['required', 'numeric', 'min:0'];
-            $rules["total_dispensed_{$fuel}"] = ['required', 'numeric', 'min:0'];
+            $presenceRule = in_array($fuel, $requiredFuelKeys, true) ? 'required' : 'nullable';
+
+            $rules["before_unloading_dipstick_{$fuel}"] = [$presenceRule, 'numeric', 'min:0'];
+            $rules["after_unloading_dipstick_{$fuel}"] = [$presenceRule, 'numeric', 'min:0'];
+            $rules["total_dispensed_{$fuel}"] = [$presenceRule, 'numeric', 'min:0'];
         }
 
         $messages = [
@@ -271,7 +282,9 @@ class StaffTankDeliveryRecordController extends Controller
             $messages["total_dispensed_{$fuel}.required"] = "{$label} total dispensed is required.";
         }
 
-        foreach ($this->checklistItems as $field => $label) {
+        $checklistItems = $this->checklistItemsForFuel($this->fuelTypeForInventoryLogId((int) $request->input('inventory_log_id')));
+
+        foreach ($checklistItems as $field => $label) {
             $messages["{$field}.required"] = "Please mark {$label} as Passed or Not Passed.";
         }
 
@@ -356,6 +369,8 @@ class StaffTankDeliveryRecordController extends Controller
             'inventory_logs.liters_delivered',
             'inventory_logs.total_cost',
             'inventory_logs.created_at',
+            DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_count'),
+            DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.id <= inventory_logs.id) as delivery_batch_line'),
             'tanks.name as tank_name',
             'tanks.fuel_type',
             'suppliers.name as supplier_name'
@@ -372,6 +387,53 @@ class StaffTankDeliveryRecordController extends Controller
         }
 
         return round((float) $value, 2);
+    }
+
+    private function checklistItemsForFuel(?string $fuelType): array
+    {
+        $items = $this->checklistItems;
+        $fuelType = strtolower((string) $fuelType);
+
+        if (str_contains($fuelType, 'diesel')) {
+            $items['ethanol_blend_passed'] = 'Visual Appearance';
+        }
+
+        return $items;
+    }
+
+    private function fuelTypeForInventoryLogId(?int $inventoryLogId): ?string
+    {
+        if (! $inventoryLogId || ! Schema::hasTable('inventory_logs') || ! Schema::hasTable('tanks')) {
+            return null;
+        }
+
+        return DB::table('inventory_logs')
+            ->join('tanks', 'inventory_logs.tank_id', '=', 'tanks.id')
+            ->where('inventory_logs.id', $inventoryLogId)
+            ->value('tanks.fuel_type');
+    }
+
+    private function fuelKeyForType(?string $fuelType): ?string
+    {
+        $fuelType = strtolower(trim((string) $fuelType));
+
+        if ($fuelType === '') {
+            return null;
+        }
+
+        if (str_contains($fuelType, 'regular')) {
+            return 'unleaded';
+        }
+
+        foreach (TankDeliveryRecord::FUEL_TYPES as $fuel => $label) {
+            $fuelLabel = strtolower($label);
+
+            if ($fuelType === $fuel || $fuelType === $fuelLabel || str_contains($fuelType, $fuel) || str_contains($fuelType, $fuelLabel)) {
+                return $fuel;
+            }
+        }
+
+        return null;
     }
 
     private function authorizeStaff(): void

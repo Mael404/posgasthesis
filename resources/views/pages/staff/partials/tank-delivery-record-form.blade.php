@@ -53,6 +53,42 @@
 
     $fieldClass = fn ($field, $base = null) => ($base ?? $inputBase) . ($showErrors && $errors->has($field) ? $errorInput : '');
     $fieldError = fn ($field) => $showErrors && $errors->has($field);
+    $checklistLabelForDelivery = function ($field, $label) use ($delivery) {
+        $fuelType = strtolower((string) ($delivery->fuel_type ?? ''));
+
+        if ($field === 'ethanol_blend_passed' && str_contains($fuelType, 'diesel')) {
+            return 'Visual Appearance';
+        }
+
+        return $label;
+    };
+
+    $fuelKeyForDelivery = function ($fuelType) use ($fuelTypes) {
+        $fuelType = strtolower(trim((string) $fuelType));
+
+        if ($fuelType === '') {
+            return null;
+        }
+
+        if (str_contains($fuelType, 'regular')) {
+            return 'unleaded';
+        }
+
+        foreach ($fuelTypes as $fuel => $label) {
+            $fuelLabel = strtolower((string) $label);
+
+            if ($fuelType === $fuel || $fuelType === $fuelLabel || str_contains($fuelType, $fuel) || str_contains($fuelType, $fuelLabel)) {
+                return $fuel;
+            }
+        }
+
+        return null;
+    };
+
+    $deliveryFuel = $fuelKeyForDelivery($delivery->fuel_type ?? null);
+    $visibleFuelTypes = $deliveryFuel && array_key_exists($deliveryFuel, $fuelTypes)
+        ? [$deliveryFuel => $fuelTypes[$deliveryFuel]]
+        : $fuelTypes;
 @endphp
 
 <input type="hidden" name="_tdr_form" value="{{ $formKey }}">
@@ -145,17 +181,18 @@
         <div class="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
             @foreach ($checklistItems as $field => $label)
                 @php
+                    $displayLabel = $checklistLabelForDelivery($field, $label);
                     $checklistDefault = $isEditing ? (string) (int) $record->{$field} : '';
                     $selectedChecklistValue = (string) $fieldValue($field, $checklistDefault);
                     $hasChecklistError = $fieldError($field);
                 @endphp
                 <div class="grid grid-cols-1 gap-3 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,300px)] md:items-center">
-                    <div class="text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $label }}</div>
+                    <div class="text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $displayLabel }}</div>
                     <div>
                         <div
                             class="grid grid-cols-2 gap-2 rounded-lg border border-transparent p-1 {{ $hasChecklistError ? 'border-error-300 bg-error-50/70 dark:border-error-500/50 dark:bg-error-500/10' : '' }}"
                             data-checklist-group="{{ $field }}"
-                            data-checklist-label="{{ $label }}">
+                            data-checklist-label="{{ $displayLabel }}">
                             <label class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.03]">
                                 <input type="radio" name="{{ $field }}" value="1" class="size-4 accent-brand-500" required
                                     x-on:change="clearChecklistError($event.target.closest('[data-checklist-group]'))"
@@ -208,7 +245,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                        @foreach ($fuelTypes as $fuel => $label)
+                        @foreach ($visibleFuelTypes as $fuel => $label)
                             @php
                                 $beforeField = "before_unloading_dipstick_{$fuel}";
                                 $afterField = "after_unloading_dipstick_{$fuel}";
