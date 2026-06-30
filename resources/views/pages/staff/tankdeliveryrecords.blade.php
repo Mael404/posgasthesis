@@ -22,6 +22,7 @@
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $dateInputClass = 'h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent py-2.5 pl-4 pr-11 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
@@ -34,6 +35,7 @@
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
+        $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 5.25V3.75M16 5.25V3.75M4.75 9.25h14.5M6 20.25h12A2.25 2.25 0 0 0 20.25 18V7A2.25 2.25 0 0 0 18 4.75H6A2.25 2.25 0 0 0 3.75 7v11A2.25 2.25 0 0 0 6 20.25Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 
         $dateLabel = function ($value, $format = 'M d, Y') {
             if (empty($value)) {
@@ -257,7 +259,10 @@
             <form method="GET" action="{{ route('staff.tank-delivery-records.index') }}" class="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_minmax(260px,1fr)_auto] xl:items-end">
                 <label class="block">
                     <span class="{{ $labelClass }}">Date</span>
-                    <input type="date" name="pending_date" value="{{ $pendingDate }}" class="mt-1.5 {{ $inputClass }}" x-on:change="submitPendingFilters($event)">
+                    <span class="relative mt-1.5 block custom-datepicker">
+                        <input type="text" name="pending_date" value="{{ $pendingDate }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-tdr-datepicker x-on:change="submitPendingFilters($event)">
+                        {!! $dateIcon !!}
+                    </span>
                 </label>
                 <label class="block">
                     <span class="{{ $labelClass }}">Type of Tank</span>
@@ -785,6 +790,7 @@
                 feedbackClosing: false,
                 init() {
                     this.$nextTick(() => {
+                        this.initDatePickers();
                         this.calculateAllForms();
 
                         if (config.sessionMessage) {
@@ -805,6 +811,29 @@
                         } else if (config.selectedMissingMessage) {
                             this.showMessage('info', config.selectedMissingMessage, 'Delivery Not Available');
                         }
+                    });
+                },
+                initDatePickers() {
+                    if (!window.flatpickr) {
+                        return;
+                    }
+
+                    document.querySelectorAll('[data-tdr-datepicker]').forEach(function(input) {
+                        if (input._tdrDatePicker) {
+                            return;
+                        }
+
+                        input._tdrDatePicker = window.flatpickr(input, {
+                            static: true,
+                            monthSelectorType: 'static',
+                            dateFormat: 'Y-m-d',
+                            defaultDate: input.value || null,
+                            allowInput: false,
+                            disableMobile: true,
+                            onChange: function() {
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        });
                     });
                 },
                 openModal(id) {
