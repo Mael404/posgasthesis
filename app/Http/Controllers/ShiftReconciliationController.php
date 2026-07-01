@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\HandlesVoidedSettlementDisplay;
 use App\Services\ShiftReadingInventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,8 @@ use Illuminate\View\View;
 
 class ShiftReconciliationController extends Controller
 {
+    use HandlesVoidedSettlementDisplay;
+
     private const PUMP_COUNT = 6;
 
     private array $lockedSalesPresence = [];
@@ -227,10 +230,16 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only verified settlements can have their approval undone.');
                 }
 
+                $this->calculateReadingData($reading);
+                $snapshot = $this->settlementSnapshotPayload($reading);
+
                 $this->shiftReadingInventory->restore($reading);
                 $reversedCollections = $this->reverseShiftApprovalCollections($reading);
                 $this->unlockSalesForReading($reading);
-                $this->updateShiftReading((int) $reading->id, $this->voidUpdatePayload($validated['void_reason']));
+                $this->updateShiftReading((int) $reading->id, array_merge(
+                    $this->voidUpdatePayload($validated['void_reason']),
+                    $snapshot
+                ));
             });
 
             return response()->json([
@@ -312,6 +321,10 @@ class ShiftReconciliationController extends Controller
 
     private function calculateReadingData(object $reading): void
     {
+        $storedExpectedCollection = $this->storedSettlementNumber($reading, 'expected_collection_snapshot')
+            ?? $this->storedSettlementNumber($reading, 'expected_collection');
+        $storedCashVariance = $this->storedSettlementNumber($reading, 'cash_variance_snapshot')
+            ?? $this->storedSettlementNumber($reading, 'cash_variance');
         [$lastVerified, $periodStart, $periodEnd] = $this->getReadingPeriodContext($reading);
 
         $totalPumpSales = 0.0;
@@ -369,6 +382,7 @@ class ShiftReconciliationController extends Controller
         $reading->cash_denominations = $this->decodeJsonDetails($reading->cash_denominations ?? null);
         $reading->gcash_entries = $this->decodeJsonDetails($reading->gcash_entries ?? null);
         $reading->cheque_entries = $this->decodeJsonDetails($reading->cheque_entries ?? null);
+        $this->applyVoidedSettlementDisplayState($reading, $storedExpectedCollection, $storedCashVariance);
         $reading->dipstick_premium = $this->liters($this->firstReadingNumber($reading, [
             'dipstick_premium',
             'premium_dipstick',

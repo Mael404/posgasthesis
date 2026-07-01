@@ -131,6 +131,44 @@
             ];
         };
 
+        $isVoidedSettlement = function ($reading) {
+            return (bool) ($reading->is_voided_settlement ?? false)
+                || str_contains(strtolower((string) ($reading->status ?? '')), 'void');
+        };
+
+        $voidedExpectedMeta = function ($reading) {
+            $snapshot = $reading->expected_collection_snapshot ?? null;
+
+            if ($snapshot !== null && $snapshot !== '') {
+                return [
+                    'display' => '&#8369;' . number_format((float) $snapshot, 2),
+                    'note' => 'Snapshot before void',
+                ];
+            }
+
+            return [
+                'display' => 'Voided',
+                'note' => 'Expected not recalculated',
+            ];
+        };
+
+        $voidedVarianceMeta = function ($reading) use ($varianceMeta) {
+            $snapshot = $reading->cash_variance_snapshot ?? null;
+
+            if ($snapshot !== null && $snapshot !== '') {
+                $meta = $varianceMeta($snapshot);
+                $meta['label'] = 'Before Void';
+
+                return $meta;
+            }
+
+            return [
+                'label' => 'Voided',
+                'class' => 'text-gray-500 dark:text-gray-400',
+                'display' => 'N/A',
+            ];
+        };
+
         $rowPayloads = collect($readings->items())->map(function ($reading) use ($periodLabel, $statusMeta) {
             return [
                 'id' => (int) ($reading->id ?? 0),
@@ -219,7 +257,9 @@
                         @forelse ($readings as $reading)
                             @php
                                 $status = $statusMeta($reading->status ?? 'Pending');
-                                $variance = $varianceMeta($reading->cash_variance ?? 0);
+                                $isVoided = $isVoidedSettlement($reading);
+                                $expected = $isVoided ? $voidedExpectedMeta($reading) : null;
+                                $variance = $isVoided ? $voidedVarianceMeta($reading) : $varianceMeta($reading->cash_variance ?? 0);
                                 $statusValue = strtolower((string) ($reading->status ?? 'Pending'));
                                 $isPending = str_contains($statusValue, 'pending');
                                 $isVerified = str_contains($statusValue, 'verified') || str_contains($statusValue, 'approved');
@@ -242,8 +282,13 @@
                                 </td>
                                 <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) ($reading->total_remitted ?? 0), 2) }}</td>
                                 <td class="{{ $tdNumberClass }}">
-                                    <span class="block font-medium text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($reading->expected_collection ?? 0), 2) }}</span>
-                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">Pump: &#8369;{{ number_format((float) ($reading->total_pump_sales ?? 0), 2) }}</span>
+                                    @if ($isVoided)
+                                        <span class="block font-medium text-gray-700 dark:text-gray-300">{!! $expected['display'] !!}</span>
+                                        <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">{{ $expected['note'] }}</span>
+                                    @else
+                                        <span class="block font-medium text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($reading->expected_collection ?? 0), 2) }}</span>
+                                        <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">Pump: &#8369;{{ number_format((float) ($reading->total_pump_sales ?? 0), 2) }}</span>
+                                    @endif
                                 </td>
                                 <td class="{{ $tdNumberClass }}">
                                     <span class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">{{ $variance['label'] }}</span>
@@ -515,6 +560,35 @@
             return '&#8369;' + fnum(value);
         }
 
+        function signedPeso(value) {
+            const amount = Number(value) || 0;
+
+            if (Math.abs(amount) < 0.01) {
+                return peso(0);
+            }
+
+            return (amount < 0 ? '-' : '+') + peso(Math.abs(amount));
+        }
+
+        function isVoidedReading(reading) {
+            return Boolean(reading && reading.is_voided_settlement)
+                || String((reading && reading.status) || '').toLowerCase().includes('void');
+        }
+
+        function expectedCollectionDisplay(reading) {
+            if (isVoidedReading(reading)) {
+                const snapshot = reading ? reading.expected_collection_snapshot : null;
+
+                if (snapshot !== null && snapshot !== undefined && snapshot !== '') {
+                    return peso(snapshot);
+                }
+
+                return 'Voided';
+            }
+
+            return peso(reading ? reading.expected_collection : 0);
+        }
+
         function modalElement(selector) {
             return typeof selector === 'string' ? document.querySelector(selector) : selector;
         }
@@ -640,7 +714,25 @@
             }
         }
 
-        function varianceState(value) {
+        function varianceState(value, reading = null) {
+            if (isVoidedReading(reading)) {
+                const snapshot = reading ? reading.cash_variance_snapshot : null;
+
+                if (snapshot !== null && snapshot !== undefined && snapshot !== '') {
+                    return {
+                        label: 'Before Void',
+                        value: signedPeso(snapshot),
+                        className: 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-white/[0.04] dark:text-gray-300'
+                    };
+                }
+
+                return {
+                    label: 'Voided',
+                    value: 'N/A',
+                    className: 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-white/[0.04] dark:text-gray-300'
+                };
+            }
+
             const variance = Number(value) || 0;
 
             if (Math.abs(variance) < 0.01) {
@@ -1009,7 +1101,12 @@
             const gcashEntries = Array.isArray(reading.gcash_entries) ? reading.gcash_entries : [];
             const chequeEntries = Array.isArray(reading.cheque_entries) ? reading.cheque_entries : [];
 
+            const voidedNotice = isVoidedReading(reading)
+                ? `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-theme-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">Voided settlement. Expected and variance are not recalculated from current transaction breakdowns.</div>`
+                : '';
+
             return [
+                voidedNotice,
                 financialRow('Total Gross Pump Sales', reading.total_pump_sales),
                 financialRow('Excess Markup / Surcharge', reading.surcharge, {
                     prefix: '+',
@@ -1038,7 +1135,7 @@
                 }),
                 `<div class="flex items-center justify-between gap-4 border-y border-gray-100 bg-gray-50 px-3 py-3 dark:border-gray-800 dark:bg-white/[0.02]">
                     <span class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Expected Collection</span>
-                    <span class="text-theme-sm font-bold tabular-nums text-brand-600 dark:text-brand-400">${peso(reading.expected_collection)}</span>
+                    <span class="text-theme-sm font-bold tabular-nums text-brand-600 dark:text-brand-400">${expectedCollectionDisplay(reading)}</span>
                 </div>`,
                 financialRow('Physical Cash Remitted', reading.cash_on_hand, {
                     detailsHtml: tableForItems(cashDenominations, cashColumns)
@@ -1066,7 +1163,7 @@
             const images = Array.isArray(data.meter_images) ? data.meter_images : [];
             const breakdowns = data.transaction_breakdowns || {};
             const row = reconciliationRows[reading.id] || {};
-            const variance = varianceState(reading.cash_variance);
+            const variance = varianceState(reading.cash_variance, reading);
             const feedback = [reading.rejection_reason, reading.admin_remarks].filter(Boolean);
             const subtitle = `${statusLabel(reading.status)} - ${dateLabel(reading)}`;
 

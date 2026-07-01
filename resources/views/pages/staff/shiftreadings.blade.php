@@ -114,6 +114,44 @@
             return ['label' => 'Overage', 'class' => 'text-brand-600 dark:text-brand-400', 'display' => '+PHP ' . number_format($variance, 2)];
         };
 
+        $isVoidedSettlement = function ($reading) {
+            return (bool) ($reading->is_voided_settlement ?? false)
+                || str_contains(strtolower((string) ($reading->status ?? '')), 'void');
+        };
+
+        $voidedExpectedMeta = function ($reading) {
+            $snapshot = $reading->expected_collection_snapshot ?? null;
+
+            if ($snapshot !== null && $snapshot !== '') {
+                return [
+                    'display' => 'PHP ' . number_format((float) $snapshot, 2),
+                    'note' => 'Snapshot before void',
+                ];
+            }
+
+            return [
+                'display' => 'Voided',
+                'note' => 'Expected not recalculated',
+            ];
+        };
+
+        $voidedVarianceMeta = function ($reading) use ($varianceMeta) {
+            $snapshot = $reading->cash_variance_snapshot ?? null;
+
+            if ($snapshot !== null && $snapshot !== '') {
+                $meta = $varianceMeta($snapshot);
+                $meta['label'] = 'Before Void';
+
+                return $meta;
+            }
+
+            return [
+                'label' => 'Voided',
+                'class' => 'text-gray-500 dark:text-gray-400',
+                'display' => 'N/A',
+            ];
+        };
+
         $rows = collect($readings->items());
         $summary = [
             'total' => $readings->total(),
@@ -273,7 +311,9 @@
                         @forelse ($readings as $reading)
                             @php
                                 $status = $statusMeta($reading->status ?? 'Pending');
-                                $variance = $varianceMeta($reading->cash_variance ?? 0);
+                                $isVoided = $isVoidedSettlement($reading);
+                                $expected = $isVoided ? $voidedExpectedMeta($reading) : null;
+                                $variance = $isVoided ? $voidedVarianceMeta($reading) : $varianceMeta($reading->cash_variance ?? 0);
                                 $statusValue = strtolower((string) ($reading->status ?? 'Pending'));
                                 $canVoid = str_contains($statusValue, 'pending') || str_contains($statusValue, 'reject');
                                 $feedback = collect([$reading->rejection_reason ?? null, $reading->admin_remarks ?? null, $reading->void_reason ?? null])
@@ -289,8 +329,13 @@
                                 </td>
                                 <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">PHP {{ number_format((float) ($reading->total_remitted ?? 0), 2) }}</td>
                                 <td class="{{ $tdNumberClass }}">
-                                    <span class="block font-medium text-gray-800 dark:text-white/90">PHP {{ number_format((float) ($reading->expected_collection ?? 0), 2) }}</span>
-                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">{{ number_format((float) ($reading->total_pump_liters ?? 0), 2) }} L</span>
+                                    @if ($isVoided)
+                                        <span class="block font-medium text-gray-700 dark:text-gray-300">{{ $expected['display'] }}</span>
+                                        <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">{{ $expected['note'] }}</span>
+                                    @else
+                                        <span class="block font-medium text-gray-800 dark:text-white/90">PHP {{ number_format((float) ($reading->expected_collection ?? 0), 2) }}</span>
+                                        <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">{{ number_format((float) ($reading->total_pump_liters ?? 0), 2) }} L</span>
+                                    @endif
                                 </td>
                                 <td class="{{ $tdNumberClass }}">
                                     <span class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">{{ $variance['label'] }}</span>
@@ -721,15 +766,15 @@
                                 </article>
                                 <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                     <p class="{{ $labelClass }}">Expected</p>
-                                    <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(details.reading.expected_collection)"></p>
+                                    <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="expectedCollectionDisplay(details.reading)"></p>
                                 </article>
                                 <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                     <p class="{{ $labelClass }}">Pump Liters</p>
                                     <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatLiters(details.reading.total_pump_liters)"></p>
                                 </article>
-                                <article class="rounded-xl border p-4" x-bind:class="varianceState(details.reading.cash_variance).boxClass">
-                                    <p class="text-theme-xs font-medium uppercase" x-text="varianceState(details.reading.cash_variance).label"></p>
-                                    <p class="mt-2 text-lg font-semibold tabular-nums" x-text="varianceState(details.reading.cash_variance).value"></p>
+                                <article class="rounded-xl border p-4" x-bind:class="varianceState(details.reading.cash_variance, details.reading).boxClass">
+                                    <p class="text-theme-xs font-medium uppercase" x-text="varianceState(details.reading.cash_variance, details.reading).label"></p>
+                                    <p class="mt-2 text-lg font-semibold tabular-nums" x-text="varianceState(details.reading.cash_variance, details.reading).value"></p>
                                 </article>
                             </div>
 
@@ -1539,7 +1584,42 @@
                     if (value.includes('void')) return 'Voided';
                     return 'Pending Verification';
                 },
-                varianceState(value) {
+                isVoidedReading(reading) {
+                    return Boolean(reading && reading.is_voided_settlement)
+                        || String((reading && reading.status) || '').toLowerCase().includes('void');
+                },
+                expectedCollectionDisplay(reading) {
+                    if (this.isVoidedReading(reading)) {
+                        const snapshot = reading ? reading.expected_collection_snapshot : null;
+
+                        if (snapshot !== null && snapshot !== undefined && snapshot !== '') {
+                            return this.money(snapshot);
+                        }
+
+                        return 'Voided';
+                    }
+
+                    return this.money(reading ? reading.expected_collection : 0);
+                },
+                varianceState(value, reading = null) {
+                    if (this.isVoidedReading(reading)) {
+                        const snapshot = reading ? reading.cash_variance_snapshot : null;
+
+                        if (snapshot !== null && snapshot !== undefined && snapshot !== '') {
+                            return {
+                                label: 'Before Void',
+                                value: this.signedMoney(snapshot),
+                                boxClass: 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-white/[0.04] dark:text-gray-300'
+                            };
+                        }
+
+                        return {
+                            label: 'Voided',
+                            value: 'N/A',
+                            boxClass: 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-white/[0.04] dark:text-gray-300'
+                        };
+                    }
+
                     const amount = Number(value || 0);
 
                     if (Math.abs(amount) < 0.01) {
@@ -1654,7 +1734,7 @@
                     const gcashRows = Array.isArray(reading.gcash_entries) ? reading.gcash_entries : [];
                     const chequeRows = Array.isArray(reading.cheque_entries) ? reading.cheque_entries : [];
 
-                    return [
+                    const rows = [
                         this.financialRow('gross', 'Total Gross Pump Sales', reading.total_pump_sales, '', 'text-gray-800 dark:text-white/90', []),
                         this.financialRow('excess_markups', 'Excess Markup / Surcharge', reading.surcharge, '+', 'text-brand-600 dark:text-brand-400', breakdowns.excess_markups || []),
                         this.financialRow('payments_collected', 'Account Payments Collected', reading.payments_collected, '+', 'text-success-600 dark:text-success-500', breakdowns.payments_collected || []),
@@ -1666,13 +1746,27 @@
                         this.financialRow('cheque_entries', 'Cheque Received', reading.cheque_amount, '', 'text-brand-600 dark:text-brand-400', chequeRows),
                         this.financialRow('total_remitted', 'Total Actual Remittance', reading.total_remitted, '', 'text-gray-800 dark:text-white/90', [])
                     ];
+
+                    if (this.isVoidedReading(reading)) {
+                        rows.splice(1, 0, this.financialRow(
+                            'expected_collection',
+                            'Expected Collection',
+                            0,
+                            '',
+                            'text-gray-600 dark:text-gray-300',
+                            [],
+                            this.expectedCollectionDisplay(reading)
+                        ));
+                    }
+
+                    return rows;
                 },
-                financialRow(key, label, amount, prefix, className, items) {
+                financialRow(key, label, amount, prefix, className, items, display = null) {
                     return {
                         key,
                         label,
                         amount: Number(amount || 0),
-                        display: prefix + this.money(amount),
+                        display: display === null ? prefix + this.money(amount) : display,
                         className,
                         items: Array.isArray(items) ? items : []
                     };
