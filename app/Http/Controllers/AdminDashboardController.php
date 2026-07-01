@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 use Symfony\Component\Process\Process;
@@ -15,6 +16,7 @@ class AdminDashboardController extends Controller
     private const PERIODS = ['today', 'weekly', 'monthly', 'custom'];
     private const METRIC_DATE_FILTERS = [
         'net-sales' => 'net_sales',
+        'net-sales-tank' => 'net_sales_tank',
         'expected-credit' => 'expected_credit',
         'credit-payments' => 'credit_payments',
         'advance-receivables' => 'advance_receivables',
@@ -207,6 +209,7 @@ class AdminDashboardController extends Controller
         $hasSales = $this->hasTable('sales');
         $fuelSales = $hasSales ? $this->fuelSalesQuery($start, $end) : null;
         $shiftReadingNetSales = $this->shiftReadingNetSales($start, $end);
+        $shiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end);
         $shiftReadingLitersMovement = $this->shiftReadingLitersMovement($start, $end);
 
         $paymentRows = $this->creditPaymentRows($start, $end);
@@ -216,8 +219,16 @@ class AdminDashboardController extends Controller
             'sales_table_net_sales_without_credit' => $hasSales ? $this->sumSalesTableNetSales(
                 $this->walkinFuelSales(clone $fuelSales)
             ) : 0,
+            'sales_table_net_sales_by_tank_with_credit' => $hasSales
+                ? $this->salesTableNetSalesByTank($start, $end)
+                : $this->emptyNetSalesTankRows(),
+            'sales_table_net_sales_by_tank_without_credit' => $hasSales
+                ? $this->salesTableNetSalesByTank($start, $end, true)
+                : $this->emptyNetSalesTankRows(),
             'shift_reading_net_sales_with_credit' => $shiftReadingNetSales['with_credit'],
             'shift_reading_net_sales_without_credit' => $shiftReadingNetSales['without_credit'],
+            'shift_reading_net_sales_by_tank_with_credit' => $shiftReadingNetSalesByTank['with_credit'],
+            'shift_reading_net_sales_by_tank_without_credit' => $shiftReadingNetSalesByTank['without_credit'],
             'shift_reading_count' => $shiftReadingNetSales['reading_count'],
             'expected_credit_sales' => $this->expectedCreditSales($start, $end),
             'expected_credit_receivables' => $creditSnapshot['receivables'],
@@ -556,6 +567,351 @@ class AdminDashboardController extends Controller
             ->value('total');
 
         return $this->money($total);
+    }
+
+    private function salesTableNetSalesByTank(Carbon $start, Carbon $end, bool $walkinOnly = false): array
+    {
+        $tanks = $this->preparedTanks();
+        $rows = $this->emptyNetSalesTankRows($tanks);
+
+        if (! $this->hasTable('sales')) {
+            return $rows;
+        }
+
+        $query = $this->fuelSalesQuery($start, $end);
+
+        if ($walkinOnly) {
+            $query = $this->walkinFuelSales($query);
+        }
+
+        $netExpression = $this->salesNetExpression();
+        $pumpExpression = $this->hasColumn('sales', 'pump_id') ? 'COALESCE(pump_id, 0)' : '0';
+        $fuelExpression = $this->hasColumn('sales', 'fuel_type') ? 'MAX(fuel_type)' : "'N/A'";
+        $litersExpression = $this->hasColumn('sales', 'liters') ? 'COALESCE(SUM(liters), 0)' : '0';
+        $salesRowsQuery = $query
+            ->selectRaw("
+                {$pumpExpression} as pump_id,
+                {$fuelExpression} as fuel_type,
+                {$litersExpression} as liters,
+                COALESCE(SUM({$netExpression}), 0) as net_sales,
+                COUNT(*) as transactions
+            ");
+
+        if ($this->hasColumn('sales', 'pump_id')) {
+            $salesRowsQuery->groupByRaw($pumpExpression);
+        }
+
+        $salesRows = $salesRowsQuery->get();
+
+        return $this->addSalesRowsToTankRows($rows, $salesRows, $tanks);
+    }
+
+    private function shiftReadingNetSalesByTank(Carbon $start, Carbon $end): array
+    {
+        $tanks = $this->preparedTanks();
+        $withCreditRows = $this->emptyNetSalesTankRows($tanks);
+        $withoutCreditRows = $this->emptyNetSalesTankRows($tanks);
+        $query = $this->shiftReadingsForRange($start, $end);
+
+        if (! $query) {
+            return [
+                'with_credit' => $withCreditRows,
+                'without_credit' => $withoutCreditRows,
+            ];
+        }
+
+        $readings = $query
+            ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', 'Verified'))
+            ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
+            ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
+            ->get();
+        $pumpToTank = $this->pumpToTankMap($tanks);
+
+        foreach ($readings as $reading) {
+            $lastVerified = $this->previousVerifiedReading($reading);
+            $pumpSales = $this->readingPumpSalesByPump($reading, $lastVerified);
+            $pumpLiters = $this->readingPumpLitersByPump($reading, $lastVerified);
+            $adjustmentsByTank = $this->readingSalesAdjustmentsByTank($reading, $tanks);
+
+            foreach ($tanks as $tank) {
+                $tankId = (int) $tank['id'];
+                $grossSales = $tank['connected_pump_numbers']->sum(
+                    fn ($pumpNumber) => (float) ($pumpSales[(int) $pumpNumber] ?? 0)
+                );
+                $liters = $tank['connected_pump_numbers']->sum(
+                    fn ($pumpNumber) => (float) ($pumpLiters[(int) $pumpNumber] ?? 0)
+                );
+                $discounts = (float) ($adjustmentsByTank[$tankId]['discounts'] ?? 0);
+                $creditSales = (float) ($adjustmentsByTank[$tankId]['credit_sales'] ?? 0);
+
+                if ($grossSales <= 0 && $liters <= 0 && $discounts <= 0 && $creditSales <= 0) {
+                    continue;
+                }
+
+                $withCreditRows[$tankId]['liters'] += $liters;
+                $withCreditRows[$tankId]['net_sales'] += $grossSales - $discounts;
+                $withCreditRows[$tankId]['transactions']++;
+
+                $withoutCreditRows[$tankId]['liters'] += $liters;
+                $withoutCreditRows[$tankId]['net_sales'] += $grossSales - $creditSales - $discounts;
+                $withoutCreditRows[$tankId]['transactions']++;
+            }
+
+            foreach ($pumpSales as $pumpId => $grossSales) {
+                $pumpId = (int) $pumpId;
+
+                if (isset($pumpToTank[$pumpId])) {
+                    continue;
+                }
+
+                $liters = (float) ($pumpLiters[$pumpId] ?? 0);
+
+                if ((float) $grossSales === 0.0 && $liters === 0.0) {
+                    continue;
+                }
+
+                $context = [
+                    'fuel_type' => $this->defaultFuelByPump()[$pumpId] ?? 'N/A',
+                    'connected_pumps_display' => $pumpId > 0 ? 'P' . $pumpId : 'No tank match',
+                ];
+
+                $this->ensureUnassignedNetSalesRow($withCreditRows, $context);
+                $this->ensureUnassignedNetSalesRow($withoutCreditRows, $context);
+
+                $withCreditRows['unassigned']['liters'] += $liters;
+                $withCreditRows['unassigned']['net_sales'] += (float) $grossSales;
+                $withCreditRows['unassigned']['transactions']++;
+
+                $withoutCreditRows['unassigned']['liters'] += $liters;
+                $withoutCreditRows['unassigned']['net_sales'] += (float) $grossSales;
+                $withoutCreditRows['unassigned']['transactions']++;
+            }
+
+            foreach ($adjustmentsByTank as $tankId => $adjustments) {
+                if ($tankId !== 'unassigned') {
+                    continue;
+                }
+
+                $this->ensureUnassignedNetSalesRow($withCreditRows, $adjustments);
+                $this->ensureUnassignedNetSalesRow($withoutCreditRows, $adjustments);
+
+                $withCreditRows[$tankId]['net_sales'] -= (float) ($adjustments['discounts'] ?? 0);
+                $withCreditRows[$tankId]['transactions'] += (int) ($adjustments['transactions'] ?? 0);
+
+                $withoutCreditRows[$tankId]['net_sales'] -= (float) ($adjustments['credit_sales'] ?? 0) + (float) ($adjustments['discounts'] ?? 0);
+                $withoutCreditRows[$tankId]['transactions'] += (int) ($adjustments['transactions'] ?? 0);
+            }
+        }
+
+        return [
+            'with_credit' => $this->formatNetSalesTankRows($withCreditRows),
+            'without_credit' => $this->formatNetSalesTankRows($withoutCreditRows),
+        ];
+    }
+
+    private function readingPumpSalesByPump($reading, $lastVerified = null): array
+    {
+        $salesByPump = [];
+
+        for ($pump = 1; $pump <= 6; $pump++) {
+            $startField = "pump{$pump}_sales_start";
+            $endField = "pump{$pump}_sales_end";
+            $previousEnd = $lastVerified ? (float) ($lastVerified->$endField ?? 0) : 0;
+            $startValue = $reading->$startField ?? $previousEnd;
+
+            $salesByPump[$pump] = (float) ($reading->$endField ?? 0) - (float) $startValue;
+        }
+
+        return $salesByPump;
+    }
+
+    private function emptyNetSalesTankRows($tanks = null): array
+    {
+        return ($tanks ?? $this->preparedTanks())
+            ->mapWithKeys(fn ($tank) => [
+                (int) $tank['id'] => [
+                    'id' => (int) $tank['id'],
+                    'name' => $tank['name'],
+                    'fuel_type' => $tank['fuel_type'],
+                    'connected_pumps_display' => $tank['connected_pumps_display'],
+                    'liters' => 0,
+                    'net_sales' => 0,
+                    'transactions' => 0,
+                ],
+            ])
+            ->all();
+    }
+
+    private function addSalesRowsToTankRows(array $tankRows, $salesRows, $tanks): array
+    {
+        $pumpToTank = $this->pumpToTankMap($tanks);
+        $fuelToTank = $this->uniqueFuelToTankMap($tanks);
+
+        foreach ($salesRows as $row) {
+            $pumpId = (int) ($row->pump_id ?? 0);
+            $fuelType = (string) ($row->fuel_type ?? 'N/A');
+            $tankId = $pumpToTank[$pumpId] ?? ($fuelToTank[$this->normalizeFuelType($fuelType)] ?? null);
+
+            if (! $tankId || ! isset($tankRows[$tankId])) {
+                $tankId = 'unassigned';
+                $this->ensureUnassignedNetSalesRow($tankRows, [
+                    'fuel_type' => $fuelType,
+                    'connected_pumps_display' => $pumpId > 0 ? 'P' . $pumpId : 'No tank match',
+                ]);
+            }
+
+            $tankRows[$tankId]['liters'] += (float) ($row->liters ?? 0);
+            $tankRows[$tankId]['net_sales'] += (float) ($row->net_sales ?? 0);
+            $tankRows[$tankId]['transactions'] += (int) ($row->transactions ?? 0);
+        }
+
+        return $this->formatNetSalesTankRows($tankRows);
+    }
+
+    private function readingSalesAdjustmentsByTank($reading, $tanks): array
+    {
+        if (! $this->hasTable('sales')) {
+            return [];
+        }
+
+        $periodStart = Carbon::parse($reading->period_from)->startOfDay();
+        $periodEnd = Carbon::parse($reading->period_to ?: $reading->period_from)->endOfDay();
+        $creditSalesExpression = $this->hasColumn('sales', 'payment_type') && $this->hasColumn('sales', 'amount')
+            ? "COALESCE(SUM(CASE WHEN LOWER(payment_type) = 'credit' THEN amount ELSE 0 END), 0)"
+            : '0';
+        $autoDiscountExpression = $this->hasColumn('sales', 'discount')
+            ? 'COALESCE(SUM(discount), 0)'
+            : '0';
+        $manualDiscountExpression = $this->hasColumn('sales', 'manual_discount')
+            ? 'COALESCE(SUM(manual_discount), 0)'
+            : '0';
+        $pumpExpression = $this->hasColumn('sales', 'pump_id') ? 'COALESCE(pump_id, 0)' : '0';
+        $fuelExpression = $this->hasColumn('sales', 'fuel_type') ? 'MAX(fuel_type)' : "'N/A'";
+
+        $rowsQuery = $this->scopeSalesToReading(DB::table('sales'), $reading, $periodStart, $periodEnd)
+            ->selectRaw("
+                {$pumpExpression} as pump_id,
+                {$fuelExpression} as fuel_type,
+                {$creditSalesExpression} as credit_sales,
+                {$autoDiscountExpression} + {$manualDiscountExpression} as discounts,
+                COUNT(*) as transactions
+            ");
+
+        if ($this->hasColumn('sales', 'pump_id')) {
+            $rowsQuery->groupByRaw($pumpExpression);
+        }
+
+        $rows = $rowsQuery->get();
+
+        $adjustments = [];
+        $pumpToTank = $this->pumpToTankMap($tanks);
+        $fuelToTank = $this->uniqueFuelToTankMap($tanks);
+
+        foreach ($rows as $row) {
+            $fuelType = (string) ($row->fuel_type ?? 'N/A');
+            $creditSales = (float) ($row->credit_sales ?? 0);
+            $discounts = (float) ($row->discounts ?? 0);
+
+            if ($creditSales <= 0 && $discounts <= 0) {
+                continue;
+            }
+
+            $tankId = $pumpToTank[(int) ($row->pump_id ?? 0)] ?? ($fuelToTank[$this->normalizeFuelType($fuelType)] ?? null) ?? 'unassigned';
+
+            if (! isset($adjustments[$tankId])) {
+                $adjustments[$tankId] = [
+                    'fuel_type' => $fuelType,
+                    'connected_pumps_display' => (int) ($row->pump_id ?? 0) > 0 ? 'P' . (int) $row->pump_id : 'No tank match',
+                    'credit_sales' => 0,
+                    'discounts' => 0,
+                    'transactions' => 0,
+                ];
+            }
+
+            $adjustments[$tankId]['credit_sales'] += $creditSales;
+            $adjustments[$tankId]['discounts'] += $discounts;
+            $adjustments[$tankId]['transactions'] += (int) ($row->transactions ?? 0);
+        }
+
+        return $adjustments;
+    }
+
+    private function pumpToTankMap($tanks): array
+    {
+        $map = [];
+
+        foreach ($tanks as $tank) {
+            foreach ($tank['connected_pump_numbers'] as $pumpNumber) {
+                $pumpNumber = (int) $pumpNumber;
+
+                if ($pumpNumber > 0 && ! isset($map[$pumpNumber])) {
+                    $map[$pumpNumber] = (int) $tank['id'];
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    private function uniqueFuelToTankMap($tanks): array
+    {
+        $counts = [];
+        $map = [];
+
+        foreach ($tanks as $tank) {
+            $fuel = $this->normalizeFuelType($tank['fuel_type']);
+
+            if ($fuel === '') {
+                continue;
+            }
+
+            $counts[$fuel] = ($counts[$fuel] ?? 0) + 1;
+            $map[$fuel] = (int) $tank['id'];
+        }
+
+        foreach ($counts as $fuel => $count) {
+            if ($count > 1) {
+                unset($map[$fuel]);
+            }
+        }
+
+        return $map;
+    }
+
+    private function normalizeFuelType($value): string
+    {
+        return strtolower(trim((string) $value));
+    }
+
+    private function ensureUnassignedNetSalesRow(array &$tankRows, array $context = []): void
+    {
+        if (isset($tankRows['unassigned'])) {
+            return;
+        }
+
+        $tankRows['unassigned'] = [
+            'id' => 'unassigned',
+            'name' => 'Unassigned',
+            'fuel_type' => $context['fuel_type'] ?? 'N/A',
+            'connected_pumps_display' => $context['connected_pumps_display'] ?? 'No tank match',
+            'liters' => 0,
+            'net_sales' => 0,
+            'transactions' => 0,
+        ];
+    }
+
+    private function formatNetSalesTankRows(array $tankRows): array
+    {
+        return collect($tankRows)
+            ->map(function ($row) {
+                $row['liters'] = $this->liters($row['liters'] ?? 0);
+                $row['net_sales'] = $this->money($row['net_sales'] ?? 0);
+                $row['transactions'] = (int) ($row['transactions'] ?? 0);
+
+                return $row;
+            })
+            ->values()
+            ->all();
     }
 
     private function shiftReadingNetSales(Carbon $start, Carbon $end): array
@@ -1058,15 +1414,23 @@ class AdminDashboardController extends Controller
             }
 
             $phTime = Carbon::now('Asia/Manila');
-            $formattedDate = $phTime->format('F j, Y h-ia');
+            $formattedDate = $phTime->format('Y-m-d_his_A');
             $safeDbName = preg_replace('/[^A-Za-z0-9_.-]/', '_', $dbName);
             $filename = "backup-{$safeDbName}-{$formattedDate}.sql";
-            $storagePath = storage_path('app/' . $filename);
+            $backupDirectory = storage_path('app/backups');
+            $storagePath = $backupDirectory . DIRECTORY_SEPARATOR . $filename;
 
+            File::ensureDirectoryExists($backupDirectory);
+
+            $mysqldumpBinary = $this->mysqldumpBinary();
             $command = [
-                $this->mysqldumpBinary(),
+                $mysqldumpBinary,
                 '--host=' . $dbHost,
                 '--user=' . $dbUser,
+                '--single-transaction',
+                '--quick',
+                '--routines',
+                '--triggers',
             ];
 
             if ($dbPort) {
@@ -1080,19 +1444,25 @@ class AdminDashboardController extends Controller
             $command[] = '--result-file=' . $storagePath;
             $command[] = $dbName;
 
-            $process = new Process($command);
+            $process = new Process($command, base_path(), $this->mysqldumpEnvironment($mysqldumpBinary));
             $process->setTimeout(180);
             $process->run();
 
             if (! $process->isSuccessful()) {
+                File::delete($storagePath);
+
                 $message = trim($process->getErrorOutput() ?: $process->getOutput());
 
                 return back()->with('error', 'Backup Error: ' . ($message ?: 'mysqldump could not complete.'));
             }
 
-            if (file_exists($storagePath)) {
-                return response()->download($storagePath)->deleteFileAfterSend(true);
+            if (File::isFile($storagePath) && File::size($storagePath) > 0) {
+                return response()
+                    ->download($storagePath, $filename, ['Content-Type' => 'application/sql'])
+                    ->deleteFileAfterSend(true);
             }
+
+            File::delete($storagePath);
 
             return back()->with('error', 'Backup failed: File could not be generated.');
         } catch (\Exception $e) {
@@ -1115,5 +1485,26 @@ class AdminDashboardController extends Controller
         }
 
         return 'mysqldump';
+    }
+
+    private function mysqldumpEnvironment(string $binary): array
+    {
+        $systemRoot = getenv('SystemRoot') ?: ($_SERVER['SystemRoot'] ?? 'C:\\Windows');
+        $windir = getenv('WINDIR') ?: ($_SERVER['WINDIR'] ?? $systemRoot);
+        $path = getenv('PATH') ?: ($_SERVER['PATH'] ?? '');
+        $paths = array_filter([
+            is_file($binary) ? dirname($binary) : null,
+            $path,
+            $systemRoot . '\\System32',
+            $systemRoot,
+            $systemRoot . '\\System32\\Wbem',
+        ]);
+
+        return [
+            'SystemRoot' => $systemRoot,
+            'WINDIR' => $windir,
+            'PATH' => implode(PATH_SEPARATOR, array_unique($paths)),
+            'PATHEXT' => getenv('PATHEXT') ?: ($_SERVER['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD'),
+        ];
     }
 }

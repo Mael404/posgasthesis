@@ -260,10 +260,14 @@ class ShiftReconciliationController extends Controller
         }
 
         $remarks = trim((string) ($validated['admin_remarks'] ?? ''));
-
-        $this->updateShiftReading((int) $validated['id'], [
+        $remarkUpdates = [
             'admin_remarks' => $remarks !== '' ? $remarks : null,
-        ]);
+            'admin_remarks_by' => $remarks !== '' ? auth()->id() : null,
+            'admin_remarks_updated_at' => $remarks !== '' ? now() : null,
+            'admin_remarks_seen_at' => null,
+        ];
+
+        $this->updateShiftReading((int) $validated['id'], $remarkUpdates);
 
         return response()->json([
             'success' => true,

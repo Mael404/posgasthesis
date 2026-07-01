@@ -164,6 +164,7 @@ class StaffReadingController extends Controller
         }
 
         $this->calculateReadingData($reading);
+        $this->markAdminRemarksSeen((int) $reading->id, $reading);
 
         return response()->json([
             'reading' => $reading,
@@ -995,6 +996,27 @@ class StaffReadingController extends Controller
         if ($filtered !== []) {
             DB::table('shift_readings')->where('id', $id)->update($filtered);
         }
+    }
+
+    private function markAdminRemarksSeen(int $id, object $reading): void
+    {
+        if (
+            ! $this->hasColumn('shift_readings', 'admin_remarks')
+            || ! $this->hasColumn('shift_readings', 'admin_remarks_seen_at')
+            || trim((string) ($reading->admin_remarks ?? '')) === ''
+        ) {
+            return;
+        }
+
+        $seenAt = now();
+        $query = DB::table('shift_readings')->where('id', $id);
+
+        if ($this->hasColumn('shift_readings', 'user_id')) {
+            $query->where('user_id', auth()->id());
+        }
+
+        $query->update(['admin_remarks_seen_at' => $seenAt]);
+        $reading->admin_remarks_seen_at = $seenAt->toDateTimeString();
     }
 
     private function insertForExistingColumnsAndGetId(string $table, array $payload): int

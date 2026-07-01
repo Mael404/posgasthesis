@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Support\StaffHeaderNotifications;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -12,6 +13,7 @@ class MenuHelper
 {
     private static ?int $pendingShiftReadingsCount = null;
     private static ?int $unreadAnnouncementsCount = null;
+    private static ?int $unreadShiftReadingRemarksCount = null;
 
     public static function getMainNavItems()
     {
@@ -266,6 +268,7 @@ class MenuHelper
     private static function getStaffItems(): array
     {
         $unreadAnnouncementsCount = self::getUnreadAnnouncementsCount();
+        $unreadShiftReadingRemarksCount = self::getUnreadShiftReadingRemarksCount();
 
         return [
             [
@@ -278,6 +281,7 @@ class MenuHelper
                 'icon' => 'task',
                 'name' => 'Shift Readings',
                 'path' => self::routePath('staff.readings.index', '/staff/shift-readings'),
+                'badge' => $unreadShiftReadingRemarksCount,
                 'activePatterns' => ['/staff/shift-readings', '/staff/shift-readings/*', '/staff/readings', '/staff/readings/*'],
             ],
             [
@@ -356,6 +360,26 @@ class MenuHelper
                 ->count();
         } catch (Throwable) {
             return self::$unreadAnnouncementsCount = 0;
+        }
+    }
+
+    private static function getUnreadShiftReadingRemarksCount(): int
+    {
+        if (self::$unreadShiftReadingRemarksCount !== null) {
+            return self::$unreadShiftReadingRemarksCount;
+        }
+
+        try {
+            $userId = (int) Auth::id();
+
+            if ($userId < 1) {
+                return self::$unreadShiftReadingRemarksCount = 0;
+            }
+
+            return self::$unreadShiftReadingRemarksCount = app(StaffHeaderNotifications::class)
+                ->unreadShiftReadingRemarksCount($userId);
+        } catch (Throwable) {
+            return self::$unreadShiftReadingRemarksCount = 0;
         }
     }
 

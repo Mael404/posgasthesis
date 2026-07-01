@@ -61,6 +61,13 @@
     <x-common.page-breadcrumb pageTitle="Admin Dashboard" />
 
     <div class="space-y-6">
+        @if (session('error'))
+            <x-ui.alert
+                variant="error"
+                title="Database Backup Failed"
+                :message="session('error')" />
+        @endif
+
         <div class="{{ $cardClass }}">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -74,7 +81,7 @@
         </div>
 
         <div class="grid min-w-0 grid-cols-12 gap-4 md:gap-6">
-            <article class="{{ $cardClass }} col-span-12 xl:col-span-6">
+            <article class="{{ $cardClass }} col-span-12">
                 <div class="{{ $cardHeaderClass }}">
                     <div>
                         <h2 class="{{ $cardTitleClass }}">Net Sales</h2>
@@ -123,6 +130,58 @@
                         <p class="{{ $captionClass }}" id="netSalesCaption">Sales table: sales less discounts, including credits</p>
                         <div class="{{ $metaClass }}" id="netSalesMeta">
                             Period: {{ $metricPeriodLabel('net-sales') }}
+                        </div>
+                    </article>
+
+                    <article class="{{ $cardClass }} col-span-12">
+                        <div class="{{ $cardHeaderClass }}">
+                            <h2 class="{{ $cardTitleClass }}">Net Sales Per Tank</h2>
+                            <div class="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:items-end">
+                                <div class="{{ $segmentGroupClass }}" aria-label="Net sales per tank period">
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="today">Today</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="weekly">Week</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="monthly">Month</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="custom">Custom</button>
+                                </div>
+                                <div class="{{ $metaClass }} mt-0 border-t-0 pt-0 text-left sm:text-right" id="netSalesTankMeta">
+                                    Sales table | Include credits | Period: {{ $metricPeriodLabel('net-sales-tank') }}
+                                </div>
+                            </div>
+                        </div>
+                        @php($netSalesTankFilter = $metricFilter('net-sales-tank'))
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                            <label class="{{ $dateLabelClass }}">
+                                <span>From</span>
+                                <span class="relative block custom-datepicker">
+                                    <input type="text" class="{{ $dateInputClass }}" name="{{ $netSalesTankFilter['prefix'] }}_from" value="{{ $netSalesTankFilter['from'] ?? request($netSalesTankFilter['prefix'] . '_from') }}" placeholder="Select date" autocomplete="off" data-dashboard-datepicker>
+                                    {!! $dateIcon !!}
+                                </span>
+                            </label>
+                            <label class="{{ $dateLabelClass }}">
+                                <span>To</span>
+                                <span class="relative block custom-datepicker">
+                                    <input type="text" class="{{ $dateInputClass }}" name="{{ $netSalesTankFilter['prefix'] }}_to" value="{{ $netSalesTankFilter['to'] ?? request($netSalesTankFilter['prefix'] . '_to') }}" placeholder="Select date" autocomplete="off" data-dashboard-datepicker>
+                                    {!! $dateIcon !!}
+                                </span>
+                            </label>
+                            <div class="{{ $dateActionClass }}">
+                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
+                                <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $netSalesTankFilter['prefix'] }}">Clear</button>
+                            </div>
+                        </form>
+                        <div class="min-w-0 max-w-full overflow-x-auto custom-scrollbar">
+                            <table class="{{ $tableClass }}">
+                                <thead>
+                                    <tr class="border-y border-gray-100 dark:border-gray-800">
+                                        <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Tank</p></th>
+                                        <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Fuel</p></th>
+                                        <th class="{{ $thClass }}"><p class="{{ $thTextClass }}">Pumps</p></th>
+                                        <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Liters</p></th>
+                                        <th class="{{ $thNumberClass }}"><p class="{{ $thTextClass }}">Net Sales</p></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="netSalesTankRows"></tbody>
+                            </table>
                         </div>
                     </article>
 
@@ -248,7 +307,7 @@
                         </div>
                     </article>
 
-                    <article class="{{ $cardClass }} col-span-12">
+                    <article class="{{ $cardClass }} col-span-12 xl:col-span-6">
                         <div class="{{ $cardHeaderClass }}">
                             <h2 class="{{ $cardTitleClass }}">Total Excess</h2>
                             <div class="{{ $segmentGroupClass }}" aria-label="Total excess period">
@@ -444,6 +503,7 @@
             netSalesSource: 'sales_table',
             netSalesCreditMode: 'with_credit',
             netSalesPeriod: cardDefaultPeriods['net-sales'] || 'today',
+            netSalesTankPeriod: cardDefaultPeriods['net-sales-tank'] || 'today',
             expectedCreditPeriod: cardDefaultPeriods['expected-credit'] || 'today',
             creditPaymentsPeriod: cardDefaultPeriods['credit-payments'] || 'today',
             advanceReceivablesPeriod: cardDefaultPeriods['advance-receivables'] || 'today',
@@ -456,6 +516,7 @@
 
         const periodStateKeys = {
             'net-sales': 'netSalesPeriod',
+            'net-sales-tank': 'netSalesTankPeriod',
             'expected-credit': 'expectedCreditPeriod',
             'credit-payments': 'creditPaymentsPeriod',
             'advance-receivables': 'advanceReceivablesPeriod',
@@ -649,6 +710,8 @@
                 ? netMeta + ' | Verified readings: ' + integerFormatter.format(readingCount)
                 : netMeta
             );
+            const netTankStats = currentStats('net-sales-tank', dashboardState.netSalesTankPeriod);
+            renderNetSalesByTank(netTankStats);
 
             const expectedStats = currentStats('expected-credit', dashboardState.expectedCreditPeriod);
             setText('expectedCreditValue', money(expectedStats.expected_credit_receivables));
@@ -690,6 +753,50 @@
                     ' | ' + periodLabel('liters-movement', dashboardState.litersMovementPeriod)
             );
             renderLitersMovementBreakdowns(litersStats, litersStatus);
+        }
+
+        function renderNetSalesByTank(stats) {
+            const rows = stats[dashboardState.netSalesSource + '_net_sales_by_tank_' + dashboardState.netSalesCreditMode] || [];
+            const tbody = document.getElementById('netSalesTankRows');
+            const sourceLabel = dashboardState.netSalesSource === 'shift_reading' ? 'Shift readings' : 'Sales table';
+            const creditLabel = dashboardState.netSalesCreditMode === 'with_credit' ? 'Include credits' : 'Walk-in only';
+
+            setText(
+                'netSalesTankMeta',
+                sourceLabel + ' | ' + creditLabel + ' | Period: ' + periodLabel('net-sales-tank', dashboardState.netSalesTankPeriod)
+            );
+
+            if (!tbody) {
+                return;
+            }
+
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td class="${emptyCellClass}" colspan="5">No tank net sales found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = rows.map(function(row) {
+                const fuelColorClasses = fuelClasses(row.fuel_type);
+                const netSales = Number(row.net_sales) || 0;
+                const netClass = netSales < 0 ? negativeAmountClass : '';
+
+                return `
+                    <tr class="${rowClass}">
+                        <td class="${primaryCellClass}">
+                            <span class="block text-theme-sm font-medium text-gray-800 dark:text-white/90">${escapeHtml(row.name)}</span>
+                        </td>
+                        <td class="${primaryCellClass}" data-label="Fuel">
+                            <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-theme-xs font-medium ${fuelColorClasses.badge}">
+                                <span class="h-1.5 w-1.5 rounded-full ${fuelColorClasses.dot}"></span>
+                                ${escapeHtml(row.fuel_type)}
+                            </span>
+                        </td>
+                        <td class="${primaryCellClass}" data-label="Pumps">${escapeHtml(row.connected_pumps_display)}</td>
+                        <td class="${numberCellClass}" data-label="Liters">${liters(row.liters)}</td>
+                        <td class="${numberCellClass} ${netClass}" data-label="Net Sales">${money(row.net_sales)}</td>
+                    </tr>
+                `;
+            }).join('');
         }
 
         function updateButtonStates() {

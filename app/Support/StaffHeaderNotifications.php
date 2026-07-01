@@ -20,6 +20,7 @@ class StaffHeaderNotifications
         }
 
         try {
+            $remarkNotifications = collect($this->shiftReadingRemarkNotifications($userId, $limit));
             $replyNotifications = collect($this->targetedAdminReplyNotifications($userId, $limit));
             $replyAnnouncementIds = $replyNotifications
                 ->pluck('announcement_id')
@@ -27,7 +28,8 @@ class StaffHeaderNotifications
                 ->unique()
                 ->all();
 
-            return $replyNotifications
+            return $remarkNotifications
+                ->merge($replyNotifications)
                 ->merge($this->unreadAnnouncementNotifications($userId, $limit, $replyAnnouncementIds))
                 ->sortByDesc('sort_timestamp')
                 ->take($limit)
@@ -41,6 +43,85 @@ class StaffHeaderNotifications
         } catch (Throwable) {
             return [];
         }
+    }
+
+    public function unreadShiftReadingRemarksCount(int $userId): int
+    {
+        if ($userId < 1 || ! $this->canReadShiftReadingRemarks()) {
+            return 0;
+        }
+
+        try {
+            return (int) $this->unreadShiftReadingRemarksQuery($userId)->count();
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    private function shiftReadingRemarkNotifications(int $userId, int $limit): array
+    {
+        if (! $this->canReadShiftReadingRemarks()) {
+            return [];
+        }
+
+        $hasAdminUser = Schema::hasColumn('shift_readings', 'admin_remarks_by') && Schema::hasTable('users');
+        $timestampColumn = $this->shiftReadingRemarkTimestampColumn();
+
+        $query = $this->unreadShiftReadingRemarksQuery($userId);
+
+        if ($hasAdminUser) {
+            $query->leftJoin('users as remark_admins', 'shift_readings.admin_remarks_by', '=', 'remark_admins.id');
+        }
+
+        return $query
+            ->select(
+                'shift_readings.id',
+                Schema::hasColumn('shift_readings', 'period_from') ? 'shift_readings.period_from' : DB::raw('NULL as period_from'),
+                Schema::hasColumn('shift_readings', 'period_to') ? 'shift_readings.period_to' : DB::raw('NULL as period_to'),
+                'shift_readings.admin_remarks',
+                $timestampColumn ? DB::raw("shift_readings.{$timestampColumn} as remark_timestamp") : DB::raw('NULL as remark_timestamp'),
+                $hasAdminUser ? 'remark_admins.name as admin_name' : DB::raw("'Admin' as admin_name")
+            )
+            ->when($timestampColumn, fn ($query) => $query->orderByDesc("shift_readings.{$timestampColumn}"))
+            ->when(! $timestampColumn && Schema::hasColumn('shift_readings', 'id'), fn ($query) => $query->orderByDesc('shift_readings.id'))
+            ->limit($limit)
+            ->get()
+            ->map(function ($reading) {
+                $createdAt = $reading->remark_timestamp ? Carbon::parse($reading->remark_timestamp) : null;
+                $version = $createdAt ? $createdAt->timestamp : 0;
+
+                return [
+                    'id' => 'shift-reading-remark-' . (int) $reading->id . '-' . $version,
+                    'type' => 'shift_reading_remark',
+                    'actorName' => $reading->admin_name ?: 'Admin',
+                    'summary' => 'left remarks on',
+                    'context' => $this->formatPeriod($reading->period_from, $reading->period_to),
+                    'body' => Str::limit((string) $reading->admin_remarks, 120),
+                    'badge' => 'Admin Remark',
+                    'time' => $createdAt ? $createdAt->diffForHumans() : '',
+                    'url' => $this->shiftReadingUrl((int) $reading->id),
+                    'sort_timestamp' => $createdAt ? $createdAt->timestamp : 0,
+                ];
+            })
+            ->all();
+    }
+
+    private function unreadShiftReadingRemarksQuery(int $userId)
+    {
+        $query = DB::table('shift_readings')
+            ->where('shift_readings.user_id', $userId)
+            ->whereNotNull('shift_readings.admin_remarks')
+            ->whereRaw("TRIM(COALESCE(shift_readings.admin_remarks, '')) <> ''");
+
+        $timestampColumn = $this->shiftReadingRemarkTimestampColumn();
+
+        return $query->where(function ($query) use ($timestampColumn) {
+            $query->whereNull('shift_readings.admin_remarks_seen_at');
+
+            if ($timestampColumn) {
+                $query->orWhereColumn('shift_readings.admin_remarks_seen_at', '<', "shift_readings.{$timestampColumn}");
+            }
+        });
     }
 
     private function targetedAdminReplyNotifications(int $userId, int $limit): array
@@ -161,5 +242,44 @@ class StaffHeaderNotifications
         return Route::has('staff.notifications.index')
             ? route('staff.notifications.index', ['announcement' => $announcementId], false)
             : '/staff/notifications?announcement=' . $announcementId;
+    }
+
+    private function canReadShiftReadingRemarks(): bool
+    {
+        return Schema::hasTable('shift_readings')
+            && Schema::hasColumn('shift_readings', 'id')
+            && Schema::hasColumn('shift_readings', 'user_id')
+            && Schema::hasColumn('shift_readings', 'admin_remarks')
+            && Schema::hasColumn('shift_readings', 'admin_remarks_seen_at');
+    }
+
+    private function shiftReadingRemarkTimestampColumn(): ?string
+    {
+        foreach (['admin_remarks_updated_at', 'updated_at', 'created_at'] as $column) {
+            if (Schema::hasColumn('shift_readings', $column)) {
+                return $column;
+            }
+        }
+
+        return null;
+    }
+
+    private function shiftReadingUrl(int $readingId): string
+    {
+        return Route::has('staff.readings.index')
+            ? route('staff.readings.index', ['reading' => $readingId], false)
+            : '/staff/shift-readings?reading=' . $readingId;
+    }
+
+    private function formatPeriod($from, $to): string
+    {
+        if (! $from && ! $to) {
+            return 'Shift Reading';
+        }
+
+        $fromDate = $from ? Carbon::parse((string) $from)->format('M d, Y') : null;
+        $toDate = $to ? Carbon::parse((string) $to)->format('M d, Y') : $fromDate;
+
+        return $fromDate === $toDate ? (string) $fromDate : "{$fromDate} - {$toDate}";
     }
 }

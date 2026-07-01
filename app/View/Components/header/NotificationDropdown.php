@@ -76,7 +76,7 @@ class NotificationDropdown extends Component
             ? route('staff.notifications.header', [], false)
             : null;
         $this->summaryLabel = 'staff alerts';
-        $this->emptySubtitle = 'Announcements and admin replies will appear here.';
+        $this->emptySubtitle = 'Announcements, admin replies, and shift-reading remarks will appear here.';
         $this->seenStorageKey = 'staffHeaderNotificationSeenKeys-' . $userId;
         $this->defaultUrl = Route::has('staff.notifications.index')
             ? route('staff.notifications.index', [], false)
@@ -85,6 +85,12 @@ class NotificationDropdown extends Component
             [
                 'label' => 'Notifications',
                 'url' => $this->defaultUrl,
+            ],
+            [
+                'label' => 'Shift Readings',
+                'url' => Route::has('staff.readings.index')
+                    ? route('staff.readings.index', [], false)
+                    : '/staff/shift-readings',
             ],
         ];
     }

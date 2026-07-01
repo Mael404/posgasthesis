@@ -150,7 +150,8 @@
             staffName: @js(auth()->user()->name ?? 'Staff'),
             latestReadingExists: @js(! empty($latestReading)),
             latestSubmitted: @js(optional($latestReading)->created_at),
-            latestReadingLabel: @js($latestReadingLabel)
+            latestReadingLabel: @js($latestReadingLabel),
+            initialReadingId: @js((int) request('reading', 0))
         })"
         x-init="init()"
         x-effect="document.body.classList.toggle('overflow-hidden', modal !== null || confirmation.open || messageDialog.open || lightbox.open)"
@@ -999,6 +1000,7 @@
                 staffName: config.staffName || 'Staff',
                 latestReadingLabel: config.latestReadingLabel || '',
                 latestReadingExists: Boolean(config.latestReadingExists),
+                initialReadingId: Number(config.initialReadingId || 0),
                 meterPhotoPhases: [
                     { key: 'opening', label: 'Opening', caption: 'Before shift starts' },
                     { key: 'closing', label: 'Closing', caption: 'After shift ends' }
@@ -1034,6 +1036,10 @@
                 init() {
                     this.resetForm();
                     this.restoreToast();
+
+                    if (this.initialReadingId > 0) {
+                        this.$nextTick(() => this.viewDetails(this.initialReadingId));
+                    }
                 },
                 blankPhotoPreviews() {
                     return this.meterPhotoTypes.reduce((previews, type) => {

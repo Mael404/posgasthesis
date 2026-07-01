@@ -220,7 +220,7 @@
                         <div class="mb-6 h-1.5 w-20 rounded-full bg-[#F6C343]"></div>
 
                         <h2 class="text-5xl font-black leading-tight tracking-tight text-white xl:text-6xl 2xl:text-7xl">
-                            JRS Fuel Station
+                            JRM Fuel Station
                         </h2>
 
                         <p class="mt-5 text-xl font-extrabold text-[#F6C343] xl:text-2xl">
