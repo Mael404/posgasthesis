@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\HandlesVoidedSettlementDisplay;
 use App\Services\ShiftReadingInventoryService;
+use App\Support\StaffHeaderNotifications;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,8 @@ class StaffReadingController extends Controller
     {
         $dataWarning = null;
         $latestReading = null;
+        $unreadAdminRemarks = collect();
+        $unreadAdminRemarksCount = 0;
         $readings = $this->emptyPaginator();
 
         if (! $this->hasTable('shift_readings')) {
@@ -55,6 +58,9 @@ class StaffReadingController extends Controller
             );
 
             $latestReading = $this->latestSubmittedReading();
+            $unreadAdminRemarks = $this->unreadAdminRemarks();
+            $unreadAdminRemarksCount = app(StaffHeaderNotifications::class)
+                ->unreadShiftReadingRemarksCount((int) auth()->id());
         }
 
         return view('pages.staff.shiftreadings', [
@@ -64,6 +70,8 @@ class StaffReadingController extends Controller
             'latestReading' => $latestReading,
             'liveSales' => $this->liveSales(),
             'dataWarning' => $dataWarning,
+            'unreadAdminRemarks' => $unreadAdminRemarks,
+            'unreadAdminRemarksCount' => $unreadAdminRemarksCount,
         ]);
     }
 
@@ -173,6 +181,9 @@ class StaffReadingController extends Controller
             'reading' => $reading,
             'meter_images' => $this->meterImages($id),
             'transaction_breakdowns' => $this->settlementDetailBreakdowns($reading),
+            'read_admin_remark_id' => (int) $reading->id,
+            'unread_admin_remarks_count' => app(StaffHeaderNotifications::class)
+                ->unreadShiftReadingRemarksCount((int) auth()->id()),
         ]);
     }
 
@@ -291,11 +302,94 @@ class StaffReadingController extends Controller
             $selects[] = DB::raw("'Staff' as staff_name");
         }
 
+        if (
+            $this->hasTable('users')
+            && $this->hasColumn('shift_readings', 'admin_remarks_by')
+            && $this->hasColumn('users', 'id')
+            && $this->hasColumn('users', 'name')
+        ) {
+            $query->leftJoin('users as remark_admins', 'shift_readings.admin_remarks_by', '=', 'remark_admins.id');
+            $selects[] = 'remark_admins.name as admin_remarks_author_name';
+        } else {
+            $selects[] = DB::raw("'Admin' as admin_remarks_author_name");
+        }
+
         if ($this->hasColumn('shift_readings', 'user_id')) {
             $query->where('shift_readings.user_id', auth()->id());
         }
 
         return $query->select($selects);
+    }
+
+    private function unreadAdminRemarks(int $limit = 10)
+    {
+        if (! $this->canReadAdminRemarks()) {
+            return collect();
+        }
+
+        $query = DB::table('shift_readings');
+        $selects = [
+            'shift_readings.id',
+            'shift_readings.admin_remarks',
+            'shift_readings.admin_remarks_seen_at',
+            $this->selectColumn('shift_readings', 'period_from', 'period_from'),
+            $this->selectColumn('shift_readings', 'period_to', 'period_to'),
+            $this->selectColumn('shift_readings', 'created_at', 'created_at'),
+        ];
+
+        $timestampColumn = $this->adminRemarkTimestampColumn();
+        $selects[] = $timestampColumn
+            ? DB::raw("shift_readings.{$timestampColumn} as admin_remarks_timestamp")
+            : DB::raw('NULL as admin_remarks_timestamp');
+
+        if (
+            $this->hasTable('users')
+            && $this->hasColumn('shift_readings', 'admin_remarks_by')
+            && $this->hasColumn('users', 'id')
+            && $this->hasColumn('users', 'name')
+        ) {
+            $query->leftJoin('users as remark_admins', 'shift_readings.admin_remarks_by', '=', 'remark_admins.id');
+            $selects[] = 'remark_admins.name as admin_remarks_author_name';
+        } else {
+            $selects[] = DB::raw("'Admin' as admin_remarks_author_name");
+        }
+
+        return $query
+            ->select($selects)
+            ->where('shift_readings.user_id', auth()->id())
+            ->whereNotNull('shift_readings.admin_remarks')
+            ->whereRaw("TRIM(COALESCE(shift_readings.admin_remarks, '')) <> ''")
+            ->where(function ($query) use ($timestampColumn) {
+                $query->whereNull('shift_readings.admin_remarks_seen_at');
+
+                if ($timestampColumn) {
+                    $query->orWhereColumn('shift_readings.admin_remarks_seen_at', '<', "shift_readings.{$timestampColumn}");
+                }
+            })
+            ->when($timestampColumn, fn ($query) => $query->orderByDesc("shift_readings.{$timestampColumn}"))
+            ->when(! $timestampColumn, fn ($query) => $query->orderByDesc('shift_readings.id'))
+            ->limit($limit)
+            ->get();
+    }
+
+    private function canReadAdminRemarks(): bool
+    {
+        return $this->hasTable('shift_readings')
+            && $this->hasColumn('shift_readings', 'id')
+            && $this->hasColumn('shift_readings', 'user_id')
+            && $this->hasColumn('shift_readings', 'admin_remarks')
+            && $this->hasColumn('shift_readings', 'admin_remarks_seen_at');
+    }
+
+    private function adminRemarkTimestampColumn(): ?string
+    {
+        foreach (['admin_remarks_updated_at', 'updated_at', 'created_at'] as $column) {
+            if ($this->hasColumn('shift_readings', $column)) {
+                return $column;
+            }
+        }
+
+        return null;
     }
 
     private function latestSubmittedReading()

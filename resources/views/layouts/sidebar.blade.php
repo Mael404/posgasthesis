@@ -116,7 +116,7 @@
                                                 class="menu-item-text flex min-w-0 flex-1 items-center gap-2">
                                                 <span class="truncate">{{ $item['name'] }}</span>
                                                 @if (!empty($item['badge']) && $item['badge'] > 0)
-                                                    <span class="inline-flex min-w-5 items-center justify-center rounded-full bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-error-600 dark:bg-error-500/15 dark:text-error-400">
+                                                    <span class="sidebar-notification-badge" @if (!empty($item['badgeKey'])) data-sidebar-badge="{{ $item['badgeKey'] }}" @endif>
                                                         {{ $item['badge'] }}
                                                     </span>
                                                 @endif
@@ -155,7 +155,7 @@
                                                             {{ $subItem['name'] }}
                                                             <span class="flex items-center gap-1 ml-auto">
                                                                 @if (!empty($subItem['badge']) && $subItem['badge'] > 0)
-                                                                    <span class="inline-flex min-w-5 items-center justify-center rounded-full bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-error-600 dark:bg-error-500/15 dark:text-error-400">
+                                                                    <span class="sidebar-notification-badge" @if (!empty($subItem['badgeKey'])) data-sidebar-badge="{{ $subItem['badgeKey'] }}" @endif>
                                                                         {{ $subItem['badge'] }}
                                                                     </span>
                                                                 @endif
@@ -205,7 +205,7 @@
                                                 class="menu-item-text flex min-w-0 flex-1 items-center gap-2">
                                                 <span class="truncate">{{ $item['name'] }}</span>
                                                 @if (!empty($item['badge']) && $item['badge'] > 0)
-                                                    <span class="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-error-600 dark:bg-error-500/15 dark:text-error-400">
+                                                    <span class="sidebar-notification-badge ml-auto" @if (!empty($item['badgeKey'])) data-sidebar-badge="{{ $item['badgeKey'] }}" @endif>
                                                         {{ $item['badge'] }}
                                                     </span>
                                                 @endif

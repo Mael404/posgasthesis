@@ -81,6 +81,62 @@
                 return 'No period selected';
             }
         };
+        $unreadAdminRemarks = collect($unreadAdminRemarks ?? []);
+        $unreadAdminRemarksCount = (int) ($unreadAdminRemarksCount ?? $unreadAdminRemarks->count());
+        $adminRemarkTimestamp = function ($reading) {
+            foreach (['admin_remarks_timestamp', 'admin_remarks_updated_at', 'updated_at', 'created_at'] as $column) {
+                $value = $reading->{$column} ?? null;
+
+                if ($value !== null && $value !== '') {
+                    return $value;
+                }
+            }
+
+            return null;
+        };
+        $adminRemarkIsUnread = function ($reading) use ($adminRemarkTimestamp) {
+            if (trim((string) ($reading->admin_remarks ?? '')) === '') {
+                return false;
+            }
+
+            if (! property_exists($reading, 'admin_remarks_seen_at')) {
+                return false;
+            }
+
+            $seenAt = $reading->admin_remarks_seen_at ?? null;
+
+            if ($seenAt === null || $seenAt === '') {
+                return true;
+            }
+
+            $timestamp = $adminRemarkTimestamp($reading);
+
+            if ($timestamp === null || $timestamp === '') {
+                return false;
+            }
+
+            try {
+                return \Carbon\Carbon::parse($seenAt)->lt(\Carbon\Carbon::parse($timestamp));
+            } catch (\Throwable) {
+                return false;
+            }
+        };
+        $adminRemarkAuthor = fn ($reading) => trim((string) ($reading->admin_remarks_author_name ?? '')) !== ''
+            ? trim((string) ($reading->admin_remarks_author_name ?? ''))
+            : 'Admin';
+        $adminRemarkUpdatedLabel = function ($reading) use ($adminRemarkTimestamp) {
+            $timestamp = $adminRemarkTimestamp($reading);
+
+            if ($timestamp === null || $timestamp === '') {
+                return null;
+            }
+
+            try {
+                return \Carbon\Carbon::parse($timestamp)->format('M d, Y h:i A');
+            } catch (\Throwable) {
+                return null;
+            }
+        };
 
         $statusMeta = function ($status) {
             $status = strtolower((string) ($status ?: 'Pending'));
@@ -277,6 +333,50 @@
             </div>
         </section>
 
+        @if ($unreadAdminRemarks->isNotEmpty())
+            <section data-admin-remarks-panel class="rounded-xl border border-error-200 bg-error-50/80 p-4 shadow-theme-xs dark:border-error-500/30 dark:bg-error-500/10">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="flex min-w-0 gap-3">
+                        <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-error-700 text-white shadow-theme-xs dark:bg-error-800">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.75a6.25 6.25 0 0 0-6.25 6.25v3.1l-1.3 2.6a1 1 0 0 0 .9 1.45h13.3a1 1 0 0 0 .9-1.45l-1.3-2.6V10A6.25 6.25 0 0 0 12 3.75Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9.75 19a2.25 2.25 0 0 0 4.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                        </span>
+                        <div class="min-w-0">
+                            <p class="text-theme-xs font-semibold uppercase text-error-700 dark:text-error-300">Shift Readings Badge</p>
+                            <h2 class="mt-1 text-theme-xl font-semibold text-gray-800 dark:text-white/90">Admin remarks needing attention</h2>
+                            <p class="mt-1 text-theme-sm text-error-700/90 dark:text-error-200">These unread admin remarks are keeping the sidebar badge active.</p>
+                        </div>
+                    </div>
+                    <span data-unread-admin-remarks-count class="inline-flex w-fit rounded-full bg-error-700 px-2.5 py-1 text-theme-xs font-semibold text-white dark:bg-error-800">
+                        {{ number_format($unreadAdminRemarksCount) }} unread
+                    </span>
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    @foreach ($unreadAdminRemarks as $remark)
+                        <article data-unread-admin-remark-card="{{ (int) $remark->id }}" class="rounded-lg border border-error-200 bg-white/90 p-4 dark:border-error-500/25 dark:bg-gray-900/70">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div class="min-w-0">
+                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $periodLabel($remark) }}</p>
+                                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
+                                        {{ $adminRemarkAuthor($remark) }}
+                                        @if ($adminRemarkUpdatedLabel($remark))
+                                            <span class="mx-1 text-gray-300 dark:text-gray-600">/</span>{{ $adminRemarkUpdatedLabel($remark) }}
+                                        @endif
+                                    </p>
+                                </div>
+                                <button type="button" x-on:click="viewDetails({{ (int) $remark->id }})" class="{{ $secondaryButtonClass }} h-9 shrink-0 px-3 text-theme-xs">View Remark</button>
+                            </div>
+                            <p class="mt-3 line-clamp-3 break-words text-theme-sm text-gray-700 dark:text-gray-300">{{ \Illuminate\Support\Str::limit((string) $remark->admin_remarks, 220) }}</p>
+                        </article>
+                    @endforeach
+                </div>
+
+                @if ($unreadAdminRemarksCount > $unreadAdminRemarks->count())
+                    <p data-unread-admin-remarks-overflow class="mt-3 text-theme-xs text-error-700/80 dark:text-error-200">Showing the latest {{ number_format($unreadAdminRemarks->count()) }} unread remarks.</p>
+                @endif
+            </section>
+        @endif
+
         <section class="{{ $cardClass }} overflow-hidden">
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -319,8 +419,12 @@
                                 $feedback = collect([$reading->rejection_reason ?? null, $reading->admin_remarks ?? null, $reading->void_reason ?? null])
                                     ->filter(fn ($value) => trim((string) $value) !== '')
                                     ->implode(' | ');
+                                $isUnreadAdminRemark = $adminRemarkIsUnread($reading);
+                                $rowDefaultClass = 'hover:bg-gray-50/70 dark:hover:bg-white/[0.02]';
+                                $rowUnreadClass = 'bg-error-50/70 ring-1 ring-inset ring-error-200 hover:bg-error-50 dark:bg-error-500/10 dark:ring-error-500/25 dark:hover:bg-error-500/15';
+                                $rowClass = $isUnreadAdminRemark ? $rowUnreadClass : $rowDefaultClass;
                             @endphp
-                            <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                            <tr id="shift-reading-{{ (int) $reading->id }}" data-shift-reading-row="{{ (int) $reading->id }}" data-default-row-class="{{ $rowDefaultClass }}" class="{{ $rowClass }}" @if ($isUnreadAdminRemark) data-unread-admin-remark-row @endif>
                                 <td class="{{ $tdPrimaryClass }}">
                                     <span class="block truncate">{{ $periodLabel($reading) }}</span>
                                     <span class="mt-1 block text-theme-xs font-normal text-gray-500 dark:text-gray-400">
@@ -341,11 +445,26 @@
                                     <span class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">{{ $variance['label'] }}</span>
                                     <span class="block font-semibold {{ $variance['class'] }}">{{ $variance['display'] }}</span>
                                 </td>
-                                <td class="{{ $tdClass }}">
+                                <td class="{{ $tdClass }}" data-admin-feedback-cell="{{ (int) $reading->id }}" data-feedback-text="{{ $feedback ?: 'No remarks' }}">
                                     <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $status['class'] }}">{{ $status['label'] }}</span>
                                 </td>
                                 <td class="{{ $tdClass }}">
-                                    <span class="line-clamp-2 break-words">{{ $feedback ?: 'No remarks' }}</span>
+                                    @if ($isUnreadAdminRemark)
+                                        <div class="rounded-lg border border-error-200 bg-white/90 p-3 dark:border-error-500/25 dark:bg-gray-900/70">
+                                            <div class="mb-2 flex flex-wrap items-center gap-2">
+                                                <span class="inline-flex rounded-full bg-error-700 px-2 py-0.5 text-[11px] font-semibold uppercase leading-5 text-white dark:bg-error-800">Unread admin remark</span>
+                                                <span class="text-theme-xs text-gray-500 dark:text-gray-400">
+                                                    {{ $adminRemarkAuthor($reading) }}
+                                                    @if ($adminRemarkUpdatedLabel($reading))
+                                                        <span class="mx-1 text-gray-300 dark:text-gray-600">/</span>{{ $adminRemarkUpdatedLabel($reading) }}
+                                                    @endif
+                                                </span>
+                                            </div>
+                                            <p class="line-clamp-3 break-words text-theme-sm text-gray-700 dark:text-gray-300">{{ $reading->admin_remarks }}</p>
+                                        </div>
+                                    @else
+                                        <span class="line-clamp-2 break-words">{{ $feedback ?: 'No remarks' }}</span>
+                                    @endif
                                 </td>
                                 <td class="{{ $tdClass }}">
                                     <div class="flex items-center gap-1.5">
@@ -419,11 +538,21 @@
                                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                                     <label class="block {{ $labelClass }}">
                                         <span>Period From</span>
-                                        <input type="date" name="period_from" x-model="form.period_from" x-on:input="clearFieldError('period_from')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.period_from ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                        <span class="relative mt-1.5 block custom-datepicker">
+                                            <input type="text" name="period_from" x-model="form.period_from" x-on:input="clearFieldError('period_from')" placeholder="Select date" autocomplete="off" class="{{ $inputClass }} pr-10" x-bind:class="fieldErrors.period_from ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''" data-shift-datepicker>
+                                            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">
+                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 2.75v3M16 2.75v3M3.75 9.25h16.5M5.5 4.25h13A1.75 1.75 0 0 1 20.25 6v12.5a1.75 1.75 0 0 1-1.75 1.75h-13a1.75 1.75 0 0 1-1.75-1.75V6A1.75 1.75 0 0 1 5.5 4.25Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            </span>
+                                        </span>
                                     </label>
                                     <label class="block {{ $labelClass }}">
                                         <span>Period To</span>
-                                        <input type="date" name="period_to" x-model="form.period_to" x-on:input="clearFieldError('period_to')" class="mt-1.5 {{ $inputClass }}" x-bind:class="fieldErrors.period_to ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''">
+                                        <span class="relative mt-1.5 block custom-datepicker">
+                                            <input type="text" name="period_to" x-model="form.period_to" x-on:input="clearFieldError('period_to')" placeholder="Select date" autocomplete="off" class="{{ $inputClass }} pr-10" x-bind:class="fieldErrors.period_to ? 'border-error-400 focus:border-error-400 focus:ring-error-500/20' : ''" data-shift-datepicker>
+                                            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">
+                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 2.75v3M16 2.75v3M3.75 9.25h16.5M5.5 4.25h13A1.75 1.75 0 0 1 20.25 6v12.5a1.75 1.75 0 0 1-1.75 1.75h-13a1.75 1.75 0 0 1-1.75-1.75V6A1.75 1.75 0 0 1 5.5 4.25Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            </span>
+                                        </span>
                                     </label>
                                     <label class="block {{ $labelClass }}">
                                         <span>Prepared By</span>
@@ -736,19 +865,18 @@
             </div>
         </div>
 
-        <div x-show="modal === 'details'" x-cloak class="fixed inset-0 z-[100010] flex items-center justify-center overflow-y-auto p-4">
-            <div class="fixed inset-0 bg-gray-950/75 backdrop-blur-md" x-on:click="closeDetails()"></div>
-            <div class="relative w-full max-w-7xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
-                <button type="button" x-on:click="closeDetails()" class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close settlement details">
-                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                </button>
-
-                <div class="border-b border-gray-100 bg-gray-50/70 p-5 pr-14 dark:border-gray-800 dark:bg-white/[0.02] md:p-6 md:pr-16">
-                    <p class="{{ $labelClass }}">Settlement Details</p>
-                    <h2 class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90" x-text="detailsTitle()"></h2>
+        <div x-show="modal === 'details'" x-cloak class="fixed inset-0 z-[100010] flex items-stretch justify-stretch overflow-hidden bg-gray-900/60 p-2 backdrop-blur-sm sm:p-4">
+            <div class="absolute inset-0" x-on:click="closeDetails()"></div>
+            <div class="relative z-10 flex h-[calc(100vh-1rem)] w-full max-w-none flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 sm:h-[calc(100vh-2rem)]">
+                <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <div class="min-w-0">
+                        <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement Details</h2>
+                        <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400" x-text="detailsTitle()"></p>
+                    </div>
+                    <button type="button" x-on:click="closeDetails()" class="{{ $secondaryButtonClass }} shrink-0">Close</button>
                 </div>
 
-                <div class="max-h-[82vh] overflow-y-auto p-5 custom-scrollbar md:p-6">
+                <div class="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar sm:p-5">
                     <template x-if="details.loading">
                         <div class="py-14 text-center text-theme-sm text-gray-500 dark:text-gray-400">Loading settlement details...</div>
                     </template>
@@ -1093,11 +1221,47 @@
                 lightbox: { open: false, url: '' },
                 init() {
                     this.resetForm();
+                    this.initDatePickers();
                     this.restoreToast();
 
                     if (this.initialReadingId > 0) {
                         this.$nextTick(() => this.viewDetails(this.initialReadingId));
                     }
+                },
+                initDatePickers() {
+                    if (!window.flatpickr) {
+                        return;
+                    }
+
+                    this.$nextTick(() => {
+                        document.querySelectorAll('[data-shift-datepicker]').forEach((input) => {
+                            if (input._shiftDatePicker) {
+                                return;
+                            }
+
+                            input._shiftDatePicker = window.flatpickr(input, {
+                                static: true,
+                                monthSelectorType: 'static',
+                                dateFormat: 'Y-m-d',
+                                defaultDate: input.value || this.today(),
+                                allowInput: false,
+                                disableMobile: true,
+                                onChange: (selectedDates, dateStr) => {
+                                    input.value = dateStr;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+                            });
+                        });
+                    });
+                },
+                syncDatePickers() {
+                    this.$nextTick(() => {
+                        document.querySelectorAll('[data-shift-datepicker]').forEach((input) => {
+                            if (input._shiftDatePicker) {
+                                input._shiftDatePicker.setDate(input.value || this.today(), false);
+                            }
+                        });
+                    });
                 },
                 blankPhotoPreviews() {
                     return this.meterPhotoTypes.reduce((previews, type) => {
@@ -1148,6 +1312,7 @@
                     this.fieldErrors = {};
                     this.photoPreviews = this.blankPhotoPreviews();
                     this.saving = false;
+                    this.syncDatePickers();
                 },
                 openForm() {
                     this.resetForm();
@@ -1551,9 +1716,102 @@
                             images: Array.isArray(data.meter_images) ? data.meter_images : [],
                             breakdowns: data.transaction_breakdowns || {}
                         };
+                        this.markAdminRemarkSeenInUi(data.read_admin_remark_id || id, data.unread_admin_remarks_count);
                     } catch (error) {
                         this.details = { loading: false, error: error.message || 'Could not load settlement details.', reading: null, images: [], breakdowns: {} };
                     }
+                },
+                markAdminRemarkSeenInUi(readingId, unreadCount) {
+                    const id = Number(readingId || 0);
+
+                    if (id < 1) {
+                        return;
+                    }
+
+                    const count = this.normalizedUnreadAdminRemarksCount(unreadCount);
+
+                    this.removeUnreadAdminRemarkCard(id);
+                    this.clearUnreadAdminRemarkRow(id);
+                    this.updateUnreadAdminRemarkPanel(count);
+                    this.updateShiftReadingsSidebarBadge(count);
+
+                    window.dispatchEvent(new CustomEvent('shift-reading-remark-read', {
+                        detail: {
+                            readingId: id,
+                            unreadCount: count
+                        }
+                    }));
+                },
+                normalizedUnreadAdminRemarksCount(value) {
+                    const parsed = Number(value);
+
+                    if (Number.isFinite(parsed)) {
+                        return Math.max(0, parsed);
+                    }
+
+                    const badge = document.querySelector('[data-unread-admin-remarks-count]');
+                    const current = badge ? Number(String(badge.textContent || '').replace(/[^\d]/g, '')) : 0;
+
+                    return Math.max(0, (Number.isFinite(current) ? current : 0) - 1);
+                },
+                removeUnreadAdminRemarkCard(readingId) {
+                    document.querySelectorAll('[data-unread-admin-remark-card="' + readingId + '"]').forEach((card) => card.remove());
+                },
+                clearUnreadAdminRemarkRow(readingId) {
+                    const row = document.querySelector('[data-shift-reading-row="' + readingId + '"]');
+
+                    if (row) {
+                        row.className = row.dataset.defaultRowClass || 'hover:bg-gray-50/70 dark:hover:bg-white/[0.02]';
+                        row.removeAttribute('data-unread-admin-remark-row');
+                    }
+
+                    const cell = document.querySelector('[data-admin-feedback-cell="' + readingId + '"]');
+
+                    if (!cell) {
+                        return;
+                    }
+
+                    const text = cell.dataset.feedbackText || 'No remarks';
+                    const span = document.createElement('span');
+                    span.className = 'line-clamp-2 break-words';
+                    span.textContent = text;
+
+                    cell.textContent = '';
+                    cell.appendChild(span);
+                },
+                updateUnreadAdminRemarkPanel(count) {
+                    const panel = document.querySelector('[data-admin-remarks-panel]');
+
+                    if (!panel) {
+                        return;
+                    }
+
+                    const remainingCards = panel.querySelectorAll('[data-unread-admin-remark-card]').length;
+
+                    if (count <= 0 || remainingCards < 1) {
+                        panel.remove();
+                        return;
+                    }
+
+                    panel.querySelectorAll('[data-unread-admin-remarks-count]').forEach((badge) => {
+                        badge.textContent = count.toLocaleString('en-US') + ' unread';
+                    });
+
+                    const overflowNote = panel.querySelector('[data-unread-admin-remarks-overflow]');
+
+                    if (overflowNote && count <= remainingCards) {
+                        overflowNote.remove();
+                    }
+                },
+                updateShiftReadingsSidebarBadge(count) {
+                    document.querySelectorAll('[data-sidebar-badge="staff-shift-readings"]').forEach((badge) => {
+                        if (count > 0) {
+                            badge.textContent = count.toLocaleString('en-US');
+                            return;
+                        }
+
+                        badge.remove();
+                    });
                 },
                 closeDetails() {
                     this.modal = null;

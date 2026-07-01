@@ -264,6 +264,10 @@
   @apply bg-success-50 group-hover:bg-success-100 dark:bg-success-500/15 dark:group-hover:bg-success-500/20;
 }
 
+@utility sidebar-notification-badge {
+  @apply inline-flex min-w-5 items-center justify-center rounded-full bg-error-700 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white ring-1 ring-error-800/10 dark:bg-error-800 dark:text-white dark:ring-error-400/20;
+}
+
 @utility menu-dropdown-badge-pro {
   @apply text-brand-600 dark:text-brand-500 block rounded-full px-2.5 py-0.5 text-xs font-medium uppercase;
 }

@@ -119,6 +119,21 @@
                     }
                 },
 
+                removeShiftReadingRemark(detail = {}) {
+                    const readingId = Number(detail.readingId || 0);
+
+                    if (readingId < 1) {
+                        return;
+                    }
+
+                    const prefix = 'shift-reading-remark-' + readingId + '-';
+
+                    this.notifications = this.notifications.filter((notification) => {
+                        return !(notification.type === 'shift_reading_remark'
+                            && String(notification.id || '').startsWith(prefix));
+                    });
+                },
+
                 handleItemClick() {
                     this.markCurrentAsSeen();
                     this.closeDropdown();
@@ -144,6 +159,7 @@
     })"
     x-init="init()"
     @click.away="closeDropdown()"
+    x-on:shift-reading-remark-read.window="removeShiftReadingRemark($event.detail)"
 >
     <!-- Notification Button -->
     <button

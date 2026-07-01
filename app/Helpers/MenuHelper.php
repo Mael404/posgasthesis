@@ -282,6 +282,7 @@ class MenuHelper
                 'name' => 'Shift Readings',
                 'path' => self::routePath('staff.readings.index', '/staff/shift-readings'),
                 'badge' => $unreadShiftReadingRemarksCount,
+                'badgeKey' => 'staff-shift-readings',
                 'activePatterns' => ['/staff/shift-readings', '/staff/shift-readings/*', '/staff/readings', '/staff/readings/*'],
             ],
             [
