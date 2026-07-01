@@ -1,5 +1,6 @@
 <?php
 
+use App\Helpers\MenuHelper;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminPriceManagementController;
@@ -33,6 +34,12 @@ Route::redirect('/signup', '/login')->name('signup');
 Route::middleware('auth')->group(function () {
     // dashboard pages
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+
+    Route::get('/sidebar/badges', function () {
+        return response()->json([
+            'badges' => MenuHelper::getSidebarBadgeCounts(),
+        ]);
+    })->name('sidebar.badges');
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'dashboard'])
         ->middleware('role:vp_admin')

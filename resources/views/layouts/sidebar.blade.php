@@ -91,6 +91,9 @@
                             @foreach ($menuGroup['items'] as $itemIndex => $item)
                                 @php
                                     $itemIsActive = MenuHelper::isItemActive($item);
+                                    $itemBadge = (int) ($item['badge'] ?? 0);
+                                    $itemBadgeKey = $item['badgeKey'] ?? null;
+                                    $itemBadgeShouldRender = $itemBadgeKey || $itemBadge > 0;
                                 @endphp
                                 <li>
                                     @if (isset($item['subItems']))
@@ -115,9 +118,9 @@
                                                 x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen"
                                                 class="menu-item-text flex min-w-0 flex-1 items-center gap-2">
                                                 <span class="truncate">{{ $item['name'] }}</span>
-                                                @if (!empty($item['badge']) && $item['badge'] > 0)
-                                                    <span class="sidebar-notification-badge" @if (!empty($item['badgeKey'])) data-sidebar-badge="{{ $item['badgeKey'] }}" @endif>
-                                                        {{ $item['badge'] }}
+                                                @if ($itemBadgeShouldRender)
+                                                    <span class="sidebar-notification-badge {{ $itemBadge > 0 ? '' : 'hidden' }}" @if ($itemBadgeKey) data-sidebar-badge="{{ $itemBadgeKey }}" @endif aria-live="polite">
+                                                        {{ $itemBadge }}
                                                     </span>
                                                 @endif
                                                 @if (!empty($item['new']))
@@ -148,15 +151,18 @@
                                                 @foreach ($item['subItems'] as $subItem)
                                                     @php
                                                         $subItemIsActive = MenuHelper::isItemActive($subItem);
+                                                        $subItemBadge = (int) ($subItem['badge'] ?? 0);
+                                                        $subItemBadgeKey = $subItem['badgeKey'] ?? null;
+                                                        $subItemBadgeShouldRender = $subItemBadgeKey || $subItemBadge > 0;
                                                     @endphp
                                                     <li>
                                                         <a href="{{ $subItem['path'] }}"
                                                             class="menu-dropdown-item {{ $subItemIsActive ? 'menu-dropdown-item-active' : 'menu-dropdown-item-inactive' }}">
                                                             {{ $subItem['name'] }}
                                                             <span class="flex items-center gap-1 ml-auto">
-                                                                @if (!empty($subItem['badge']) && $subItem['badge'] > 0)
-                                                                    <span class="sidebar-notification-badge" @if (!empty($subItem['badgeKey'])) data-sidebar-badge="{{ $subItem['badgeKey'] }}" @endif>
-                                                                        {{ $subItem['badge'] }}
+                                                                @if ($subItemBadgeShouldRender)
+                                                                    <span class="sidebar-notification-badge {{ $subItemBadge > 0 ? '' : 'hidden' }}" @if ($subItemBadgeKey) data-sidebar-badge="{{ $subItemBadgeKey }}" @endif aria-live="polite">
+                                                                        {{ $subItemBadge }}
                                                                     </span>
                                                                 @endif
                                                                 @if (!empty($subItem['new']))
@@ -204,9 +210,9 @@
                                                 x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen"
                                                 class="menu-item-text flex min-w-0 flex-1 items-center gap-2">
                                                 <span class="truncate">{{ $item['name'] }}</span>
-                                                @if (!empty($item['badge']) && $item['badge'] > 0)
-                                                    <span class="sidebar-notification-badge ml-auto" @if (!empty($item['badgeKey'])) data-sidebar-badge="{{ $item['badgeKey'] }}" @endif>
-                                                        {{ $item['badge'] }}
+                                                @if ($itemBadgeShouldRender)
+                                                    <span class="sidebar-notification-badge ml-auto {{ $itemBadge > 0 ? '' : 'hidden' }}" @if ($itemBadgeKey) data-sidebar-badge="{{ $itemBadgeKey }}" @endif aria-live="polite">
+                                                        {{ $itemBadge }}
                                                     </span>
                                                 @endif
                                                 @if (!empty($item['new']))
@@ -233,3 +239,61 @@
 
     </div>
 </aside>
+
+@once
+    @push('scripts')
+        <script>
+            (() => {
+                const endpoint = @json(route('sidebar.badges', [], false));
+                const intervalMs = 2000;
+
+                const updateBadges = (badges = {}) => {
+                    document.querySelectorAll('[data-sidebar-badge]').forEach((badge) => {
+                        const key = badge.dataset.sidebarBadge;
+
+                        if (!Object.prototype.hasOwnProperty.call(badges, key)) {
+                            return;
+                        }
+
+                        const count = Number.parseInt(badges[key], 10) || 0;
+                        badge.textContent = count;
+                        badge.classList.toggle('hidden', count < 1);
+                    });
+                };
+
+                const fetchBadges = async () => {
+                    try {
+                        const response = await fetch(endpoint, {
+                            credentials: 'same-origin',
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                            },
+                        });
+
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const payload = await response.json();
+                        updateBadges(payload.badges || {});
+                    } catch (error) {
+                        // Keep the sidebar quiet if the network briefly fails.
+                    }
+                };
+
+                document.addEventListener('DOMContentLoaded', () => {
+                    fetchBadges();
+
+                    const timer = window.setInterval(fetchBadges, intervalMs);
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden) {
+                            fetchBadges();
+                        }
+                    });
+                    window.addEventListener('beforeunload', () => window.clearInterval(timer));
+                });
+            })();
+        </script>
+    @endpush
+@endonce

@@ -83,6 +83,20 @@ class MenuHelper
         ], fn ($group) => ! empty($group['items'])));
     }
 
+    public static function getSidebarBadgeCounts(): array
+    {
+        return match (Auth::user()?->role) {
+            'vp_admin' => [
+                'admin-pending-shift-readings' => self::getPendingShiftReadingsCount(),
+            ],
+            'staff' => [
+                'staff-shift-readings' => self::getUnreadShiftReadingRemarksCount(),
+                'staff-notifications' => self::getUnreadAnnouncementsCount(),
+            ],
+            default => [],
+        };
+    }
+
     public static function getDashboardPath(?string $role = null): string
     {
         return match ($role ?? Auth::user()?->role) {
@@ -164,6 +178,7 @@ class MenuHelper
                 'name' => 'Sales Monitoring',
                 'icon' => 'charts',
                 'badge' => $pendingReadingsCount,
+                'badgeKey' => 'admin-pending-shift-readings',
                 'subItems' => [
                     [
                         'name' => 'Transaction Logs',
@@ -178,6 +193,7 @@ class MenuHelper
                         'name' => 'Shift Reconciliation',
                         'path' => self::routePath('admin.reconcile.index', '/admin/reconciliation'),
                         'badge' => $pendingReadingsCount,
+                        'badgeKey' => 'admin-pending-shift-readings',
                         'activePatterns' => [
                             '/admin/reconciliation',
                             '/admin/reconciliation/*',
@@ -314,6 +330,7 @@ class MenuHelper
                 'name' => 'Notifications',
                 'path' => self::routePath('staff.notifications.index', '/staff/notifications'),
                 'badge' => $unreadAnnouncementsCount,
+                'badgeKey' => 'staff-notifications',
                 'activePatterns' => ['/staff/notifications', '/staff/notifications/*', '/staff/announcements', '/staff/announcements/*'],
             ],
         ];
