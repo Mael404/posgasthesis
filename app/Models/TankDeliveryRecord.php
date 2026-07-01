@@ -39,10 +39,17 @@ class TankDeliveryRecord extends Model
         'total_dispensed_diesel',
         'after_before_total_diesel',
         'delivery_summary_diesel',
+        'verified_by',
+        'verified_at',
+        'rejected_by',
+        'rejected_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
         'record_date' => 'date',
+        'verified_at' => 'datetime',
+        'rejected_at' => 'datetime',
         'security_seals_passed' => 'boolean',
         'product_level_passed' => 'boolean',
         'ethanol_blend_passed' => 'boolean',

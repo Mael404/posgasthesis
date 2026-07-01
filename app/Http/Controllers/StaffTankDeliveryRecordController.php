@@ -32,6 +32,10 @@ class StaffTankDeliveryRecordController extends Controller
         $hasPendingFilters = $request->filled('pending_date') || $request->filled('pending_tank_type');
 
         $pendingDeliveries = $this->pendingDeliveriesQuery($pendingDate, $pendingTankType)->get();
+        $pendingDeliveryCodes = $pendingDeliveries->pluck('delivery_code')->filter()->unique()->values();
+        $pendingDeliveryBatchLines = $pendingDeliveryCodes->isEmpty()
+            ? collect()
+            : $this->pendingDeliveryBatchLinesQuery($pendingDeliveryCodes->all())->get();
         $selectedDelivery = null;
 
         if ($request->filled('delivery_id')) {
@@ -57,6 +61,7 @@ class StaffTankDeliveryRecordController extends Controller
                 'inventory_logs.total_cost',
                 DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_count'),
                 DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.id <= inventory_logs.id) as delivery_batch_line'),
+                DB::raw('(select count(distinct batch_records.inventory_log_id) from tank_delivery_records as batch_records inner join inventory_logs as batch_record_logs on batch_records.inventory_log_id = batch_record_logs.id where batch_record_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_submitted_count'),
                 'tanks.name as tank_name',
                 'tanks.fuel_type',
                 'suppliers.name as supplier_name',
@@ -70,6 +75,7 @@ class StaffTankDeliveryRecordController extends Controller
         return view('pages.staff.tankdeliveryrecords', [
             'title' => 'Tank Delivery Record',
             'pendingDeliveries' => $pendingDeliveries,
+            'pendingDeliveryBatchLines' => $pendingDeliveryBatchLines,
             'selectedDelivery' => $selectedDelivery,
             'records' => $records,
             'fuelTypes' => TankDeliveryRecord::FUEL_TYPES,
@@ -127,14 +133,14 @@ class StaffTankDeliveryRecordController extends Controller
                 'staff_id' => auth()->id(),
                 'created_at' => now(),
                 'updated_at' => now(),
-            ], $this->recordFieldsFromValidated($validated));
+            ], $this->verificationResetFields(), $this->recordFieldsFromValidated($validated));
 
             DB::table('tank_delivery_records')->insert($recordData);
 
             DB::table('inventory_logs')
                 ->where('id', $delivery->id)
                 ->update([
-                    'delivery_status' => InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED,
+                    'delivery_status' => InventoryLog::STATUS_PENDING_ADMIN_VERIFICATION,
                 ]);
         });
 
@@ -183,17 +189,23 @@ class StaffTankDeliveryRecordController extends Controller
                 ]);
             }
 
+            if ($delivery->delivery_status === InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED) {
+                throw ValidationException::withMessages([
+                    'inventory_log_id' => 'Verified Tank Delivery Records can no longer be edited.',
+                ]);
+            }
+
             DB::table('tank_delivery_records')
                 ->where('id', $existingRecord->id)
                 ->update(array_merge([
                     'delivery_code' => $delivery->delivery_code,
                     'updated_at' => now(),
-                ], $this->recordFieldsFromValidated($validated)));
+                ], $this->verificationResetFields(), $this->recordFieldsFromValidated($validated)));
 
             DB::table('inventory_logs')
                 ->where('id', $delivery->id)
                 ->update([
-                    'delivery_status' => InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED,
+                    'delivery_status' => InventoryLog::STATUS_PENDING_ADMIN_VERIFICATION,
                 ]);
         });
 
@@ -215,6 +227,17 @@ class StaffTankDeliveryRecordController extends Controller
 
             if (! $existingRecord) {
                 abort(404);
+            }
+
+            $deliveryStatus = DB::table('inventory_logs')
+                ->where('id', $existingRecord->inventory_log_id)
+                ->lockForUpdate()
+                ->value('delivery_status');
+
+            if ($deliveryStatus === InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED) {
+                throw ValidationException::withMessages([
+                    'record' => 'Verified Tank Delivery Records can no longer be deleted.',
+                ]);
             }
 
             DB::table('tank_delivery_records')
@@ -366,6 +389,7 @@ class StaffTankDeliveryRecordController extends Controller
             'inventory_logs.id',
             'inventory_logs.delivery_code',
             'inventory_logs.delivery_date',
+            'inventory_logs.delivery_status',
             'inventory_logs.liters_delivered',
             'inventory_logs.total_cost',
             'inventory_logs.created_at',
@@ -375,9 +399,59 @@ class StaffTankDeliveryRecordController extends Controller
             'tanks.fuel_type',
             'suppliers.name as supplier_name'
         )
+            ->selectRaw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.delivery_status = ?) as delivery_batch_pending_count', [InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD])
+            ->selectRaw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.delivery_status = ?) as delivery_batch_completed_count', [InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED])
+            ->selectRaw('(select count(distinct batch_records.inventory_log_id) from tank_delivery_records as batch_records inner join inventory_logs as batch_record_logs on batch_records.inventory_log_id = batch_record_logs.id where batch_record_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_submitted_count')
+            ->selectRaw('(select coalesce(sum(batch_logs.liters_delivered), 0) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_total_liters')
             ->orderByDesc('inventory_logs.delivery_date')
             ->orderByDesc('inventory_logs.created_at')
             ->orderByDesc('inventory_logs.id');
+    }
+
+    private function verificationResetFields(): array
+    {
+        if (! Schema::hasTable('tank_delivery_records')) {
+            return [];
+        }
+
+        return collect([
+            'verified_by' => null,
+            'verified_at' => null,
+            'rejected_by' => null,
+            'rejected_at' => null,
+            'rejection_reason' => null,
+        ])->filter(fn ($value, $column) => Schema::hasColumn('tank_delivery_records', $column))->all();
+    }
+
+    private function pendingDeliveryBatchLinesQuery(array $deliveryCodes)
+    {
+        return DB::table('inventory_logs')
+            ->join('tanks', 'inventory_logs.tank_id', '=', 'tanks.id')
+            ->join('suppliers', 'inventory_logs.supplier_id', '=', 'suppliers.id')
+            ->leftJoin('tank_delivery_records', 'inventory_logs.id', '=', 'tank_delivery_records.inventory_log_id')
+            ->whereIn('inventory_logs.delivery_code', $deliveryCodes)
+            ->select(
+                'inventory_logs.id',
+                'inventory_logs.delivery_code',
+                'inventory_logs.delivery_date',
+                'inventory_logs.delivery_status',
+                'inventory_logs.liters_delivered',
+                'inventory_logs.total_cost',
+                'inventory_logs.created_at',
+                'tank_delivery_records.id as tank_delivery_record_id',
+                DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_count'),
+                DB::raw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.id <= inventory_logs.id) as delivery_batch_line'),
+                'tanks.name as tank_name',
+                'tanks.fuel_type',
+                'suppliers.name as supplier_name'
+            )
+            ->selectRaw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.delivery_status = ?) as delivery_batch_pending_count', [InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD])
+            ->selectRaw('(select count(*) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code and batch_logs.delivery_status = ?) as delivery_batch_completed_count', [InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED])
+            ->selectRaw('(select count(distinct batch_records.inventory_log_id) from tank_delivery_records as batch_records inner join inventory_logs as batch_record_logs on batch_records.inventory_log_id = batch_record_logs.id where batch_record_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_submitted_count')
+            ->selectRaw('(select coalesce(sum(batch_logs.liters_delivered), 0) from inventory_logs as batch_logs where batch_logs.delivery_code = inventory_logs.delivery_code) as delivery_batch_total_liters')
+            ->orderByDesc('inventory_logs.delivery_date')
+            ->orderByDesc('inventory_logs.created_at')
+            ->orderBy('inventory_logs.id');
     }
 
     private function nullableDecimal($value): ?float

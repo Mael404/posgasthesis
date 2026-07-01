@@ -121,24 +121,55 @@
             return number_format((float) $value, 2) . $suffix;
         };
 
-        $statusLabel = function ($status) {
+        $statusMeta = function ($status) {
             $status = trim((string) $status);
 
-            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED) {
-                return 'Completed';
+            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED) {
+                return [
+                    'label' => 'Verified',
+                    'class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
+                    'can_review' => false,
+                ];
             }
 
-            if ($status === \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD) {
-                return 'Pending';
+            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_REJECTED) {
+                return [
+                    'label' => 'Rejected',
+                    'class' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400',
+                    'can_review' => false,
+                ];
             }
 
-            return $status !== '' ? $status : 'Pending';
+            if ($status === \App\Models\InventoryLog::STATUS_PENDING_ADMIN_VERIFICATION
+                || $status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED) {
+                return [
+                    'label' => 'Pending Admin Verification',
+                    'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
+                    'can_review' => true,
+                ];
+            }
+
+            if ($status === \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD || $status === '') {
+                return [
+                    'label' => 'Pending Tank Delivery Record',
+                    'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
+                    'can_review' => false,
+                ];
+            }
+
+            return [
+                'label' => $status,
+                'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
+                'can_review' => false,
+            ];
         };
 
-        $statusClass = function ($status) {
-            return $status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED
-                ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'
-                : 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400';
+        $statusLabel = function ($status) use ($statusMeta) {
+            return $statusMeta($status)['label'];
+        };
+
+        $statusClass = function ($status) use ($statusMeta) {
+            return $statusMeta($status)['class'];
         };
 
         $fuelStyle = function ($fuel) {
@@ -230,6 +261,7 @@
             stockUrl: @js(route('inventory.stockIn')),
             priceUrl: @js(route('inventory.updatePrice')),
             csrfToken: @js(csrf_token()),
+            initialSuccess: @js(session('success') ?: session('status')),
             initialError: @js($viewErrors->first()),
             tanks: @js($tanks->map(fn ($tank) => [
                 'id' => (string) $tank->id,
@@ -238,7 +270,7 @@
             ])->values())
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', deliveryModalOpen || deliveryDetailsModal !== null || confirmation.open || messageDialog.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', deliveryModalOpen || deliveryDetailsModal !== null || rejectDialog.open || confirmation.open || messageDialog.open)"
         class="space-y-6">
         <style>
             [x-cloak] { display: none !important; }
@@ -693,7 +725,7 @@
                                         $style = $fuelStyle($log->fuel_type);
                                         $deliveryCode = trim((string) ($log->delivery_code ?? ''));
                                         $deliveryStatus = trim((string) ($log->delivery_status ?? '')) ?: \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
-                                        $deliveryCompleted = $deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED;
+                                        $deliveryStatusMeta = $statusMeta($deliveryStatus);
                                         $deliveryDetailsId = 'delivery-details-' . $log->id;
                                         $hasDeliveryDetails = ! empty($log->tank_delivery_record_id);
                                     @endphp
@@ -717,8 +749,8 @@
                                         <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">+{{ number_format((float) $log->liters_delivered, 2) }} L</td>
                                         <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $log->total_cost, 2) }}</td>
                                         <td class="{{ $tdClass }}">
-                                            <span class="inline-flex max-w-[150px] whitespace-normal rounded-full px-2.5 py-1 text-theme-xs font-medium leading-5 {{ $statusClass($deliveryStatus) }}">
-                                                {{ $statusLabel($deliveryStatus) }}
+                                            <span class="inline-flex max-w-[170px] whitespace-normal rounded-full px-2.5 py-1 text-theme-xs font-medium leading-5 {{ $deliveryStatusMeta['class'] }}">
+                                                {{ $deliveryStatusMeta['label'] }}
                                             </span>
                                         </td>
                                         <td class="{{ $tdClass }}">{{ $log->created_at ? \Carbon\Carbon::parse($log->created_at)->format('M d, h:i A') : 'N/A' }}</td>
@@ -730,7 +762,7 @@
                                                         <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke="currentColor" stroke-width="1.7" />
                                                     </svg>
                                                 </button>
-                                            @elseif ($deliveryCompleted)
+                                            @elseif ($deliveryStatusMeta['can_review'])
                                                 <span class="text-theme-xs text-error-500 dark:text-error-400">Missing</span>
                                             @else
                                                 <span class="text-theme-xs text-gray-400 dark:text-gray-500">-</span>
@@ -753,6 +785,9 @@
                     @php
                         $deliveryDetailsId = 'delivery-details-' . $log->id;
                         $deliveryStatus = trim((string) ($log->delivery_status ?? '')) ?: \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
+                        $deliveryStatusMeta = $statusMeta($deliveryStatus);
+                        $verifyFormId = 'verify-tdr-' . $log->tank_delivery_record_id;
+                        $rejectFormId = 'reject-tdr-' . $log->tank_delivery_record_id;
                     @endphp
 
                     <template x-teleport="body">
@@ -785,7 +820,7 @@
                                     <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
                                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                             <p class="{{ $labelClass }}">Status</p>
-                                            <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $statusClass($deliveryStatus) }}">{{ $statusLabel($deliveryStatus) }}</span>
+                                            <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $deliveryStatusMeta['class'] }}">{{ $deliveryStatusMeta['label'] }}</span>
                                         </div>
                                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                             <p class="{{ $labelClass }}">Record Date</p>
@@ -799,6 +834,7 @@
                                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                             <p class="{{ $labelClass }}">Submitted By</p>
                                             <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->staff_name ?? 'Staff' }}</p>
+                                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $dateLabel($log->tank_delivery_record_created_at ?? null, 'M d, h:i A') }}</p>
                                         </div>
                                     </div>
 
@@ -825,6 +861,48 @@
                                             <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">&#8369;{{ $numberLabel($log->total_cost) }}</p>
                                         </div>
                                     </div>
+
+                                    <section class="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                            <div>
+                                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Verification Status</h3>
+                                                <p class="mt-1 {{ $captionClass }}">Admin review for this tank line inspection.</p>
+                                            </div>
+                                            <span class="inline-flex w-fit rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $deliveryStatusMeta['class'] }}">{{ $deliveryStatusMeta['label'] }}</span>
+                                        </div>
+
+                                        @if ($deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED)
+                                            <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                                    <p class="{{ $labelClass }}">Verified By</p>
+                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->verified_by_name ?? 'Admin' }}</p>
+                                                </div>
+                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                                    <p class="{{ $labelClass }}">Verified At</p>
+                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->verified_at ?? null, 'M d, Y h:i A') }}</p>
+                                                </div>
+                                            </div>
+                                        @elseif ($deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_REJECTED)
+                                            <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                                    <p class="{{ $labelClass }}">Rejected By</p>
+                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->rejected_by_name ?? 'Admin' }}</p>
+                                                </div>
+                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                                                    <p class="{{ $labelClass }}">Rejected At</p>
+                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->rejected_at ?? null, 'M d, Y h:i A') }}</p>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3 rounded-lg border border-error-100 bg-error-50 p-3 dark:border-error-500/20 dark:bg-error-500/10">
+                                                <p class="{{ $labelClass }} text-error-700 dark:text-error-400">Rejection Reason</p>
+                                                <p class="mt-1 text-theme-sm leading-6 text-error-700 dark:text-error-300">{{ $log->rejection_reason ?: 'No reason recorded.' }}</p>
+                                            </div>
+                                        @else
+                                            <p class="mt-4 text-theme-sm text-gray-600 dark:text-gray-400">
+                                                {{ $deliveryStatusMeta['can_review'] ? 'This record is ready for admin verification.' : 'No admin verification action is available for this status.' }}
+                                            </p>
+                                        @endif
+                                    </section>
 
                                     <section class="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Inspection Checklist</h3>
@@ -892,12 +970,64 @@
                                     </section>
                                 </div>
 
-                                <div class="flex justify-end border-t border-gray-100 px-5 py-4 dark:border-gray-800 sm:px-6">
+                                <div class="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end sm:px-6">
+                                    @if ($deliveryStatusMeta['can_review'])
+                                        <form id="{{ $verifyFormId }}" method="POST" action="{{ route('inventory.tank-delivery-records.verify', $log->tank_delivery_record_id) }}" class="hidden">
+                                            @csrf
+                                        </form>
+                                        <button type="button" class="{{ $secondaryButtonClass }} border-error-200 text-error-600 hover:bg-error-50 hover:text-error-700 dark:border-error-500/25 dark:text-error-400 dark:hover:bg-error-500/10" x-on:click="openRejectDialog(@js($deliveryDetailsId), @js($rejectFormId))">
+                                            Reject Record
+                                        </button>
+                                        <button type="button" class="{{ $primaryButtonClass }} bg-success-500 hover:bg-success-600" x-on:click="confirmVerifyRecord(@js($verifyFormId))">
+                                            Verify Record
+                                        </button>
+                                    @endif
                                     <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeDeliveryDetails()">Close</button>
                                 </div>
                             </div>
                         </div>
                     </template>
+
+                    @if ($deliveryStatusMeta['can_review'])
+                        <template x-teleport="body">
+                            <div
+                                x-cloak
+                                x-show="rejectDialog.open && rejectDialog.deliveryId === @js($deliveryDetailsId)"
+                                x-transition.opacity
+                                class="fixed inset-0 flex items-center justify-center bg-gray-900/55 p-4 backdrop-blur-sm"
+                                style="z-index: 2147483647;"
+                                x-on:keydown.escape.window="closeRejectDialog()">
+                                <div class="absolute inset-0" x-on:click="closeRejectDialog()"></div>
+
+                                <form id="{{ $rejectFormId }}" method="POST" action="{{ route('inventory.tank-delivery-records.reject', $log->tank_delivery_record_id) }}" class="relative w-full max-w-lg rounded-2xl border border-white/70 bg-white p-5 shadow-2xl dark:border-gray-800 dark:bg-gray-950 sm:p-6">
+                                    @csrf
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div>
+                                            <p class="{{ $labelClass }}">Reject Record</p>
+                                            <h3 class="mt-1 text-lg font-semibold text-gray-800 dark:text-white/90">{{ $log->delivery_code ?: 'Delivery Log #' . $log->id }}</h3>
+                                        </div>
+                                        <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeRejectDialog()" aria-label="Close rejection dialog">
+                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    <label class="mt-5 block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                        <span>Rejection Reason</span>
+                                        <textarea name="rejection_reason" rows="5" class="mt-1.5 min-h-[140px] w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800" required maxlength="2000" placeholder="Explain what staff should correct before resubmitting."></textarea>
+                                    </label>
+
+                                    <div class="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                                        <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeRejectDialog()">Cancel</button>
+                                        <button type="button" class="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600" x-on:click="submitRejectRecord(@js($rejectFormId))">
+                                            Submit Rejection
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </template>
+                    @endif
                 @endif
             @endforeach
 
@@ -1192,6 +1322,7 @@
                 deliveryRows: [],
                 deliveryModalOpen: false,
                 deliveryDetailsModal: null,
+                rejectDialog: { open: false, deliveryId: null, formId: null },
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
                 confirmation: {
@@ -1212,6 +1343,10 @@
                     this.deliveryRows = [this.newDeliveryRow()];
                     this.initDatePickers();
                     this.showStoredToast();
+
+                    if (config.initialSuccess) {
+                        this.$nextTick(() => this.showToast(config.initialSuccess));
+                    }
 
                     if (config.initialError) {
                         this.$nextTick(() => this.showMessage('error', config.initialError));
@@ -1346,7 +1481,46 @@
                     this.deliveryDetailsModal = id;
                 },
                 closeDeliveryDetails() {
+                    if (this.rejectDialog.open) {
+                        return;
+                    }
+
                     this.deliveryDetailsModal = null;
+                },
+                openRejectDialog(deliveryId, formId) {
+                    this.rejectDialog = { open: true, deliveryId, formId };
+
+                    window.setTimeout(() => {
+                        const form = document.getElementById(formId);
+                        form?.querySelector('[name="rejection_reason"]')?.focus({ preventScroll: true });
+                    }, 50);
+                },
+                closeRejectDialog() {
+                    this.rejectDialog = { open: false, deliveryId: null, formId: null };
+                },
+                async confirmVerifyRecord(formId) {
+                    const confirmed = await this.askConfirmation({
+                        title: 'Verify Record',
+                        message: 'Verify this Tank Delivery Record inspection?',
+                        details: 'This approves the staff inspection record only. Tank volume will not be changed.',
+                        confirmText: 'Verify Record',
+                        tone: 'success'
+                    });
+
+                    if (!confirmed) {
+                        return;
+                    }
+
+                    document.getElementById(formId)?.submit();
+                },
+                submitRejectRecord(formId) {
+                    const form = document.getElementById(formId);
+
+                    if (!form || !form.reportValidity()) {
+                        return;
+                    }
+
+                    form.submit();
                 },
                 responseMessage(data, fallback) {
                     const firstError = data && data.errors ? Object.values(data.errors).flat()[0] : '';

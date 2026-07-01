@@ -69,24 +69,70 @@
             return number_format((float) $value, 2) . $suffix;
         };
 
-        $statusLabel = function ($status) {
+        $statusMeta = function ($status, $row = null) {
             $status = trim((string) $status);
+            $statusKey = strtolower($status);
 
-            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED) {
-                return 'Completed';
+            if (str_contains($statusKey, 'reject')) {
+                return [
+                    'label' => 'Rejected',
+                    'class' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400',
+                    'can_edit' => true,
+                    'can_delete' => true,
+                ];
+            }
+
+            if (str_contains($statusKey, 'verified') || str_contains($statusKey, 'approved')) {
+                return [
+                    'label' => 'Verified',
+                    'class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
+                    'can_edit' => false,
+                    'can_delete' => false,
+                ];
+            }
+
+            if ($statusKey === 'in progress') {
+                return [
+                    'label' => 'In Progress',
+                    'class' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400',
+                    'can_edit' => false,
+                    'can_delete' => true,
+                ];
+            }
+
+            if ($status === \App\Models\InventoryLog::STATUS_PENDING_ADMIN_VERIFICATION
+                || $status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED) {
+                return [
+                    'label' => 'Pending Admin Verification',
+                    'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
+                    'can_edit' => true,
+                    'can_delete' => true,
+                ];
             }
 
             if ($status === \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD) {
-                return 'Pending';
+                return [
+                    'label' => 'Pending',
+                    'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
+                    'can_edit' => false,
+                    'can_delete' => true,
+                ];
             }
 
-            return $status !== '' ? $status : 'Pending';
+            return [
+                'label' => $status !== '' ? $status : 'Pending',
+                'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
+                'can_edit' => false,
+                'can_delete' => true,
+            ];
         };
 
-        $statusClass = function ($status) {
-            return $status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED
-                ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'
-                : 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400';
+        $statusLabel = function ($status) use ($statusMeta) {
+            return $statusMeta($status)['label'];
+        };
+
+        $statusClass = function ($status) use ($statusMeta) {
+            return $statusMeta($status)['class'];
         };
 
         $fuelStyle = function ($fuel) {
@@ -159,8 +205,34 @@
                 : $fuelTypes;
         };
 
+        $lineLabel = function ($row) {
+            $count = max(1, (int) ($row->delivery_batch_count ?? 1));
+            $line = min($count, max(1, (int) ($row->delivery_batch_line ?? 1)));
+
+            return "Line {$line} of {$count}";
+        };
+
+        $batchProgressLabel = function ($row, $verb = 'submitted') {
+            $total = max(1, (int) ($row->delivery_batch_count ?? 1));
+            $submitted = min($total, max(0, (int) ($row->delivery_batch_submitted_count ?? $row->delivery_batch_completed_count ?? 0)));
+
+            return number_format($submitted) . ' of ' . number_format($total) . " {$verb}";
+        };
+
+        $batchIsInProgress = function ($row) {
+            $total = max(1, (int) ($row->delivery_batch_count ?? 1));
+            $submitted = min($total, max(0, (int) ($row->delivery_batch_submitted_count ?? $row->delivery_batch_completed_count ?? 0)));
+
+            return $total > 1 && $submitted > 0 && $submitted < $total;
+        };
+
+        $pendingDeliveryBatchLines = collect($pendingDeliveryBatchLines ?? $pendingDeliveries);
+        $pendingDeliveryBatches = $pendingDeliveries->groupBy('delivery_code');
+        $pendingDeliveryBatchLineGroups = $pendingDeliveryBatchLines->groupBy('delivery_code');
+        $pendingDeliveryIds = $pendingDeliveries->pluck('id')->mapWithKeys(fn ($id) => [(int) $id => true]);
+        $pendingBatchCount = $pendingDeliveryBatches->count();
+        $pendingLineCount = $pendingDeliveries->count();
         $totalRecords = method_exists($records, 'total') ? $records->total() : $recordItems->count();
-        $completedOnPage = $recordItems->filter(fn ($record) => ($record->delivery_status ?? null) === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED)->count();
         $selectedModal = (request()->filled('delivery_id') || request()->filled('delivery_code')) && $selectedDelivery ? 'create-' . $selectedDelivery->id : null;
     @endphp
 
@@ -171,7 +243,7 @@
             fuels: @js(array_keys($fuelTypes)),
             sessionMessage: @js(session('success') ?: session('status')),
             initialError: @js($errors->first()),
-            selectedMissingMessage: @js((request('delivery_id') || request('delivery_code')) && ! $selectedDelivery ? 'The selected delivery code is no longer pending or has already been completed.' : ''),
+            selectedMissingMessage: @js((request('delivery_id') || request('delivery_code')) && ! $selectedDelivery ? 'The selected delivery code is no longer pending or has already been submitted.' : ''),
             reopenForm: @js(old('_tdr_form')),
             selectedModal: @js($selectedModal)
         })"
@@ -232,13 +304,17 @@
                     <p class="mt-2 max-w-3xl {{ $captionClass }}">Pending delivery inspections and submitted tanker records.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 sm:min-w-[320px]">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:min-w-[520px]">
                     <div class="rounded-xl border border-warning-100 bg-warning-50/50 p-3 dark:border-warning-500/20 dark:bg-warning-500/10">
-                        <p class="{{ $labelClass }}">Pending</p>
-                        <p class="mt-1 text-lg font-semibold tabular-nums text-warning-700 dark:text-warning-400">{{ number_format($pendingDeliveries->count()) }}</p>
+                        <p class="{{ $labelClass }}">Pending Batches</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-warning-700 dark:text-warning-400">{{ number_format($pendingBatchCount) }}</p>
+                    </div>
+                    <div class="rounded-xl border border-brand-100 bg-brand-50/50 p-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+                        <p class="{{ $labelClass }}">Pending Tank Lines</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-brand-700 dark:text-brand-400">{{ number_format($pendingLineCount) }}</p>
                     </div>
                     <div class="rounded-xl border border-success-100 bg-success-50/50 p-3 dark:border-success-500/20 dark:bg-success-500/10">
-                        <p class="{{ $labelClass }}">Submitted</p>
+                        <p class="{{ $labelClass }}">Submitted Records</p>
                         <p class="mt-1 text-lg font-semibold tabular-nums text-success-700 dark:text-success-500">{{ number_format($totalRecords) }}</p>
                     </div>
                 </div>
@@ -249,10 +325,10 @@
             <div class="flex flex-col gap-3 border-b border-gray-200 pb-5 dark:border-gray-800 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pending Deliveries</h2>
-                    <p class="mt-1 {{ $captionClass }}">Delivery codes generated from Inventory & Tanks.</p>
+                    <p class="mt-1 {{ $captionClass }}">Grouped by batch delivery code; each tank line is submitted separately.</p>
                 </div>
                 <span class="inline-flex w-fit rounded-full bg-warning-50 px-3 py-1 text-theme-xs font-semibold text-warning-700 dark:bg-warning-500/15 dark:text-warning-400">
-                    {{ $pendingDeliveries->count() }} pending
+                    {{ $pendingBatchCount }} pending batch{{ $pendingBatchCount === 1 ? '' : 'es' }} / {{ $pendingLineCount }} pending line{{ $pendingLineCount === 1 ? '' : 's' }}
                 </span>
             </div>
 
@@ -278,9 +354,8 @@
                     <select name="delivery_id" id="pendingDeliverySelect" class="mt-1.5 {{ $selectClass }}" x-on:change="openDeliveryFromSelect($event)">
                         <option value="">Choose pending delivery code</option>
                         @foreach ($pendingDeliveries as $delivery)
-                            @php $deliveryBatchLabel = $batchLabel($delivery); @endphp
                             <option value="{{ $delivery->id }}" data-modal-id="create-{{ $delivery->id }}" {{ (string) request('delivery_id') === (string) $delivery->id ? 'selected' : '' }}>
-                                {{ $delivery->delivery_code }}{{ $deliveryBatchLabel ? ' - ' . $deliveryBatchLabel : '' }} - {{ $dateLabel($delivery->delivery_date) }} - {{ $delivery->supplier_name }} - {{ $delivery->tank_name }} ({{ $delivery->fuel_type }})
+                                {{ $delivery->delivery_code }} | {{ $delivery->tank_name }} {{ $delivery->fuel_type }} | {{ $lineLabel($delivery) }} | {{ $delivery->supplier_name }} | {{ $dateLabel($delivery->delivery_date) }}
                             </option>
                         @endforeach
                     </select>
@@ -298,68 +373,214 @@
                     {{ $hasPendingFilters ? 'No pending deliveries match the selected filters.' : 'No pending deliveries available.' }}
                 </div>
             @else
-                <div class="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-3">
-                    @foreach ($pendingDeliveries as $delivery)
-                        @php
-                            $style = $fuelStyle($delivery->fuel_type);
-                            $deliveryBatchLabel = $batchLabel($delivery);
-                        @endphp
-                        <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                            <div class="flex items-start justify-between gap-3">
-                                <div class="min-w-0">
-                                    <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $delivery->delivery_code }}</span>
-                                    @if ($deliveryBatchLabel)
-                                        <span class="mt-2 inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-semibold text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{{ $deliveryBatchLabel }}</span>
-                                    @endif
-                                    <h3 class="mt-3 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $delivery->supplier_name }}</h3>
-                                    <p class="mt-1 {{ $captionClass }}">{{ $dateLabel($delivery->delivery_date) }}</p>
-                                </div>
-                                <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">
-                                    <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
-                                    {{ $delivery->fuel_type }}
-                                </span>
-                            </div>
-                            <div class="mt-4 grid grid-cols-2 gap-2 text-theme-sm">
-                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                    <p class="{{ $labelClass }}">Tank</p>
-                                    <p class="mt-1 truncate font-medium text-gray-800 dark:text-white/90">{{ $delivery->tank_name }}</p>
-                                </div>
-                                <div class="rounded-lg bg-gray-50 p-3 text-right dark:bg-white/[0.03]">
-                                    <p class="{{ $labelClass }}">Liters</p>
-                                    <p class="mt-1 font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) $delivery->liters_delivered, 2) }} L</p>
-                                </div>
-                            </div>
-                            <button type="button" class="mt-4 w-full {{ $primaryButtonClass }}" x-on:click="openModal('create-{{ $delivery->id }}')">
-                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                                </svg>
-                                Complete Record
-                            </button>
-                        </article>
-                    @endforeach
+                <div class="mt-5 max-w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                    <table class="min-w-[1040px] w-full table-fixed">
+                        <colgroup>
+                            <col class="w-[19%]">
+                            <col class="w-[12%]">
+                            <col class="w-[16%]">
+                            <col class="w-[11%]">
+                            <col class="w-[12%]">
+                            <col class="w-[14%]">
+                            <col class="w-[8%]">
+                            <col class="w-[8%]">
+                        </colgroup>
+                        <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                            <tr>
+                                <th class="{{ $thClass }}">Delivery Code</th>
+                                <th class="{{ $thClass }}">Delivery Date</th>
+                                <th class="{{ $thClass }}">Supplier</th>
+                                <th class="{{ $thClass }}">Tank Lines</th>
+                                <th class="{{ $thClass }} text-right">Total Liters</th>
+                                <th class="{{ $thClass }}">Progress</th>
+                                <th class="{{ $thClass }}">Status</th>
+                                <th class="{{ $thClass }}">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                            @foreach ($pendingDeliveryBatches as $deliveryCode => $batch)
+                                @php
+                                    $batchFirst = $batch->first();
+                                    $batchLines = $pendingDeliveryBatchLineGroups->get($deliveryCode, $batch);
+                                    $totalLines = max((int) ($batchFirst->delivery_batch_count ?? $batchLines->count()), $batchLines->count());
+                                    $pendingLines = min($totalLines, max(0, (int) ($batchFirst->delivery_batch_pending_count ?? $batch->count())));
+                                    $submittedLines = min($totalLines, max(0, (int) ($batchFirst->delivery_batch_submitted_count ?? $batchFirst->delivery_batch_completed_count ?? ($totalLines - $pendingLines))));
+                                    $batchLiters = (float) ($batchFirst->delivery_batch_total_liters ?? $batchLines->sum('liters_delivered'));
+                                    $batchStatus = $submittedLines > 0 && $pendingLines > 0
+                                        ? 'In Progress'
+                                        : ($pendingLines > 0
+                                        ? \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD
+                                        : \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED);
+                                @endphp
+                                <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                                    <td class="{{ $tdPrimaryClass }}">
+                                        <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $deliveryCode }}</span>
+                                    </td>
+                                    <td class="{{ $tdClass }}">{{ $dateLabel($batchFirst->delivery_date) }}</td>
+                                    <td class="{{ $tdClass }}">
+                                        <span class="block truncate font-medium text-gray-800 dark:text-white/90">{{ $batchFirst->supplier_name }}</span>
+                                    </td>
+                                    <td class="{{ $tdClass }}">{{ number_format($totalLines) }} tank{{ $totalLines === 1 ? '' : 's' }}</td>
+                                    <td class="{{ $tdNumberClass }}">{{ number_format($batchLiters, 2) }} L</td>
+                                    <td class="{{ $tdClass }}">{{ number_format($submittedLines) }} of {{ number_format($totalLines) }} submitted</td>
+                                    <td class="{{ $tdClass }}">
+                                        <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $statusClass($batchStatus) }}">{{ $statusLabel($batchStatus) }}</span>
+                                    </td>
+                                    <td class="{{ $tdClass }}">
+                                        <button type="button" class="{{ $secondaryButtonClass }} h-9 px-3 py-2 text-theme-xs" x-on:click="openModal('batch-{{ $batchFirst->id }}')">
+                                            View More
+                                        </button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
                 </div>
             @endif
         </section>
+
+        @foreach ($pendingDeliveryBatches as $deliveryCode => $batch)
+            @php
+                $batchFirst = $batch->first();
+                $batchLines = $pendingDeliveryBatchLineGroups->get($deliveryCode, $batch);
+                $totalLines = max((int) ($batchFirst->delivery_batch_count ?? $batchLines->count()), $batchLines->count());
+                $pendingLines = min($totalLines, max(0, (int) ($batchFirst->delivery_batch_pending_count ?? $batch->count())));
+                $submittedLines = min($totalLines, max(0, (int) ($batchFirst->delivery_batch_submitted_count ?? $batchFirst->delivery_batch_completed_count ?? ($totalLines - $pendingLines))));
+                $batchLiters = (float) ($batchFirst->delivery_batch_total_liters ?? $batchLines->sum('liters_delivered'));
+            @endphp
+            <div
+                x-show="modal === 'batch-{{ $batchFirst->id }}'"
+                x-cloak
+                x-transition.opacity
+                class="fixed inset-0 overflow-y-auto bg-gray-900/55 px-4 py-6 backdrop-blur-[2px]"
+                style="z-index: 100200;"
+                x-on:click.self="closeModal()">
+                <div class="mx-auto flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900" data-modal-panel="batch-{{ $batchFirst->id }}">
+                    <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                        <div class="min-w-0">
+                            <p class="{{ $labelClass }}">Pending Delivery Batch</p>
+                            <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $deliveryCode }}</h2>
+                            <p class="mt-1 {{ $captionClass }}">{{ $batchFirst->supplier_name }} - {{ $dateLabel($batchFirst->delivery_date) }}</p>
+                        </div>
+                        <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeModal()" aria-label="Close modal">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
+                        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Delivery Code</p>
+                                <p class="mt-2 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $deliveryCode }}</p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Supplier</p>
+                                <p class="mt-2 truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $batchFirst->supplier_name }}</p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Delivery Date</p>
+                                <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($batchFirst->delivery_date) }}</p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Total Tank Lines</p>
+                                <p class="mt-2 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($totalLines) }}</p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Total Liters</p>
+                                <p class="mt-2 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($batchLiters, 2) }} L</p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Progress</p>
+                                <p class="mt-2 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($submittedLines) }} of {{ number_format($totalLines) }} submitted</p>
+                            </div>
+                        </div>
+
+                        <div class="mt-5 max-w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                            <table class="min-w-[820px] w-full table-fixed">
+                                <colgroup>
+                                    <col class="w-[15%]">
+                                    <col class="w-[18%]">
+                                    <col class="w-[16%]">
+                                    <col class="w-[17%]">
+                                    <col class="w-[14%]">
+                                    <col class="w-[20%]">
+                                </colgroup>
+                                <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                                    <tr>
+                                        <th class="{{ $thClass }}">Line</th>
+                                        <th class="{{ $thClass }}">Tank</th>
+                                        <th class="{{ $thClass }}">Fuel Type</th>
+                                        <th class="{{ $thClass }} text-right">Liters Delivered</th>
+                                        <th class="{{ $thClass }}">Status</th>
+                                        <th class="{{ $thClass }}">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                    @foreach ($batchLines as $delivery)
+                                        @php
+                                            $style = $fuelStyle($delivery->fuel_type);
+                                            $lineStatus = $delivery->delivery_status ?? \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
+                                            $lineIsPending = isset($pendingDeliveryIds[(int) $delivery->id]);
+                                            $lineStatusLabel = !empty($delivery->tank_delivery_record_id) ? 'Pending Admin Verification' : $statusLabel($lineStatus);
+                                            $lineStatusClass = !empty($delivery->tank_delivery_record_id)
+                                                ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'
+                                                : $statusClass($lineStatus);
+                                        @endphp
+                                        <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                                            <td class="{{ $tdClass }}">{{ $lineLabel($delivery) }}</td>
+                                            <td class="{{ $tdPrimaryClass }}">{{ $delivery->tank_name }}</td>
+                                            <td class="{{ $tdClass }}">
+                                                <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">
+                                                    <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
+                                                    {{ $delivery->fuel_type }}
+                                                </span>
+                                            </td>
+                                            <td class="{{ $tdNumberClass }}">{{ number_format((float) $delivery->liters_delivered, 2) }} L</td>
+                                            <td class="{{ $tdClass }}">
+                                                <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $lineStatusClass }}">{{ $lineStatusLabel }}</span>
+                                            </td>
+                                            <td class="{{ $tdClass }}">
+                                                @if ($lineIsPending)
+                                                    <button type="button" class="{{ $primaryButtonClass }} h-9 px-3 py-2 text-theme-xs" x-on:click="openModal('create-{{ $delivery->id }}')">
+                                                        Inspect Tank Line
+                                                    </button>
+                                                @else
+                                                    <span class="text-theme-xs font-medium text-gray-500 dark:text-gray-400">Already submitted</span>
+                                                @endif
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+                        <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        @endforeach
 
         <section class="{{ $cardClass }} overflow-hidden p-0">
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Submitted Tank Delivery Records</h2>
-                    <p class="mt-1 {{ $captionClass }}">{{ $completedOnPage }} completed record{{ $completedOnPage === 1 ? '' : 's' }} on this page.</p>
+                    <p class="mt-1 {{ $captionClass }}">{{ number_format($recordItems->count()) }} submitted record{{ $recordItems->count() === 1 ? '' : 's' }} on this page, one row per tank line.</p>
                 </div>
             </div>
 
             <div class="max-w-full overflow-x-auto">
-                <table class="min-w-[1120px] w-full table-fixed">
+                <table class="min-w-[1220px] w-full table-fixed">
                     <colgroup>
-                        <col class="w-[15%]">
-                        <col class="w-[13%]">
-                        <col class="w-[12%]">
-                        <col class="w-[15%]">
-                        <col class="w-[15%]">
-                        <col class="w-[12%]">
+                        <col class="w-[18%]">
+                        <col class="w-[11%]">
                         <col class="w-[10%]">
-                        <col class="w-[8%]">
+                        <col class="w-[13%]">
+                        <col class="w-[13%]">
+                        <col class="w-[11%]">
+                        <col class="w-[12%]">
+                        <col class="w-[12%]">
                     </colgroup>
                     <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                         <tr>
@@ -377,14 +598,17 @@
                         @forelse ($records as $record)
                             @php
                                 $style = $fuelStyle($record->fuel_type);
-                                $recordBatchLabel = $batchLabel($record);
+                                $recordLineLabel = $lineLabel($record);
+                                $recordProgressLabel = $batchProgressLabel($record);
+                                $recordStatus = $statusMeta($record->delivery_status, $record);
+                                $recordBatchInProgress = $batchIsInProgress($record);
                             @endphp
                             <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                                 <td class="{{ $tdPrimaryClass }}">
                                     <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $record->delivery_code }}</span>
-                                    @if ($recordBatchLabel)
-                                        <span class="mt-2 inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-semibold text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{{ $recordBatchLabel }}</span>
-                                    @endif
+                                    <span class="mt-2 block text-theme-xs font-semibold text-gray-600 dark:text-gray-300">{{ $recordLineLabel }}</span>
+                                    <span class="mt-1 block text-theme-xs text-gray-500 dark:text-gray-400">Batch Delivery</span>
+                                    <span class="mt-1 block text-theme-xs text-gray-500 dark:text-gray-400">{{ $recordProgressLabel }}</span>
                                 </td>
                                 <td class="{{ $tdClass }}">
                                     <span class="block font-medium text-gray-800 dark:text-white/90">{{ $dateLabel($record->record_date) }}</span>
@@ -401,7 +625,10 @@
                                 </td>
                                 <td class="{{ $tdClass }}">{{ $record->staff_name ?? 'Staff' }}</td>
                                 <td class="{{ $tdClass }}">
-                                    <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $statusClass($record->delivery_status) }}">{{ $statusLabel($record->delivery_status) }}</span>
+                                    <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $recordStatus['class'] }}">{{ $recordStatus['label'] }}</span>
+                                    @if ($recordBatchInProgress)
+                                        <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $statusClass('In Progress') }}">In Progress</span>
+                                    @endif
                                 </td>
                                 <td class="{{ $tdClass }}">
                                     <div class="flex items-center gap-2">
@@ -411,17 +638,21 @@
                                                 <path d="M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z" stroke="currentColor" stroke-width="1.6" />
                                             </svg>
                                         </button>
-                                        <button type="button" class="{{ $editIconButtonClass }}" x-on:click="openModal('edit-{{ $record->id }}')" title="Update" aria-label="Update {{ $record->delivery_code }}">
-                                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                <path d="M4.75 19.25h4.1L18.5 9.6a2.33 2.33 0 0 0-3.3-3.3l-9.65 9.65-.8 3.3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                                                <path d="m13.75 7.75 2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-                                            </svg>
-                                        </button>
-                                        <button type="button" class="{{ $deleteIconButtonClass }}" x-on:click="confirmDeleteRecord('delete-record-{{ $record->id }}', @js($record->delivery_code))" title="Delete" aria-label="Delete {{ $record->delivery_code }}">
-                                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                <path d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.414.336-.75.75-.75h3c.414 0 .75.336.75.75v1.75M9 10.75v6M12 10.75v6M15 10.75v6M7.5 7.25l.58 11.03c.05.83.73 1.47 1.56 1.47h4.72c.83 0 1.51-.64 1.56-1.47l.58-11.03" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                                            </svg>
-                                        </button>
+                                        @if ($recordStatus['can_edit'])
+                                            <button type="button" class="{{ $editIconButtonClass }}" x-on:click="openModal('edit-{{ $record->id }}')" title="Update" aria-label="Update {{ $record->delivery_code }}">
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                    <path d="M4.75 19.25h4.1L18.5 9.6a2.33 2.33 0 0 0-3.3-3.3l-9.65 9.65-.8 3.3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                                                    <path d="m13.75 7.75 2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                                                </svg>
+                                            </button>
+                                        @endif
+                                        @if ($recordStatus['can_delete'])
+                                            <button type="button" class="{{ $deleteIconButtonClass }}" x-on:click="confirmDeleteRecord('delete-record-{{ $record->id }}', @js($record->delivery_code))" title="Delete" aria-label="Delete {{ $record->delivery_code }}">
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                    <path d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.414.336-.75.75-.75h3c.414 0 .75.336.75.75v1.75M9 10.75v6M12 10.75v6M15 10.75v6M7.5 7.25l.58 11.03c.05.83.73 1.47 1.56 1.47h4.72c.83 0 1.51-.64 1.56-1.47l.58-11.03" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                                                </svg>
+                                            </button>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>
@@ -456,7 +687,7 @@
                 <div class="mx-auto flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900" data-modal-panel="create-{{ $delivery->id }}">
                     <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
                         <div class="min-w-0">
-                            <p class="{{ $labelClass }}">Complete Delivery</p>
+                            <p class="{{ $labelClass }}">Submit Delivery Record</p>
                             <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $delivery->delivery_code }}</h2>
                             @if ($deliveryBatchLabel)
                                 <p class="mt-1 text-theme-xs font-semibold text-gray-500 dark:text-gray-400">{{ $deliveryBatchLabel }} - {{ $delivery->tank_name }} / {{ $delivery->fuel_type }}</p>
@@ -497,8 +728,10 @@
         @foreach ($records as $record)
             @php
                 $editFormKey = 'edit-' . $record->id;
-                $recordStatusClass = $statusClass($record->delivery_status);
-                $recordStatusLabel = $statusLabel($record->delivery_status);
+                $recordStatus = $statusMeta($record->delivery_status, $record);
+                $recordLineLabel = $lineLabel($record);
+                $recordProgressLabel = $batchProgressLabel($record);
+                $recordBatchInProgress = $batchIsInProgress($record);
             @endphp
 
             <div
@@ -513,6 +746,7 @@
                         <div class="min-w-0">
                             <p class="{{ $labelClass }}">Delivery Details</p>
                             <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $record->delivery_code }}</h2>
+                            <p class="mt-1 text-theme-xs font-semibold text-gray-500 dark:text-gray-400">Batch Delivery - {{ $recordLineLabel }} - {{ $recordProgressLabel }}</p>
                         </div>
                         <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeModal()" aria-label="Close modal">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -524,7 +758,10 @@
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
                             <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <p class="{{ $labelClass }}">Status</p>
-                                <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $recordStatusClass }}">{{ $recordStatusLabel }}</span>
+                                <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $recordStatus['class'] }}">{{ $recordStatus['label'] }}</span>
+                                @if ($recordBatchInProgress)
+                                    <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $statusClass('In Progress') }}">In Progress</span>
+                                @endif
                             </div>
                             <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <p class="{{ $labelClass }}">Record Date</p>
@@ -627,55 +864,60 @@
                 </div>
             </div>
 
-            <div
-                x-show="modal === 'edit-{{ $record->id }}'"
-                x-cloak
-                x-transition.opacity
-                class="fixed inset-0 overflow-y-auto bg-gray-900/55 px-4 py-6 backdrop-blur-[2px]"
-                style="z-index: 100200;"
-                x-on:click.self="closeModal()">
-                <div class="mx-auto flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900" data-modal-panel="edit-{{ $record->id }}">
-                    <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-                        <div class="min-w-0">
-                            <p class="{{ $labelClass }}">Update Delivery</p>
-                            <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $record->delivery_code }}</h2>
-                        </div>
-                        <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeModal()" aria-label="Close modal">
-                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <form method="POST" action="{{ route('staff.tank-delivery-records.update', $record->id) }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit.prevent="confirmTdrSubmit($event.target, 'Update Tank Delivery Record', 'Apply these updates to this tank delivery record?', 'Update Record', 'brand')">
-                        @csrf
-                        @method('PUT')
-                        <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
-                            @include('pages.staff.partials.tank-delivery-record-form', [
-                                'delivery' => $record,
-                                'record' => $record,
-                                'inventoryLogId' => $record->inventory_log_id,
-                                'formKey' => $editFormKey,
-                                'fuelTypes' => $fuelTypes,
-                                'checklistItems' => $checklistItems,
-                            ])
-                        </div>
-                        <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
-                            <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeModal()">Cancel</button>
-                            <button type="submit" class="{{ $primaryButtonClass }}">
+            @if ($recordStatus['can_edit'])
+                <div
+                    x-show="modal === 'edit-{{ $record->id }}'"
+                    x-cloak
+                    x-transition.opacity
+                    class="fixed inset-0 overflow-y-auto bg-gray-900/55 px-4 py-6 backdrop-blur-[2px]"
+                    style="z-index: 100200;"
+                    x-on:click.self="closeModal()">
+                    <div class="mx-auto flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900" data-modal-panel="edit-{{ $record->id }}">
+                        <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                            <div class="min-w-0">
+                                <p class="{{ $labelClass }}">Update Delivery</p>
+                                <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $record->delivery_code }}</h2>
+                                <p class="mt-1 text-theme-xs font-semibold text-gray-500 dark:text-gray-400">Batch Delivery - {{ $recordLineLabel }}</p>
+                            </div>
+                            <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeModal()" aria-label="Close modal">
                                 <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M5 12.5 9.5 17 19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                                    <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
                                 </svg>
-                                Update Record
                             </button>
                         </div>
-                    </form>
+                        <form method="POST" action="{{ route('staff.tank-delivery-records.update', $record->id) }}" class="flex min-h-0 flex-1 flex-col js-tdr-form" x-on:submit.prevent="confirmTdrSubmit($event.target, 'Update Tank Delivery Record', 'Apply these updates to this tank delivery record?', 'Update Record', 'brand')">
+                            @csrf
+                            @method('PUT')
+                            <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar">
+                                @include('pages.staff.partials.tank-delivery-record-form', [
+                                    'delivery' => $record,
+                                    'record' => $record,
+                                    'inventoryLogId' => $record->inventory_log_id,
+                                    'formKey' => $editFormKey,
+                                    'fuelTypes' => $fuelTypes,
+                                    'checklistItems' => $checklistItems,
+                                ])
+                            </div>
+                            <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
+                                <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeModal()">Cancel</button>
+                                <button type="submit" class="{{ $primaryButtonClass }}">
+                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M5 12.5 9.5 17 19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                                    </svg>
+                                    Update Record
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
-            </div>
+            @endif
 
-            <form id="delete-record-{{ $record->id }}" method="POST" action="{{ route('staff.tank-delivery-records.destroy', $record->id) }}" class="hidden">
-                @csrf
-                @method('DELETE')
-            </form>
+            @if ($recordStatus['can_delete'])
+                <form id="delete-record-{{ $record->id }}" method="POST" action="{{ route('staff.tank-delivery-records.destroy', $record->id) }}" class="hidden">
+                    @csrf
+                    @method('DELETE')
+                </form>
+            @endif
         @endforeach
 
         <div

@@ -299,6 +299,14 @@ class InventoryController extends Controller
             'after_before_total_diesel',
             'delivery_summary_diesel',
             'staff_name',
+            'tank_delivery_record_created_at',
+            'verified_by',
+            'verified_at',
+            'verified_by_name',
+            'rejected_by',
+            'rejected_at',
+            'rejected_by_name',
+            'rejection_reason',
         ];
         $selectColumns = [
             'inventory_logs.*',
@@ -308,6 +316,10 @@ class InventoryController extends Controller
         ];
 
         if ($hasTankDeliveryRecords) {
+            $recordColumn = fn (string $column, ?string $alias = null) => $this->hasColumn('tank_delivery_records', $column)
+                ? 'tank_delivery_records.' . $column . ($alias ? ' as ' . $alias : '')
+                : DB::raw('null as ' . ($alias ?: $column));
+
             $selectColumns = array_merge($selectColumns, [
                 'tank_delivery_records.id as tank_delivery_record_id',
                 'tank_delivery_records.staff_id',
@@ -334,11 +346,23 @@ class InventoryController extends Controller
                 'tank_delivery_records.total_dispensed_diesel',
                 'tank_delivery_records.after_before_total_diesel',
                 'tank_delivery_records.delivery_summary_diesel',
+                $recordColumn('created_at', 'tank_delivery_record_created_at'),
+                $recordColumn('verified_by'),
+                $recordColumn('verified_at'),
+                $recordColumn('rejected_by'),
+                $recordColumn('rejected_at'),
+                $recordColumn('rejection_reason'),
             ]);
 
             $selectColumns[] = $hasUsersTable
                 ? 'users.name as staff_name'
                 : DB::raw('null as staff_name');
+            $selectColumns[] = $hasUsersTable && $this->hasColumn('tank_delivery_records', 'verified_by')
+                ? 'verified_users.name as verified_by_name'
+                : DB::raw('null as verified_by_name');
+            $selectColumns[] = $hasUsersTable && $this->hasColumn('tank_delivery_records', 'rejected_by')
+                ? 'rejected_users.name as rejected_by_name'
+                : DB::raw('null as rejected_by_name');
         } else {
             $selectColumns = array_merge(
                 $selectColumns,
@@ -358,6 +382,14 @@ class InventoryController extends Controller
 
             if ($hasUsersTable) {
                 $query->leftJoin('users', 'tank_delivery_records.staff_id', '=', 'users.id');
+
+                if ($this->hasColumn('tank_delivery_records', 'verified_by')) {
+                    $query->leftJoin('users as verified_users', 'tank_delivery_records.verified_by', '=', 'verified_users.id');
+                }
+
+                if ($this->hasColumn('tank_delivery_records', 'rejected_by')) {
+                    $query->leftJoin('users as rejected_users', 'tank_delivery_records.rejected_by', '=', 'rejected_users.id');
+                }
             }
         }
 

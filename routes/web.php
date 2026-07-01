@@ -5,6 +5,7 @@ use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminPriceManagementController;
 use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\AdminStockInController;
+use App\Http\Controllers\AdminTankDeliveryRecordVerificationController;
 use App\Http\Controllers\AdminTankManagementController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\BillingController;
@@ -133,6 +134,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/inventory/tank-management', [AdminTankManagementController::class, 'index'])->name('inventory.tanks.index');
         Route::get('/inventory/stock-in', [AdminStockInController::class, 'index'])->name('inventory.stock.index');
         Route::post('/inventory/stock-in', [AdminStockInController::class, 'store'])->name('inventory.stockIn');
+        Route::post('/inventory/tank-delivery-records/{record}/verify', [AdminTankDeliveryRecordVerificationController::class, 'verify'])
+            ->whereNumber('record')
+            ->name('inventory.tank-delivery-records.verify');
+        Route::post('/inventory/tank-delivery-records/{record}/reject', [AdminTankDeliveryRecordVerificationController::class, 'reject'])
+            ->whereNumber('record')
+            ->name('inventory.tank-delivery-records.reject');
         Route::get('/inventory/price-management', [AdminPriceManagementController::class, 'index'])->name('inventory.prices.index');
         Route::post('/inventory/prices', [AdminPriceManagementController::class, 'update'])->name('inventory.updatePrice');
 
