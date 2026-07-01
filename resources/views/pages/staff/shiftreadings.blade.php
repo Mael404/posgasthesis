@@ -778,6 +778,13 @@
                                 </article>
                             </div>
 
+                            <template x-if="isVoidedReading(details.reading)">
+                                <div class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
+                                    <span class="mb-2 inline-flex rounded-full bg-warning-100 px-2.5 py-1 text-theme-xs font-semibold uppercase text-warning-700 dark:bg-warning-500/15 dark:text-warning-300">Voided</span>
+                                    <p>This settlement has been voided. The details below are shown for historical reference only.</p>
+                                </div>
+                            </template>
+
                             <section class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Shift Details</h3>
                                 <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -934,6 +941,12 @@
                 </div>
 
                 <div class="max-h-[76vh] overflow-y-auto p-5 custom-scrollbar md:p-6">
+                    <template x-if="isVoidedReading(details.reading)">
+                        <div class="mb-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
+                            This settlement has been voided. The details below are shown for historical reference only.
+                        </div>
+                    </template>
+
                     <div class="divide-y divide-gray-100 dark:divide-gray-800">
                         <template x-for="row in financialRows()" :key="row.key">
                             <details class="group">

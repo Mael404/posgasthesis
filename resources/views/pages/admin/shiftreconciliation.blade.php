@@ -376,6 +376,11 @@
                     <div id="detailsErrorState" class="hidden rounded-xl border border-error-200 bg-error-50 p-4 text-theme-sm text-error-700 dark:border-error-500/20 dark:bg-error-500/10 dark:text-error-300"></div>
 
                     <div id="detailsContent" class="hidden space-y-5">
+                        <div id="voidedSettlementNotice" class="hidden rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-300">
+                            <span class="mb-2 inline-flex rounded-full bg-warning-100 px-2.5 py-1 text-theme-xs font-semibold uppercase text-warning-700 dark:bg-warning-500/15 dark:text-warning-300">Voided</span>
+                            <p>This settlement has been voided. The details below are shown for historical reference only.</p>
+                        </div>
+
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                             <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <p class="{{ $labelClass }}">Staff</p>
@@ -1102,7 +1107,7 @@
             const chequeEntries = Array.isArray(reading.cheque_entries) ? reading.cheque_entries : [];
 
             const voidedNotice = isVoidedReading(reading)
-                ? `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-theme-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">Voided settlement. Expected and variance are not recalculated from current transaction breakdowns.</div>`
+                ? `<div class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-3 text-theme-sm text-warning-800 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-300">This settlement has been voided. The details below are shown for historical reference only.</div>`
                 : '';
 
             return [
@@ -1166,6 +1171,7 @@
             const variance = varianceState(reading.cash_variance, reading);
             const feedback = [reading.rejection_reason, reading.admin_remarks].filter(Boolean);
             const subtitle = `${statusLabel(reading.status)} - ${dateLabel(reading)}`;
+            const voidedNotice = document.getElementById('voidedSettlementNotice');
 
             document.getElementById('detailsSubtitle').textContent = subtitle;
             document.getElementById('financialSubtitle').textContent = subtitle;
@@ -1174,6 +1180,7 @@
             document.getElementById('viewTotalRemitted').innerHTML = peso(reading.total_remitted);
             document.getElementById('viewTotalSales').innerHTML = `Total Sales: ${peso(reading.total_pump_sales)}`;
             document.getElementById('viewTotalLiters').textContent = `${fnum(reading.total_pump_liters)} L total dispensed`;
+            voidedNotice.classList.toggle('hidden', !isVoidedReading(reading));
 
             const varianceBox = document.getElementById('viewVarianceBox');
             varianceBox.className = `rounded-xl border p-4 ${variance.className}`;

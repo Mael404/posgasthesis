@@ -82,7 +82,7 @@ class ShiftReconciliationController extends Controller
         return response()->json([
             'reading' => $reading,
             'meter_images' => $this->meterImages($id),
-            'transaction_breakdowns' => $this->getTransactionBreakdowns($reading),
+            'transaction_breakdowns' => $this->settlementDetailBreakdowns($reading),
         ]);
     }
 
@@ -532,7 +532,7 @@ class ShiftReconciliationController extends Controller
             ->values();
     }
 
-    private function getTransactionBreakdowns(object $reading): array
+    private function getTransactionBreakdowns(object $reading, bool $includeVoidedHistorical = false): array
     {
         $empty = [
             'credit_sales' => [],
@@ -578,7 +578,7 @@ class ShiftReconciliationController extends Controller
             $canJoinCustomers ? $this->selectColumn('customers', 'owner_name', 'owner_name') : DB::raw('NULL as owner_name'),
         ]);
 
-        $this->scopeSalesToReading($query, $reading, $periodStart, $periodEnd)
+        $this->scopeSalesToReading($query, $reading, $periodStart, $periodEnd, $includeVoidedHistorical)
             ->where(function ($query) {
                 $query->whereRaw('1 = 0');
 
@@ -669,9 +669,13 @@ class ShiftReconciliationController extends Controller
         ];
     }
 
-    private function scopeSalesToReading($query, object $reading, Carbon $periodStart, Carbon $periodEnd)
+    private function scopeSalesToReading($query, object $reading, Carbon $periodStart, Carbon $periodEnd, bool $includeVoidedHistorical = false)
     {
-        if (strtolower((string) ($reading->status ?? '')) === 'voided') {
+        if ($this->settlementIsVoided($reading)) {
+            if ($includeVoidedHistorical) {
+                return $this->scopeVoidedSettlementHistoricalSales($query, $reading);
+            }
+
             return $query->whereRaw('1 = 0');
         }
 
