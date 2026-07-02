@@ -20,50 +20,40 @@
         .signin-system-font label {
             font-family: "Segoe UI", Arial, sans-serif;
         }
+
+        .signin-system-font input[type="password"]::-ms-reveal,
+        .signin-system-font input[type="password"]::-ms-clear {
+            display: none;
+            height: 0;
+            width: 0;
+        }
     </style>
 
-    <main class="relative min-h-screen overflow-hidden bg-[#F4F8F3] text-[#102318]">
+    <main class="relative min-h-screen overflow-hidden bg-white text-[#102318]">
         <div class="grid min-h-screen grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,0.98fr)_minmax(460px,1.02fr)]">
 
             {{-- RIGHT LOGIN PANEL --}}
-            <section class="signin-system-font relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-8 sm:px-8 lg:order-2 lg:px-12">
-                {{-- Soft decorative background --}}
-                <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(22,128,58,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(246,195,67,0.12),transparent_28%)]"></div>
-
-                <div class="absolute -left-24 top-16 h-72 w-72 rounded-full border border-[#16803A]/10"></div>
-                <div class="absolute -left-14 top-28 h-80 w-80 rounded-full border border-[#16803A]/10"></div>
-                <div class="absolute -bottom-20 left-0 h-72 w-72 rounded-full bg-[#16803A]/8 blur-3xl"></div>
-
-                <div class="absolute left-8 top-16 hidden grid-cols-6 gap-3 opacity-40 sm:grid">
-                    @for ($i = 0; $i < 36; $i++)
-                        <span class="h-1.5 w-1.5 rounded-full bg-[#16803A]/30"></span>
-                    @endfor
-                </div>
-
-                <div class="absolute bottom-16 right-10 hidden grid-cols-7 gap-3 opacity-30 md:grid">
-                    @for ($i = 0; $i < 42; $i++)
-                        <span class="h-1.5 w-1.5 rounded-full bg-[#16803A]/35"></span>
-                    @endfor
-                </div>
-
-                <div class="relative z-10 w-full max-w-[500px]">
-                    <div class="rounded-[8px] border border-white/80 bg-white/90 px-6 py-8 shadow-[0_24px_70px_rgba(6,59,34,0.16)] backdrop-blur-xl sm:px-8 sm:py-10 lg:px-10">
+            <section class="signin-system-font relative flex min-h-screen items-center justify-center bg-white px-5 py-8 sm:px-8 md:px-10 lg:order-2 lg:border-l lg:border-[#EDF2EE] lg:px-12 xl:px-16">
+                <div class="w-full max-w-[450px] -translate-y-3 sm:max-w-[470px] sm:-translate-y-4 lg:max-w-[450px] lg:-translate-y-6 xl:max-w-[480px]">
 
                         {{-- Logo --}}
-                        <div class="mb-7 flex justify-center">
+                        <div class="mb-4 flex justify-center sm:mb-5">
                             <img src="{{ asset('images/logo/jrs.png') }}"
                                 alt="JRS Fuel Station logo"
-                                class="h-24 w-44 object-contain sm:h-28 sm:w-52" />
+                                class="h-32 w-64 object-contain sm:h-36 sm:w-72 lg:h-[164px] lg:w-[328px]" />
                         </div>
 
                         {{-- Heading --}}
-                        <div class="mb-7 text-center">
-                            <h1 class="text-4xl font-extrabold tracking-tight text-[#063B22] sm:text-5xl">
-                                Welcome back
+                        <div class="mb-7 text-center sm:mb-8">
+                            <h1 class="text-3xl font-extrabold tracking-tight text-[#063B22] sm:text-[34px]">
+                                Login to your account
                             </h1>
-                            <div class="mx-auto mt-3 h-1.5 w-14 rounded-full bg-[#F6C343]"></div>
-                            <p class="mt-4 text-sm font-medium text-[#66756B] sm:text-base">
-                                Sign in to continue to your dashboard.
+                            <div class="mx-auto mt-2.5 flex w-20 items-center justify-center gap-1.5">
+                                <span class="h-1 w-10 rounded-full bg-[#16803A]"></span>
+                                <span class="h-1 w-5 rounded-full bg-[#F6C343]"></span>
+                            </div>
+                            <p class="mt-3 text-sm font-medium leading-6 text-[#66756B] sm:text-base">
+                                Kindly provide your account credentials to continue.
                             </p>
                         </div>
 
@@ -92,7 +82,7 @@
                             </div>
                         @endif
 
-                        <form method="POST" action="{{ route('login.store') }}" class="space-y-5">
+                        <form method="POST" action="{{ route('login.store') }}" class="space-y-4 sm:space-y-5">
                             @csrf
 
                             {{-- Email --}}
@@ -117,7 +107,7 @@
                                         autocomplete="email"
                                         required
                                         autofocus
-                                        class="h-14 w-full rounded-2xl border border-[#D9E5DA] bg-white py-3 pl-12 pr-4 text-sm font-semibold text-[#102318] shadow-sm outline-none transition placeholder:text-[#9AA89D] hover:border-[#A9C8AE] focus:border-[#16803A] focus:ring-4 focus:ring-[#16803A]/15" />
+                                        class="h-[52px] w-full rounded-[8px] border border-[#D9E5DA] bg-white py-3 pl-12 pr-4 text-sm font-semibold text-[#102318] shadow-[0_10px_26px_rgba(16,35,24,0.05)] outline-none transition placeholder:text-[#9AA89D] hover:border-[#A9C8AE] focus:border-[#16803A] focus:ring-4 focus:ring-[#16803A]/15 sm:h-14" />
                                 </div>
 
                                 @if ($showInlineEmailError)
@@ -145,15 +135,17 @@
                                         placeholder="Enter your password"
                                         autocomplete="current-password"
                                         required
-                                        class="h-14 w-full rounded-2xl border border-[#D9E5DA] bg-white py-3 pl-12 pr-14 text-sm font-semibold text-[#102318] shadow-sm outline-none transition placeholder:text-[#9AA89D] hover:border-[#A9C8AE] focus:border-[#16803A] focus:ring-4 focus:ring-[#16803A]/15" />
+                                        class="h-[52px] w-full rounded-[8px] border border-[#D9E5DA] bg-white py-3 pl-12 pr-14 text-sm font-semibold text-[#102318] shadow-[0_10px_26px_rgba(16,35,24,0.05)] outline-none transition placeholder:text-[#9AA89D] hover:border-[#A9C8AE] focus:border-[#16803A] focus:ring-4 focus:ring-[#16803A]/15 sm:h-14" />
 
                                     <button type="button"
                                         @click="showPassword = !showPassword"
-                                        class="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-[#66756B] transition hover:bg-[#16803A]/10 hover:text-[#063B22] focus:outline-none focus:ring-4 focus:ring-[#16803A]/15"
+                                        class="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-[8px] text-[#66756B] transition hover:bg-[#16803A]/10 hover:text-[#063B22] focus:outline-none focus:ring-4 focus:ring-[#16803A]/15 sm:h-10 sm:w-10"
                                         :aria-label="showPassword ? 'Hide password' : 'Show password'"
                                         :aria-pressed="showPassword.toString()">
-
-                                       
+                                        <svg class="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none">
+                                            <path d="M2.75 12s3.25-5.75 9.25-5.75S21.25 12 21.25 12 18 17.75 12 17.75 2.75 12 2.75 12Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                                            <path d="M12 14.75A2.75 2.75 0 1 0 12 9.25a2.75 2.75 0 0 0 0 5.5Z" stroke="currentColor" stroke-width="1.8" />
+                                        </svg>
                                     </button>
                                 </div>
 
@@ -163,7 +155,7 @@
                             </div>
 
                             {{-- Options --}}
-                            <div class="flex items-center justify-between gap-4">
+                            <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <label for="remember" class="flex cursor-pointer items-center gap-3 text-sm font-semibold text-[#485B4E]">
                                     <input type="checkbox"
                                         id="remember"
@@ -186,7 +178,7 @@
 
                             {{-- Submit --}}
                             <button type="submit"
-                                class="group flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-[#16803A] px-5 text-sm font-extrabold text-white shadow-[0_18px_34px_rgba(22,128,58,0.28)] transition hover:-translate-y-0.5 hover:bg-[#126D32] hover:shadow-[0_22px_40px_rgba(22,128,58,0.34)] focus:outline-none focus:ring-4 focus:ring-[#16803A]/25">
+                                class="group flex h-[52px] w-full items-center justify-center gap-3 rounded-[8px] bg-[#16803A] px-5 text-sm font-extrabold text-white shadow-[0_14px_26px_rgba(22,128,58,0.22)] transition hover:-translate-y-0.5 hover:bg-[#126D32] hover:shadow-[0_18px_32px_rgba(22,128,58,0.28)] focus:outline-none focus:ring-4 focus:ring-[#16803A]/25 sm:h-14">
                                 <span>Sign In</span>
                                 <svg class="h-5 w-5 transition group-hover:translate-x-1" viewBox="0 0 24 24" fill="none">
                                     <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -194,7 +186,6 @@
                             </button>
                         </form>
 
-                    </div>
                 </div>
             </section>
 
