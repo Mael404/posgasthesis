@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Services\LitersMovementTrackingService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -17,6 +18,7 @@ class AdminHeaderNotifications
     {
         try {
             return collect([
+                ...$this->litersMovementNotifications($limit),
                 ...$this->shiftReadingNotifications($limit),
                 ...$this->announcementCommentNotifications($limit),
             ])
@@ -32,6 +34,11 @@ class AdminHeaderNotifications
         } catch (Throwable) {
             return [];
         }
+    }
+
+    private function litersMovementNotifications(int $limit): array
+    {
+        return app(LitersMovementTrackingService::class)->activeLimitNotifications($limit);
     }
 
     private function shiftReadingNotifications(int $limit): array

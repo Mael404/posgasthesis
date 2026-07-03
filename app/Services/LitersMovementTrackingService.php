@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -13,10 +14,16 @@ class LitersMovementTrackingService
     private const DEFAULT_LIMIT = 4000.0;
     private const ACTIVE_STATUS = 'active';
     private const GENERATED_STATUS = 'generated';
-    private const DEFAULT_FUEL_TYPES = ['Regular', 'Premium', 'Diesel'];
+    private const DEFAULT_FUEL_TYPES = ['Unleaded', 'Premium', 'Diesel'];
+    private const DEFAULT_FUEL_LIMITS = [
+        'regular' => 4000.0,
+        'premium' => 4347.0,
+        'diesel' => null,
+    ];
 
     private array $tablePresence = [];
     private array $columnPresence = [];
+    private ?array $fuelPrices = null;
 
     public function state(?int $staffId = null, int $perPage = 20, string $pageName = 'page'): array
     {
@@ -40,7 +47,7 @@ class LitersMovementTrackingService
         ];
     }
 
-    public function ensureActivePeriod(?float $limit = null): object
+    public function ensureActivePeriod(?float $limit = null, ?array $tankLimits = null): object
     {
         $period = $this->activePeriod();
 
@@ -48,7 +55,7 @@ class LitersMovementTrackingService
             return $period;
         }
 
-        $periodId = $this->createPeriod($limit ?? self::DEFAULT_LIMIT);
+        $periodId = $this->createPeriod($limit ?? self::DEFAULT_LIMIT, null, $tankLimits);
 
         return DB::table('liters_tracking_periods')->where('id', $periodId)->first();
     }
@@ -77,11 +84,18 @@ class LitersMovementTrackingService
 
     public function updateActiveLimit(float $limit): object
     {
+        return $this->updateActiveLimits(['legacy' => $limit]);
+    }
+
+    public function updateActiveLimits(array $limits): object
+    {
         if (! $this->isReady()) {
             throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
         }
 
-        return DB::transaction(function () use ($limit) {
+        $limits = $this->sanitizeTankLimits($limits);
+
+        return DB::transaction(function () use ($limits) {
             $period = DB::table('liters_tracking_periods')
                 ->where('status', self::ACTIVE_STATUS)
                 ->lockForUpdate()
@@ -89,16 +103,25 @@ class LitersMovementTrackingService
                 ->orderByDesc('id')
                 ->first();
 
+            $tanks = $this->preparedTanks();
+            $legacyLimit = $this->legacyLimitFromLimits($limits, $tanks);
+
             if (! $period) {
                 $period = DB::table('liters_tracking_periods')
-                    ->where('id', $this->createPeriod($limit))
+                    ->where('id', $this->createPeriod($legacyLimit, null, $limits))
                     ->first();
             }
 
-            DB::table('liters_tracking_periods')->where('id', $period->id)->update([
-                'liters_limit' => round($limit, 2),
+            $values = [
+                'liters_limit' => round($legacyLimit, 2),
                 'updated_at' => now(),
-            ]);
+            ];
+
+            if ($this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+                $values['tank_limits'] = json_encode($limits);
+            }
+
+            DB::table('liters_tracking_periods')->where('id', $period->id)->update($values);
 
             return DB::table('liters_tracking_periods')->where('id', $period->id)->first();
         });
@@ -130,16 +153,20 @@ class LitersMovementTrackingService
             $endedAt = now();
             $summary = $this->summaryFromRows($period, $transactions);
             $transactionIds = $transactions->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+            $tankLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
             $snapshot = [
                 'period_code' => $period->period_code,
                 'started_at' => $period->started_at,
                 'ended_at' => $endedAt->toDateTimeString(),
                 'liters_limit' => $summary['limit'],
+                'tank_limits' => $tankLimits,
                 'total_liters' => $summary['total_liters'],
                 'total_amount' => $summary['total_amount'],
                 'transaction_count' => $summary['transaction_count'],
                 'fuel_breakdown' => $summary['fuel_breakdown'],
+                'tank_breakdown' => $summary['tank_breakdown'],
                 'staff_breakdown' => $summary['staff_breakdown'],
+                'reached_limits' => $summary['reached_limits'],
                 'transaction_ids' => $transactionIds,
                 'generated_by' => $generatedBy,
                 'generated_at' => $endedAt->toDateTimeString(),
@@ -159,7 +186,11 @@ class LitersMovementTrackingService
                 'updated_at' => $endedAt,
             ]);
 
-            $newPeriodId = $this->createPeriod((float) $period->liters_limit, $endedAt);
+            $newPeriodId = $this->createPeriod(
+                (float) $period->liters_limit,
+                $endedAt,
+                $tankLimits
+            );
 
             return [
                 'period' => DB::table('liters_tracking_periods')->where('id', $period->id)->first(),
@@ -208,28 +239,71 @@ class LitersMovementTrackingService
 
         $period = $this->activePeriod();
 
-        if (! $period || (float) ($period->liters_limit ?? 0) <= 0) {
+        if (! $period) {
             return 0;
         }
 
-        $query = $this->fuelSalesQuery($period, null);
-        $totalLiters = (float) $query->sum('sales.liters');
-
-        return $totalLiters >= (float) $period->liters_limit ? 1 : 0;
+        return count($this->summaryForPeriod($period, null)['reached_limits'] ?? []);
     }
 
-    private function createPeriod(float $limit, $startedAt = null): int
+    public function activeLimitNotifications(int $limit = 10): array
+    {
+        if (! $this->isReady()) {
+            return [];
+        }
+
+        $period = $this->activePeriod();
+
+        if (! $period) {
+            return [];
+        }
+
+        $summary = $this->summaryForPeriod($period, null);
+        $url = Route::has('admin.liters-movement.index')
+            ? route('admin.liters-movement.index', [], false)
+            : '/admin/liters-movement';
+        $sortTimestamp = $period->updated_at ? strtotime((string) $period->updated_at) : time();
+
+        return collect($summary['reached_limits'] ?? [])
+            ->take($limit)
+            ->map(function (array $tank) use ($period, $url, $sortTimestamp) {
+                $limit = (float) ($tank['limit'] ?? 0);
+                $liters = (float) ($tank['liters'] ?? 0);
+
+                return [
+                    'id' => 'liters-movement-' . (int) $period->id . '-' . Str::slug((string) ($tank['limit_key'] ?? $tank['name'] ?? 'tank')),
+                    'type' => 'liters_movement_limit',
+                    'actorName' => 'Liters Movement',
+                    'summary' => 'reached the limit for',
+                    'context' => $tank['name'] ?? $tank['fuel_type'] ?? 'Tank',
+                    'body' => number_format($liters, 2) . ' L recorded against ' . number_format($limit, 2) . ' L. Review and generate the record when ready.',
+                    'badge' => $tank['fuel_type'] ?? 'Fuel',
+                    'time' => 'Active now',
+                    'url' => $url,
+                    'sort_timestamp' => $sortTimestamp,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function createPeriod(float $limit, $startedAt = null, ?array $tankLimits = null): int
     {
         $startedAt ??= now();
-
-        return (int) DB::table('liters_tracking_periods')->insertGetId([
+        $values = [
             'period_code' => $this->generatePeriodCode(),
             'liters_limit' => round($limit, 2),
             'status' => self::ACTIVE_STATUS,
             'started_at' => $startedAt,
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+            $values['tank_limits'] = json_encode($tankLimits ?? $this->defaultStoredTankLimits($limit));
+        }
+
+        return (int) DB::table('liters_tracking_periods')->insertGetId($values);
     }
 
     private function generatePeriodCode(): string
@@ -284,9 +358,14 @@ class LitersMovementTrackingService
             ->select(
                 'sales.id',
                 'sales.user_id',
+                'sales.pump_id',
                 'sales.fuel_type',
                 'sales.liters',
+                'sales.price_applied',
                 'sales.amount',
+                'sales.or_number',
+                'sales.reference_no',
+                'sales.created_at',
                 DB::raw("{$staffExpression} as staff_name")
             )
             ->orderBy('sales.created_at')
@@ -296,7 +375,11 @@ class LitersMovementTrackingService
 
     private function summaryFromRows(object $period, Collection $rows): array
     {
-        $fuelBreakdown = $this->defaultFuelBreakdown();
+        $tanks = $this->preparedTanks();
+        $fuelBreakdown = $this->defaultFuelBreakdown($tanks);
+        $tankBreakdown = $this->defaultTankBreakdown($period, $tanks);
+        $pumpToTank = $this->pumpToTankMap($tanks);
+        $fuelToTank = $this->uniqueFuelToTankMap($tanks);
         $staffBreakdown = [];
         $totalLiters = 0.0;
         $totalAmount = 0.0;
@@ -310,6 +393,7 @@ class LitersMovementTrackingService
             }
 
             $fuel = $this->normalizeFuelType($row->fuel_type ?? '');
+            $fuelKey = $this->normalizeFuelKey($fuel);
 
             if (! isset($fuelBreakdown[$fuel])) {
                 $fuelBreakdown[$fuel] = [
@@ -341,25 +425,64 @@ class LitersMovementTrackingService
             $staffBreakdown[$staffIndex]['amount'] = $this->money($staffBreakdown[$staffIndex]['amount'] + $amount);
             $staffBreakdown[$staffIndex]['transaction_count']++;
 
+            $tankId = $pumpToTank[(int) ($row->pump_id ?? 0)] ?? ($fuelToTank[$fuelKey] ?? null);
+
+            if (! $tankId || ! isset($tankBreakdown[$tankId])) {
+                $tankId = 'unassigned';
+                $this->ensureUnassignedTankBreakdown($tankBreakdown, [
+                    'fuel_type' => $fuel,
+                    'connected_pumps_display' => (int) ($row->pump_id ?? 0) > 0 ? 'P' . (int) $row->pump_id : 'No tank match',
+                ]);
+            }
+
+            $price = $this->transactionPrice($row, $fuel, $liters, $amount);
+            $tankBreakdown[$tankId]['liters'] = $this->liters($tankBreakdown[$tankId]['liters'] + $liters);
+            $tankBreakdown[$tankId]['amount'] = $this->money($tankBreakdown[$tankId]['amount'] + $amount);
+            $tankBreakdown[$tankId]['transaction_count']++;
+            $tankBreakdown[$tankId]['entries'][] = [
+                'id' => (int) ($row->id ?? 0),
+                'created_at' => $row->created_at ?? null,
+                'pump_id' => (int) ($row->pump_id ?? 0),
+                'staff_name' => trim((string) ($row->staff_name ?? 'Staff')) ?: 'Staff',
+                'receipt' => trim((string) ($row->or_number ?? '')),
+                'reference' => trim((string) ($row->reference_no ?? '')),
+                'liters' => $liters,
+                'price_per_liter' => $price,
+                'amount' => $amount,
+            ];
+
             $totalLiters = $this->liters($totalLiters + $liters);
             $totalAmount = $this->money($totalAmount + $amount);
         }
 
-        $limit = $this->liters($period->liters_limit ?? self::DEFAULT_LIMIT);
-        $percent = $limit > 0 ? round(($totalLiters / $limit) * 100, 2) : 0.0;
-        $status = $this->statusFor($totalLiters, $limit);
+        $tankRows = $this->formatTankBreakdown($tankBreakdown);
+        $configuredLimit = $this->liters(collect($tankRows)->sum(fn ($tank) => (float) ($tank['limit'] ?? 0)));
+        $percent = $configuredLimit > 0 ? round(($totalLiters / $configuredLimit) * 100, 2) : 0.0;
+        $reachedLimits = collect($tankRows)
+            ->filter(fn ($tank) => ($tank['status']['key'] ?? null) === 'limit_reached')
+            ->values()
+            ->all();
+        $nearLimits = collect($tankRows)
+            ->filter(fn ($tank) => ($tank['status']['key'] ?? null) === 'near_limit')
+            ->count();
+        $status = $reachedLimits !== []
+            ? $this->statusFor(1, 1)
+            : ($nearLimits > 0 ? $this->statusFor(0.8, 1) : $this->statusFor(0, 1));
 
         return [
             'total_liters' => $totalLiters,
             'total_amount' => $totalAmount,
-            'limit' => $limit,
-            'remaining_liters' => $this->liters(max(0, $limit - $totalLiters)),
-            'over_liters' => $this->liters(max(0, $totalLiters - $limit)),
+            'limit' => $configuredLimit,
+            'configured_limit_count' => collect($tankRows)->filter(fn ($tank) => (bool) ($tank['has_limit'] ?? false))->count(),
+            'remaining_liters' => $configuredLimit > 0 ? $this->liters(max(0, $configuredLimit - $totalLiters)) : 0.0,
+            'over_liters' => $configuredLimit > 0 ? $this->liters(max(0, $totalLiters - $configuredLimit)) : 0.0,
             'percent' => $percent,
             'progress_width' => min(100, max(0, $percent)),
             'transaction_count' => $rows->count(),
             'fuel_breakdown' => array_values($fuelBreakdown),
+            'tank_breakdown' => $tankRows,
             'staff_breakdown' => collect($staffBreakdown)->sortByDesc('liters')->values()->all(),
+            'reached_limits' => $reachedLimits,
             'status' => $status,
         ];
     }
@@ -464,26 +587,43 @@ class LitersMovementTrackingService
 
     private function emptySummary(?object $period): array
     {
-        $limit = $this->liters($period->liters_limit ?? self::DEFAULT_LIMIT);
+        $tanks = $this->preparedTanks();
+        $tankBreakdown = $this->formatTankBreakdown($this->defaultTankBreakdown($period, $tanks));
+        $limit = $this->liters(collect($tankBreakdown)->sum(fn ($tank) => (float) ($tank['limit'] ?? 0)));
 
         return [
             'total_liters' => 0.0,
             'total_amount' => 0.0,
             'limit' => $limit,
+            'configured_limit_count' => collect($tankBreakdown)->filter(fn ($tank) => (bool) ($tank['has_limit'] ?? false))->count(),
             'remaining_liters' => $limit,
             'over_liters' => 0.0,
             'percent' => 0.0,
             'progress_width' => 0.0,
             'transaction_count' => 0,
-            'fuel_breakdown' => array_values($this->defaultFuelBreakdown()),
+            'fuel_breakdown' => array_values($this->defaultFuelBreakdown($tanks)),
+            'tank_breakdown' => $tankBreakdown,
             'staff_breakdown' => [],
-            'status' => $this->statusFor(0, $limit),
+            'reached_limits' => [],
+            'status' => $this->statusFor(0, 1),
         ];
     }
 
-    private function defaultFuelBreakdown(): array
+    private function defaultFuelBreakdown(?Collection $tanks = null): array
     {
-        return collect(self::DEFAULT_FUEL_TYPES)
+        $fuelTypes = collect(self::DEFAULT_FUEL_TYPES);
+
+        if ($tanks) {
+            $fuelTypes = $tanks
+                ->pluck('fuel_type')
+                ->merge($fuelTypes);
+        }
+
+        return $fuelTypes
+            ->map(fn ($fuel) => $this->normalizeFuelType($fuel))
+            ->filter()
+            ->unique()
+            ->sortBy(fn ($fuel) => $this->fuelSortKey($fuel))
             ->mapWithKeys(fn ($fuel) => [$fuel => [
                 'fuel_type' => $fuel,
                 'liters' => 0.0,
@@ -491,6 +631,334 @@ class LitersMovementTrackingService
                 'transaction_count' => 0,
             ]])
             ->all();
+    }
+
+    private function defaultTankBreakdown(?object $period, Collection $tanks): array
+    {
+        $limits = $this->storedTankLimitsForPeriod($period, $tanks);
+
+        return $tanks
+            ->mapWithKeys(function (array $tank) use ($limits) {
+                $limitKey = $this->tankLimitKey($tank);
+                $fuelType = $this->normalizeFuelType($tank['fuel_type'] ?? '');
+                $limit = array_key_exists($limitKey, $limits)
+                    ? $limits[$limitKey]
+                    : $this->defaultLimitForFuel($fuelType);
+
+                return [
+                    (int) $tank['id'] => [
+                        'id' => (int) $tank['id'],
+                        'limit_key' => $limitKey,
+                        'name' => $tank['name'],
+                        'fuel_type' => $fuelType,
+                        'connected_pumps_display' => $tank['connected_pumps_display'],
+                        'price_per_liter' => $this->priceForFuel($fuelType),
+                        'limit' => $limit,
+                        'has_limit' => $limit !== null && (float) $limit > 0,
+                        'liters' => 0.0,
+                        'amount' => 0.0,
+                        'remaining_liters' => $limit !== null ? (float) $limit : 0.0,
+                        'over_liters' => 0.0,
+                        'percent' => 0.0,
+                        'progress_width' => 0.0,
+                        'transaction_count' => 0,
+                        'entries' => [],
+                        'status' => $this->statusFor(0, (float) ($limit ?? 0)),
+                    ],
+                ];
+            })
+            ->all();
+    }
+
+    private function formatTankBreakdown(array $tankRows): array
+    {
+        return collect($tankRows)
+            ->map(function (array $tank) {
+                $limit = $tank['limit'];
+                $hasLimit = $limit !== null && (float) $limit > 0;
+                $liters = $this->liters($tank['liters'] ?? 0);
+                $amount = $this->money($tank['amount'] ?? 0);
+                $limitValue = $hasLimit ? $this->liters($limit) : null;
+                $percent = $hasLimit ? round(($liters / $limitValue) * 100, 2) : 0.0;
+
+                $tank['liters'] = $liters;
+                $tank['amount'] = $amount;
+                $tank['price_per_liter'] = $this->money($tank['price_per_liter'] ?? 0);
+                $tank['limit'] = $limitValue;
+                $tank['has_limit'] = $hasLimit;
+                $tank['remaining_liters'] = $hasLimit ? $this->liters(max(0, $limitValue - $liters)) : 0.0;
+                $tank['over_liters'] = $hasLimit ? $this->liters(max(0, $liters - $limitValue)) : 0.0;
+                $tank['percent'] = $percent;
+                $tank['progress_width'] = min(100, max(0, $percent));
+                $tank['transaction_count'] = (int) ($tank['transaction_count'] ?? 0);
+                $tank['entries'] = collect($tank['entries'] ?? [])->sortBy('created_at')->values()->all();
+                $tank['status'] = $this->statusFor($liters, (float) ($limitValue ?? 0));
+
+                return $tank;
+            })
+            ->sortBy(fn ($tank) => $this->fuelSortKey($tank['fuel_type']) . '-' . str_pad((string) ($tank['id'] ?? 0), 6, '0', STR_PAD_LEFT))
+            ->values()
+            ->all();
+    }
+
+    private function ensureUnassignedTankBreakdown(array &$tankRows, array $context = []): void
+    {
+        if (isset($tankRows['unassigned'])) {
+            return;
+        }
+
+        $fuelType = $this->normalizeFuelType($context['fuel_type'] ?? 'N/A');
+
+        $tankRows['unassigned'] = [
+            'id' => 'unassigned',
+            'limit_key' => 'unassigned',
+            'name' => 'Unassigned',
+            'fuel_type' => $fuelType,
+            'connected_pumps_display' => $context['connected_pumps_display'] ?? 'No tank match',
+            'price_per_liter' => $this->priceForFuel($fuelType),
+            'limit' => null,
+            'has_limit' => false,
+            'liters' => 0.0,
+            'amount' => 0.0,
+            'remaining_liters' => 0.0,
+            'over_liters' => 0.0,
+            'percent' => 0.0,
+            'progress_width' => 0.0,
+            'transaction_count' => 0,
+            'entries' => [],
+            'status' => $this->statusFor(0, 0),
+        ];
+    }
+
+    private function preparedTanks(): Collection
+    {
+        if (! $this->hasTable('tanks')) {
+            return collect();
+        }
+
+        return DB::table('tanks')
+            ->when($this->hasColumn('tanks', 'id'), fn ($query) => $query->orderBy('id'))
+            ->get()
+            ->filter(function ($tank) {
+                $status = strtolower(trim((string) ($tank->status ?? '')));
+
+                return $status === '' || $status === 'active';
+            })
+            ->map(function ($tank) {
+                $fuelType = $this->normalizeFuelType($tank->fuel_type ?? 'N/A');
+                $pumpNumbers = $this->tankPumpNumbers($tank);
+
+                return [
+                    'id' => (int) ($tank->id ?? 0),
+                    'name' => ($tank->name ?? null) ?: $fuelType,
+                    'fuel_type' => $fuelType,
+                    'connected_pump_numbers' => $pumpNumbers,
+                    'connected_pumps_display' => $pumpNumbers->isEmpty()
+                        ? 'N/A'
+                        : $pumpNumbers->map(fn ($pumpNumber) => 'P' . $pumpNumber)->implode(', '),
+                ];
+            })
+            ->sortBy(fn ($tank) => $this->fuelSortKey($tank['fuel_type']) . '-' . str_pad((string) $tank['id'], 6, '0', STR_PAD_LEFT))
+            ->values();
+    }
+
+    private function tankPumpNumbers($tank): Collection
+    {
+        $connectedPumps = trim((string) ($tank->connected_pumps ?? ''));
+        $fuelKey = $this->normalizeFuelKey($tank->fuel_type ?? '');
+
+        $pumpNumbers = collect(preg_split('/\s*,\s*/', $connectedPumps, -1, PREG_SPLIT_NO_EMPTY))
+            ->map(function ($pumpLabel) {
+                preg_match('/\d+/', (string) $pumpLabel, $matches);
+
+                return isset($matches[0]) ? (int) $matches[0] : null;
+            })
+            ->filter(fn ($pumpNumber) => $pumpNumber !== null && $pumpNumber > 0);
+
+        if ($pumpNumbers->isEmpty()) {
+            $pumpNumbers = match ($fuelKey) {
+                'premium' => collect([1, 3]),
+                'regular' => collect([2, 4]),
+                'diesel' => collect([5, 6]),
+                default => collect(),
+            };
+        }
+
+        return $pumpNumbers->unique()->values();
+    }
+
+    private function pumpToTankMap(Collection $tanks): array
+    {
+        $map = [];
+
+        foreach ($tanks as $tank) {
+            foreach ($tank['connected_pump_numbers'] as $pumpNumber) {
+                $pumpNumber = (int) $pumpNumber;
+
+                if ($pumpNumber > 0 && ! isset($map[$pumpNumber])) {
+                    $map[$pumpNumber] = (int) $tank['id'];
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    private function uniqueFuelToTankMap(Collection $tanks): array
+    {
+        $counts = [];
+        $map = [];
+
+        foreach ($tanks as $tank) {
+            $fuel = $this->normalizeFuelKey($tank['fuel_type']);
+
+            if ($fuel === '') {
+                continue;
+            }
+
+            $counts[$fuel] = ($counts[$fuel] ?? 0) + 1;
+            $map[$fuel] = (int) $tank['id'];
+        }
+
+        foreach ($counts as $fuel => $count) {
+            if ($count > 1) {
+                unset($map[$fuel]);
+            }
+        }
+
+        return $map;
+    }
+
+    private function storedTankLimitsForPeriod(?object $period, Collection $tanks): array
+    {
+        $stored = [];
+
+        if ($period && $this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+            $decoded = json_decode((string) ($period->tank_limits ?? ''), true);
+            $stored = is_array($decoded) ? $this->sanitizeTankLimits($decoded) : [];
+        }
+
+        if ($stored !== []) {
+            return $stored;
+        }
+
+        return $tanks
+            ->mapWithKeys(function (array $tank) use ($period) {
+                $fuelType = $this->normalizeFuelType($tank['fuel_type'] ?? '');
+                $legacyLimit = (float) ($period->liters_limit ?? self::DEFAULT_LIMIT);
+
+                return [$this->tankLimitKey($tank) => $this->defaultLimitForFuel($fuelType, $legacyLimit)];
+            })
+            ->all();
+    }
+
+    private function defaultStoredTankLimits(float $legacyLimit): array
+    {
+        return $this->preparedTanks()
+            ->mapWithKeys(fn (array $tank) => [
+                $this->tankLimitKey($tank) => $this->defaultLimitForFuel($tank['fuel_type'], $legacyLimit),
+            ])
+            ->all();
+    }
+
+    private function sanitizeTankLimits(array $limits): array
+    {
+        $sanitized = [];
+
+        foreach ($limits as $key => $value) {
+            $key = trim((string) $key);
+
+            if ($key === '') {
+                continue;
+            }
+
+            if ($value === null || $value === '') {
+                $sanitized[$key] = null;
+                continue;
+            }
+
+            $numeric = round((float) $value, 2);
+            $sanitized[$key] = $numeric > 0 ? $numeric : null;
+        }
+
+        return $sanitized;
+    }
+
+    private function legacyLimitFromLimits(array $limits, Collection $tanks): float
+    {
+        foreach ($tanks as $tank) {
+            if ($this->normalizeFuelKey($tank['fuel_type']) !== 'regular') {
+                continue;
+            }
+
+            $key = $this->tankLimitKey($tank);
+
+            if (isset($limits[$key]) && (float) $limits[$key] > 0) {
+                return (float) $limits[$key];
+            }
+        }
+
+        foreach ($limits as $value) {
+            if ($value !== null && (float) $value > 0) {
+                return (float) $value;
+            }
+        }
+
+        return self::DEFAULT_LIMIT;
+    }
+
+    private function tankLimitKey(array $tank): string
+    {
+        return 'tank:' . (int) ($tank['id'] ?? 0);
+    }
+
+    private function defaultLimitForFuel($fuelType, ?float $legacyLimit = null): ?float
+    {
+        $fuelKey = $this->normalizeFuelKey($fuelType);
+
+        if ($fuelKey === 'regular' && $legacyLimit !== null && $legacyLimit > 0) {
+            return round($legacyLimit, 2);
+        }
+
+        return self::DEFAULT_FUEL_LIMITS[$fuelKey] ?? null;
+    }
+
+    private function priceForFuel($fuelType): float
+    {
+        return $this->currentFuelPrices()[$this->normalizeFuelKey($fuelType)] ?? 0.0;
+    }
+
+    private function currentFuelPrices(): array
+    {
+        if ($this->fuelPrices !== null) {
+            return $this->fuelPrices;
+        }
+
+        if (! $this->hasTable('fuel_prices')) {
+            return $this->fuelPrices = [];
+        }
+
+        return $this->fuelPrices = DB::table('fuel_prices')
+            ->get()
+            ->mapWithKeys(fn ($row) => [
+                $this->normalizeFuelKey($row->fuel_type ?? '') => $this->money($row->price_per_liter ?? 0),
+            ])
+            ->all();
+    }
+
+    private function transactionPrice($row, string $fuelType, float $liters, float $amount): float
+    {
+        $price = (float) ($row->price_applied ?? 0);
+
+        if ($price <= 0 && $liters > 0 && $amount > 0) {
+            $price = $amount / $liters;
+        }
+
+        if ($price <= 0) {
+            $price = $this->priceForFuel($fuelType);
+        }
+
+        return $this->money($price);
     }
 
     private function statusFor(float $totalLiters, float $limit): array
@@ -517,10 +985,14 @@ class LitersMovementTrackingService
 
         return [
             'key' => 'normal',
-            'label' => 'Normal',
-            'badge_class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
-            'progress_class' => 'bg-success-500',
-            'border_class' => 'border-success-200 bg-success-50/60 dark:border-success-500/25 dark:bg-success-500/10',
+            'label' => $limit > 0 ? 'Normal' : 'No Limit',
+            'badge_class' => $limit > 0
+                ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'
+                : 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
+            'progress_class' => $limit > 0 ? 'bg-success-500' : 'bg-gray-400',
+            'border_class' => $limit > 0
+                ? 'border-success-200 bg-success-50/60 dark:border-success-500/25 dark:bg-success-500/10'
+                : 'border-gray-200 bg-gray-50/70 dark:border-gray-800 dark:bg-white/[0.02]',
         ];
     }
 
@@ -537,10 +1009,39 @@ class LitersMovementTrackingService
         }
 
         if (str_contains($value, 'regular') || str_contains($value, 'unleaded')) {
-            return 'Regular';
+            return 'Unleaded';
         }
 
         return trim((string) $fuelType) !== '' ? ucfirst((string) $fuelType) : 'N/A';
+    }
+
+    private function normalizeFuelKey($fuelType): string
+    {
+        $value = strtolower(trim((string) $fuelType));
+
+        if (str_contains($value, 'diesel')) {
+            return 'diesel';
+        }
+
+        if (str_contains($value, 'premium')) {
+            return 'premium';
+        }
+
+        if (str_contains($value, 'regular') || str_contains($value, 'unleaded')) {
+            return 'regular';
+        }
+
+        return $value;
+    }
+
+    private function fuelSortKey($fuelType): string
+    {
+        return match ($this->normalizeFuelKey($fuelType)) {
+            'regular' => '10',
+            'premium' => '20',
+            'diesel' => '30',
+            default => '90-' . strtolower((string) $fuelType),
+        };
     }
 
     private function decodeSnapshot($snapshot): array
@@ -554,31 +1055,55 @@ class LitersMovementTrackingService
     {
         return $this->hasTable('liters_tracking_periods')
             && $this->hasTable('sales')
+            && $this->hasTable('tanks')
+            && $this->hasTable('fuel_prices')
             && $this->hasColumn('sales', 'liters_tracking_period_id')
             && $this->hasColumn('sales', 'user_id')
+            && $this->hasColumn('sales', 'pump_id')
             && $this->hasColumn('sales', 'liters')
             && $this->hasColumn('sales', 'fuel_type')
             && $this->hasColumn('sales', 'amount')
-            && $this->hasColumn('sales', 'created_at');
+            && $this->hasColumn('sales', 'created_at')
+            && $this->hasColumn('tanks', 'id')
+            && $this->hasColumn('tanks', 'fuel_type')
+            && $this->hasColumn('tanks', 'connected_pumps')
+            && $this->hasColumn('fuel_prices', 'fuel_type')
+            && $this->hasColumn('fuel_prices', 'price_per_liter');
     }
 
     private function missingRequirements(): array
     {
         $missing = [];
 
-        if (! $this->hasTable('liters_tracking_periods')) {
-            $missing[] = 'liters_tracking_periods';
+        foreach (['liters_tracking_periods', 'sales', 'tanks', 'fuel_prices'] as $table) {
+            if (! $this->hasTable($table)) {
+                $missing[] = $table;
+            }
         }
 
         if (! $this->hasTable('sales')) {
-            $missing[] = 'sales';
-
             return $missing;
         }
 
-        foreach (['liters_tracking_period_id', 'user_id', 'liters', 'fuel_type', 'amount', 'created_at'] as $column) {
+        foreach (['liters_tracking_period_id', 'user_id', 'pump_id', 'liters', 'fuel_type', 'amount', 'created_at'] as $column) {
             if (! $this->hasColumn('sales', $column)) {
                 $missing[] = "sales.{$column}";
+            }
+        }
+
+        if ($this->hasTable('tanks')) {
+            foreach (['id', 'fuel_type', 'connected_pumps'] as $column) {
+                if (! $this->hasColumn('tanks', $column)) {
+                    $missing[] = "tanks.{$column}";
+                }
+            }
+        }
+
+        if ($this->hasTable('fuel_prices')) {
+            foreach (['fuel_type', 'price_per_liter'] as $column) {
+                if (! $this->hasColumn('fuel_prices', $column)) {
+                    $missing[] = "fuel_prices.{$column}";
+                }
             }
         }
 

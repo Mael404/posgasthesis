@@ -56,6 +56,12 @@
                     'url' => $defaultUrl,
                 ],
                 [
+                    'label' => 'Liters Movement',
+                    'url' => \Illuminate\Support\Facades\Route::has('admin.liters-movement.index')
+                        ? route('admin.liters-movement.index', [], false)
+                        : '/admin/liters-movement',
+                ],
+                [
                     'label' => 'Announcements',
                     'url' => \Illuminate\Support\Facades\Route::has('admin.announcements.index')
                         ? route('admin.announcements.index', [], false)

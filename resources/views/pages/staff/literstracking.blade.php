@@ -145,7 +145,9 @@
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 @foreach ($summary['fuel_breakdown'] as $fuel)
-                    @php($style = $fuelStyle($fuel['fuel_type'] ?? ''))
+                    @php
+                        $style = $fuelStyle($fuel['fuel_type'] ?? '');
+                    @endphp
                     <article class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                         <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">
                             <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>

@@ -39,13 +39,21 @@ class LitersMovementController extends Controller
     public function updateLimit(Request $request, LitersMovementTrackingService $tracking): RedirectResponse
     {
         $validated = $request->validate([
-            'liters_limit' => ['required', 'numeric', 'min:1', 'max:99999999'],
+            'liters_limit' => ['nullable', 'numeric', 'min:1', 'max:99999999'],
+            'tank_limits' => ['nullable', 'array'],
+            'tank_limits.*' => ['nullable', 'numeric', 'min:1', 'max:99999999'],
         ]);
 
         try {
-            $tracking->updateActiveLimit((float) $validated['liters_limit']);
+            $tankLimits = $validated['tank_limits'] ?? [];
 
-            return back()->with('success', 'Liters limit updated.');
+            if ($tankLimits === [] && isset($validated['liters_limit'])) {
+                $tankLimits = ['legacy' => (float) $validated['liters_limit']];
+            }
+
+            $tracking->updateActiveLimits($tankLimits);
+
+            return back()->with('success', 'Tank liters limits updated.');
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage())->withInput();
         }

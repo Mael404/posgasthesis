@@ -12,7 +12,10 @@
             'progress_width' => 0,
             'transaction_count' => 0,
             'fuel_breakdown' => [],
+            'tank_breakdown' => [],
             'staff_breakdown' => [],
+            'reached_limits' => [],
+            'configured_limit_count' => 0,
             'status' => [
                 'key' => 'normal',
                 'label' => 'Normal',
@@ -29,6 +32,8 @@
         $historyItems = $history instanceof \Illuminate\Contracts\Pagination\Paginator
             ? collect($history->items())
             : collect($history);
+        $tankBreakdown = collect($summary['tank_breakdown'] ?? []);
+        $reachedLimits = collect($summary['reached_limits'] ?? []);
         $missingRequirements = $missingRequirements ?? [];
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
@@ -61,18 +66,46 @@
             $fuel = strtolower((string) $fuel);
 
             if (str_contains($fuel, 'diesel')) {
-                return ['badge' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400', 'dot' => 'bg-warning-500'];
+                return [
+                    'badge' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
+                    'dot' => 'bg-warning-500',
+                    'bar' => 'bg-warning-500',
+                    'border' => 'border-warning-300 dark:border-warning-500/40',
+                    'soft' => 'bg-warning-50/70 dark:bg-warning-500/10',
+                    'header' => 'bg-warning-500 text-gray-950',
+                ];
             }
 
             if (str_contains($fuel, 'regular') || str_contains($fuel, 'unleaded')) {
-                return ['badge' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500', 'dot' => 'bg-success-500'];
+                return [
+                    'badge' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
+                    'dot' => 'bg-success-500',
+                    'bar' => 'bg-success-500',
+                    'border' => 'border-success-300 dark:border-success-500/40',
+                    'soft' => 'bg-success-50/70 dark:bg-success-500/10',
+                    'header' => 'bg-success-500 text-white',
+                ];
             }
 
             if (str_contains($fuel, 'premium')) {
-                return ['badge' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400', 'dot' => 'bg-error-500'];
+                return [
+                    'badge' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400',
+                    'dot' => 'bg-error-500',
+                    'bar' => 'bg-error-500',
+                    'border' => 'border-error-300 dark:border-error-500/40',
+                    'soft' => 'bg-error-50/70 dark:bg-error-500/10',
+                    'header' => 'bg-error-500 text-white',
+                ];
             }
 
-            return ['badge' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400', 'dot' => 'bg-brand-500'];
+            return [
+                'badge' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400',
+                'dot' => 'bg-brand-500',
+                'bar' => 'bg-brand-500',
+                'border' => 'border-brand-300 dark:border-brand-500/40',
+                'soft' => 'bg-brand-50/70 dark:bg-brand-500/10',
+                'header' => 'bg-brand-500 text-white',
+            ];
         };
 
         $paymentStyle = function ($type) {
@@ -132,9 +165,10 @@
             </div>
         @endif
 
-        @if (($summary['status']['key'] ?? '') === 'limit_reached')
+        @if ($reachedLimits->isNotEmpty())
             <div class="rounded-xl border border-error-200 bg-error-50 p-4 text-theme-sm text-error-800 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-                Active liters movement reached {{ number_format((float) $summary['total_liters'], 2) }} L against the {{ number_format((float) $summary['limit'], 2) }} L limit.
+                <span class="font-semibold">Tank limit reached:</span>
+                {{ $reachedLimits->map(fn ($tank) => ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank') . ' (' . number_format((float) ($tank['liters'] ?? 0), 2) . ' L / ' . number_format((float) ($tank['limit'] ?? 0), 2) . ' L)')->implode(', ') }}.
             </div>
         @endif
 
@@ -150,16 +184,31 @@
 
                 @if (! $missingRequirements)
                     <div class="grid grid-cols-1 gap-3">
-                        <form method="POST" action="{{ route('admin.liters-movement.limit') }}" class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                        <form method="POST" action="{{ route('admin.liters-movement.limit') }}" class="space-y-3">
                             @csrf
-                            <label class="min-w-0 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                <span>Liters Limit</span>
-                                <input type="number" name="liters_limit" min="1" step="0.01" value="{{ old('liters_limit', $summary['limit']) }}" class="mt-1.5 {{ $inputClass }}">
-                            </label>
-                            <button type="submit" class="{{ $primaryButtonClass }} sm:self-end">
-                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5 9.2 16.7 19 6.9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                Update
-                            </button>
+                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                @foreach ($tankBreakdown as $tank)
+                                    @php
+                                        $style = $fuelStyle($tank['fuel_type'] ?? '');
+                                        $limitKey = $tank['limit_key'] ?? '';
+                                        $oldLimit = old("tank_limits.{$limitKey}", ($tank['has_limit'] ?? false) ? ($tank['limit'] ?? '') : '');
+                                    @endphp
+                                    <label class="min-w-0 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                        <span class="flex items-center gap-2">
+                                            <span class="h-2 w-2 rounded-full {{ $style['dot'] }}"></span>
+                                            {{ $tank['fuel_type'] ?? 'Fuel' }}
+                                        </span>
+                                        <input type="number" name="tank_limits[{{ $limitKey }}]" min="1" step="0.01" value="{{ $oldLimit }}" placeholder="No limit" class="mt-1.5 {{ $inputClass }}">
+                                    </label>
+                                @endforeach
+                            </div>
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <p class="{{ $captionClass }}">Leave a tank blank to skip limit alerts for that tank.</p>
+                                <button type="submit" class="{{ $primaryButtonClass }}">
+                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5 9.2 16.7 19 6.9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    Update Limits
+                                </button>
+                            </div>
                         </form>
 
                         <form x-ref="generateForm" method="POST" action="{{ route('admin.liters-movement.generate') }}" class="hidden">
@@ -181,18 +230,18 @@
                 <p class="mt-1 {{ $captionClass }}">&#8369;{{ number_format((float) $summary['total_amount'], 2) }}</p>
             </article>
             <article class="{{ $cardClass }}">
-                <p class="{{ $labelClass }}">Liters Limit</p>
+                <p class="{{ $labelClass }}">Configured Limits</p>
                 <p class="{{ $valueClass }}">{{ number_format((float) $summary['limit'], 2) }} L</p>
-                <p class="mt-1 {{ $captionClass }}">{{ number_format((float) $summary['percent'], 2) }}% used</p>
+                <p class="mt-1 {{ $captionClass }}">{{ number_format((int) ($summary['configured_limit_count'] ?? 0)) }} active tank limit{{ (int) ($summary['configured_limit_count'] ?? 0) === 1 ? '' : 's' }}</p>
             </article>
             <article class="{{ $cardClass }}">
-                <p class="{{ $labelClass }}">Remaining Liters</p>
+                <p class="{{ $labelClass }}">Remaining Before Limits</p>
                 <p class="{{ $valueClass }}">{{ number_format((float) $summary['remaining_liters'], 2) }} L</p>
-                <p class="mt-1 {{ $captionClass }}">{{ (float) $summary['over_liters'] > 0 ? number_format((float) $summary['over_liters'], 2) . ' L over limit' : 'Before limit' }}</p>
+                <p class="mt-1 {{ $captionClass }}">{{ (float) $summary['over_liters'] > 0 ? number_format((float) $summary['over_liters'], 2) . ' L over configured limits' : 'Across configured tanks' }}</p>
             </article>
             <article class="{{ $cardClass }} {{ $summary['status']['border_class'] }}">
-                <p class="{{ $labelClass }}">Status</p>
-                <p class="{{ $valueClass }}">{{ $summary['status']['label'] }}</p>
+                <p class="{{ $labelClass }}">Reached Tanks</p>
+                <p class="{{ $valueClass }}">{{ number_format($reachedLimits->count()) }}</p>
                 <p class="mt-1 {{ $captionClass }}">{{ number_format((int) $summary['transaction_count']) }} active transaction{{ (int) $summary['transaction_count'] === 1 ? '' : 's' }}</p>
             </article>
         </section>
@@ -200,43 +249,91 @@
         <section class="{{ $cardClass }}">
             <div class="mb-4 flex items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Current Progress</h2>
-                    <p class="mt-1 {{ $captionClass }}">{{ number_format((float) $summary['total_liters'], 2) }} of {{ number_format((float) $summary['limit'], 2) }} liters</p>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
+                    <p class="mt-1 {{ $captionClass }}">Active tracking period by tank limit.</p>
                 </div>
-                <span class="text-theme-sm font-semibold tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) $summary['percent'], 2) }}%</span>
             </div>
-            <div class="h-3 overflow-hidden rounded-full bg-gray-100 dark:bg-white/[0.06]">
-                <div class="h-full rounded-full {{ $summary['status']['progress_class'] }}" style="width: {{ $summary['progress_width'] }}%"></div>
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                @foreach ($tankBreakdown as $tank)
+                    @php
+                        $style = $fuelStyle($tank['fuel_type'] ?? '');
+                    @endphp
+                    <div class="rounded-xl border p-4 {{ $style['border'] }} {{ $style['soft'] }}">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $tank['name'] ?? 'Tank' }}</p>
+                                <p class="mt-1 {{ $captionClass }}">{{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
+                            </div>
+                            <span class="shrink-0 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $tank['status']['badge_class'] ?? '' }}">{{ $tank['status']['label'] ?? 'Normal' }}</span>
+                        </div>
+                        <div class="mt-4 flex items-end justify-between gap-4">
+                            <p class="text-xl font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }} L</p>
+                            <p class="{{ $captionClass }}">{{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L limit' : 'No limit' }}</p>
+                        </div>
+                        <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-white/[0.08]">
+                            <div class="h-full rounded-full {{ $style['bar'] }}" style="width: {{ $tank['progress_width'] ?? 0 }}%"></div>
+                        </div>
+                    </div>
+                @endforeach
             </div>
         </section>
 
-        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
-            <div class="{{ $cardClass }} xl:col-span-5">
-                <div class="mb-5">
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Fuel Breakdown</h2>
-                    <p class="mt-1 {{ $captionClass }}">Active tracking totals by fuel type.</p>
-                </div>
-                <div class="space-y-3">
-                    @foreach ($summary['fuel_breakdown'] as $fuel)
-                        @php($style = $fuelStyle($fuel['fuel_type'] ?? ''))
-                        <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                            <div class="flex items-center justify-between gap-4">
-                                <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">
-                                    <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
-                                    {{ $fuel['fuel_type'] }}
-                                </span>
-                                <span class="text-theme-xs text-gray-500 dark:text-gray-400">{{ number_format((int) $fuel['transaction_count']) }} txn</span>
-                            </div>
-                            <div class="mt-4 flex items-end justify-between gap-4">
-                                <p class="text-xl font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) $fuel['liters'], 2) }} L</p>
-                                <p class="{{ $captionClass }}">&#8369;{{ number_format((float) $fuel['amount'], 2) }}</p>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
+        <section class="space-y-4">
+            <div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
+                <p class="mt-1 {{ $captionClass }}">Quantity, price, and totals separated by tank for the active period.</p>
             </div>
 
-            <div class="{{ $cardClass }} xl:col-span-7">
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                @foreach ($tankBreakdown as $tank)
+                    @php
+                        $style = $fuelStyle($tank['fuel_type'] ?? '');
+                        $entries = collect($tank['entries'] ?? []);
+                    @endphp
+                    <article class="{{ $cardClass }} overflow-hidden p-0">
+                        <div class="px-5 py-4 {{ $style['header'] }}">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <p class="truncate text-base font-semibold">{{ $tank['fuel_type'] ?? 'Fuel' }}</p>
+                                    <p class="mt-1 truncate text-theme-xs opacity-90">{{ $tank['name'] ?? 'Tank' }} | {{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
+                                </div>
+                                <span class="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-theme-xs font-semibold">
+                                    {{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L' : 'No limit' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+                            <div class="px-4 py-2">Qty (L)</div>
+                            <div class="px-4 py-2 text-right">Price</div>
+                            <div class="px-4 py-2 text-right">Total</div>
+                        </div>
+
+                        <div class="max-h-[360px] overflow-y-auto">
+                            @forelse ($entries as $entry)
+                                <div class="grid grid-cols-3 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
+                                    <div class="px-4 py-2.5 tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
+                                    <div class="px-4 py-2.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($entry['price_per_liter'] ?? 0), 2) }}</div>
+                                    <div class="px-4 py-2.5 text-right tabular-nums font-medium text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['amount'] ?? 0), 2) }}</div>
+                                </div>
+                            @empty
+                                <div class="px-4 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                    No active-period records.
+                                </div>
+                            @endforelse
+                        </div>
+
+                        <div class="grid grid-cols-3 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
+                            <div class="px-4 py-3 tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
+                            <div class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($tank['price_per_liter'] ?? 0), 2) }}</div>
+                            <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['amount'] ?? 0), 2) }}</div>
+                        </div>
+                    </article>
+                @endforeach
+            </div>
+        </section>
+
+        <section class="{{ $cardClass }}">
                 <div class="mb-5">
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Staff Breakdown</h2>
                     <p class="mt-1 {{ $captionClass }}">Active tracking totals grouped by staff.</p>
@@ -277,7 +374,6 @@
                         </table>
                     </div>
                 </div>
-            </div>
         </section>
 
         <section class="{{ $cardClass }}">
