@@ -192,7 +192,7 @@
                     <p class="mt-1 {{ $captionClass }}">Review remittances, pump readings, collections, discounts, and settlement variances.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div data-shift-reconciliation-summary class="grid grid-cols-2 gap-3 sm:grid-cols-5">
                     <div class="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
                         <p class="{{ $labelClass }}">Total</p>
                         <p class="mt-1 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($summary['total']) }}</p>
@@ -223,7 +223,7 @@
             @endif
         </section>
 
-        <section class="{{ $cardClass }} overflow-hidden">
+        <section data-shift-reconciliation-list class="{{ $cardClass }} overflow-hidden">
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement Queue</h2>
@@ -345,6 +345,8 @@
                 </div>
             @endif
         </section>
+
+        <script type="application/json" id="reconciliationRowsData">@json($rowPayloads)</script>
     </div>
 
     <div id="reconciliationToast" class="fixed right-4 top-24 z-[100400] hidden max-w-sm rounded-xl border border-gray-200 bg-white px-4 py-3 text-theme-sm shadow-theme-lg dark:border-gray-800 dark:bg-gray-900">
@@ -539,17 +541,20 @@
 
 @push('scripts')
     <script>
-        const reconciliationRows = @json($rowPayloads);
+        let reconciliationRows = @json($rowPayloads);
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || @json(csrf_token());
         const detailsUrl = @json(url('/admin/reconciliation/details'));
         const approveUrl = @json(route('admin.reconcile.approve'));
         const voidApprovalUrl = @json(route('admin.reconcile.voidApproval'));
         const rejectUrl = @json(route('admin.reconcile.reject'));
         const remarksUrl = @json(route('admin.reconcile.remarks'));
+        const reconciliationRefreshInterval = 5000;
         const moneyFormatter = new Intl.NumberFormat('en-PH', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });
+        let reconciliationRefreshTimer = null;
+        let reconciliationRefreshInFlight = false;
 
         function esc(value) {
             const element = document.createElement('textarea');
@@ -697,6 +702,95 @@
             } catch (error) {
                 showToast(payload);
             }
+        }
+
+        function rowsFromDocument(sourceDocument = document) {
+            const script = sourceDocument.querySelector('#reconciliationRowsData');
+
+            if (!script) {
+                return null;
+            }
+
+            try {
+                return JSON.parse(script.textContent || '{}');
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function syncReconciliationRows(sourceDocument) {
+            const rows = rowsFromDocument(sourceDocument);
+
+            if (rows === null) {
+                return;
+            }
+
+            reconciliationRows = rows;
+
+            const currentScript = document.querySelector('#reconciliationRowsData');
+            const freshScript = sourceDocument.querySelector('#reconciliationRowsData');
+
+            if (currentScript && freshScript) {
+                currentScript.textContent = freshScript.textContent;
+            }
+        }
+
+        function replaceReconciliationRegion(sourceDocument, selector) {
+            const current = document.querySelector(selector);
+            const fresh = sourceDocument.querySelector(selector);
+
+            if (!current || !fresh) {
+                return false;
+            }
+
+            current.innerHTML = fresh.innerHTML;
+
+            return true;
+        }
+
+        async function refreshReconciliationLive(options = {}) {
+            if (reconciliationRefreshInFlight) {
+                return;
+            }
+
+            reconciliationRefreshInFlight = true;
+
+            try {
+                const response = await fetch(window.location.href, {
+                    headers: {
+                        'Accept': 'text/html',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    cache: 'no-store',
+                    credentials: 'same-origin'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Unable to refresh shift readings.');
+                }
+
+                const html = await response.text();
+                const sourceDocument = new DOMParser().parseFromString(html, 'text/html');
+                const didReplaceSummary = replaceReconciliationRegion(sourceDocument, '[data-shift-reconciliation-summary]');
+                const didReplaceList = replaceReconciliationRegion(sourceDocument, '[data-shift-reconciliation-list]');
+
+                if (!didReplaceSummary && !didReplaceList) {
+                    throw new Error('Shift reading live regions were not found.');
+                }
+
+                syncReconciliationRows(sourceDocument);
+            } catch (error) {
+                if (options.showErrors) {
+                    showToast(error.message || 'Unable to refresh shift readings.', 'error');
+                }
+            } finally {
+                reconciliationRefreshInFlight = false;
+            }
+        }
+
+        function startReconciliationLivePolling() {
+            window.clearInterval(reconciliationRefreshTimer);
+            reconciliationRefreshTimer = window.setInterval(refreshReconciliationLive, reconciliationRefreshInterval);
         }
 
         function setButtonLoading(button, isLoading, loadingText = 'Saving...') {
@@ -906,35 +1000,35 @@
             const litersDiff = Number(reading[`pump${pump}_dispensed_liters`]) || 0;
 
             return `
-                <div class="rounded-lg border border-gray-100 p-3 dark:border-gray-800">
-                    <div class="mb-2 flex items-center justify-between gap-3">
-                        <span class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pump ${pump}</span>
+                <div class="rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                    <div class="mb-3 flex items-center justify-between gap-3">
+                        <span class="text-base font-semibold text-gray-800 dark:text-white/90">Pump ${pump}</span>
                         <span class="rounded-full bg-gray-100 px-2 py-0.5 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">${pumpFuel(pump)}</span>
                     </div>
-                    <div class="grid grid-cols-2 gap-2 text-theme-xs sm:grid-cols-3">
+                    <div class="grid grid-cols-2 gap-3 text-theme-sm sm:grid-cols-3">
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Open Sales</p>
-                            <p class="mt-0.5 font-medium tabular-nums text-gray-800 dark:text-white/90">${peso(salesStart)}</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-gray-800 dark:text-white/90">${peso(salesStart)}</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Close Sales</p>
-                            <p class="mt-0.5 font-medium tabular-nums text-gray-800 dark:text-white/90">${peso(salesEnd)}</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-gray-800 dark:text-white/90">${peso(salesEnd)}</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Sales</p>
-                            <p class="mt-0.5 font-semibold tabular-nums text-brand-600 dark:text-brand-400">${peso(salesDiff)}</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">${peso(salesDiff)}</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Open L</p>
-                            <p class="mt-0.5 font-medium tabular-nums text-gray-800 dark:text-white/90">${fnum(litersStart)} L</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-gray-800 dark:text-white/90">${fnum(litersStart)} L</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Close L</p>
-                            <p class="mt-0.5 font-medium tabular-nums text-gray-800 dark:text-white/90">${fnum(litersEnd)} L</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-gray-800 dark:text-white/90">${fnum(litersEnd)} L</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Liters</p>
-                            <p class="mt-0.5 font-semibold tabular-nums text-brand-600 dark:text-brand-400">${fnum(litersDiff)} L</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">${fnum(litersDiff)} L</p>
                         </div>
                     </div>
                 </div>
@@ -1280,6 +1374,7 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             showQueuedToast();
+            startReconciliationLivePolling();
 
             document.querySelectorAll('[data-close-modal]').forEach((button) => {
                 button.addEventListener('click', () => closeModal(button.dataset.closeModal));
@@ -1299,6 +1394,7 @@
                         reconciliationRows[id].admin_remarks = adminRemarks.trim();
                         closeModal('#remarksModal');
                         showToast(data.message || 'Remarks saved.');
+                        refreshReconciliationLive();
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });
@@ -1310,8 +1406,8 @@
                 submitAction(approveUrl, { id }, document.getElementById('btnApprove'), 'Approving')
                     .then((data) => {
                         closeModal('#approveModal');
-                        queueToastAfterReload(data.message || 'Settlement approved.');
-                        window.location.reload();
+                        showToast(data.message || 'Settlement approved.');
+                        refreshReconciliationLive({ showErrors: true });
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });
@@ -1332,8 +1428,8 @@
                 }, document.getElementById('btnReject'), 'Rejecting')
                     .then((data) => {
                         closeModal('#rejectModal');
-                        queueToastAfterReload(data.message || 'Settlement rejected.');
-                        window.location.reload();
+                        showToast(data.message || 'Settlement rejected.');
+                        refreshReconciliationLive({ showErrors: true });
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });
@@ -1354,8 +1450,8 @@
                 }, document.getElementById('btnVoidApproval'), 'Undoing')
                     .then((data) => {
                         closeModal('#voidApprovalModal');
-                        queueToastAfterReload(data.message || 'Approval undone.');
-                        window.location.reload();
+                        showToast(data.message || 'Approval undone.');
+                        refreshReconciliationLive({ showErrors: true });
                     })
                     .catch((error) => showToast(error.message, 'error'));
             });

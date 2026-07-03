@@ -211,7 +211,7 @@ class MenuHelper
                         'activePatterns' => ['/inventory/tank-management'],
                     ],
                     [
-                        'name' => 'Stock In',
+                        'name' => 'Log Delivery',
                         'path' => self::routePath('inventory.stock.index', '/inventory/stock-in'),
                         'activePatterns' => ['/inventory/stock-in'],
                     ],

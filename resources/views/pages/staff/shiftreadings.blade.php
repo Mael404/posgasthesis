@@ -224,6 +224,14 @@
                 $latestReadingLabel = null;
             }
         }
+
+        $staffShiftLiveState = [
+            'prevReadings' => $prevReadings ?? [],
+            'latestReadingExists' => ! empty($latestReading),
+            'latestSubmitted' => optional($latestReading)->created_at,
+            'latestReadingLabel' => $latestReadingLabel,
+            'liveSales' => $liveSales ?? [],
+        ];
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Shift Readings" />
@@ -313,7 +321,7 @@
                 </div>
             </div>
 
-            <div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div data-staff-shift-live-summary class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div class="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
                     <p class="{{ $labelClass }}">Total</p>
                     <p class="mt-1 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($summary['total']) }}</p>
@@ -333,6 +341,7 @@
             </div>
         </section>
 
+        <div data-staff-shift-live-admin-remarks>
         @if ($unreadAdminRemarks->isNotEmpty())
             <section data-admin-remarks-panel class="rounded-xl border border-error-200 bg-error-50/80 p-4 shadow-theme-xs dark:border-error-500/30 dark:bg-error-500/10">
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -376,8 +385,9 @@
                 @endif
             </section>
         @endif
+        </div>
 
-        <section class="{{ $cardClass }} overflow-hidden">
+        <section data-staff-shift-live-history class="{{ $cardClass }} overflow-hidden">
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement History</h2>
@@ -497,6 +507,8 @@
                 </div>
             @endif
         </section>
+
+        <script type="application/json" data-staff-shift-live-state>@json($staffShiftLiveState)</script>
 
         <div x-show="modal === 'form'" x-cloak class="fixed inset-0 z-[100010] flex items-center justify-center overflow-hidden p-0 sm:p-3">
             <div class="fixed inset-0 bg-gray-950/75 backdrop-blur-md" x-on:click="if (!saving) closeForm()"></div>
@@ -865,8 +877,8 @@
             </div>
         </div>
 
-        <div x-show="modal === 'details'" x-cloak class="fixed inset-0 z-[100010] flex items-stretch justify-stretch overflow-hidden bg-gray-900/60 p-2 backdrop-blur-sm sm:p-4">
-            <div class="absolute inset-0" x-on:click="closeDetails()"></div>
+        <div x-show="modal === 'details'" x-cloak class="fixed inset-0 z-[100200] flex items-stretch justify-stretch overflow-hidden p-2 sm:p-4">
+            <div class="fixed inset-0 bg-gray-950/85 backdrop-blur-md" x-on:click="closeDetails()"></div>
             <div class="relative z-10 flex h-[calc(100vh-1rem)] w-full max-w-none flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 sm:h-[calc(100vh-2rem)]">
                 <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
                     <div class="min-w-0">
@@ -1024,19 +1036,19 @@
 
                                                 <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
                                                     <template x-for="pump in dispenser.pumps" :key="'details-pump-' + pump.id">
-                                                        <article class="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                                                        <article class="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
                                                             <div class="mb-3 flex items-center justify-between gap-3">
                                                                 <div>
-                                                                    <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
+                                                                    <p class="text-base font-semibold text-gray-800 dark:text-white/90" x-text="pump.label"></p>
                                                                     <p class="text-theme-xs text-gray-500 dark:text-gray-400" x-text="pump.fuel"></p>
                                                                 </div>
                                                                 <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300" x-text="pump.fuel"></span>
                                                             </div>
-                                                            <div class="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
+                                                            <div class="space-y-2 sm:grid sm:grid-cols-2 sm:gap-3 sm:space-y-0 xl:grid-cols-3">
                                                                 <template x-for="row in pumpDetailRows(pump.id)" :key="row.label">
-                                                                    <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2" x-bind:class="row.highlight ? 'bg-gray-50 dark:bg-white/[0.03]' : ''">
-                                                                        <span class="text-theme-xs uppercase text-gray-500 dark:text-gray-400" x-text="row.label"></span>
-                                                                        <span class="text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="row.value"></span>
+                                                                    <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5" x-bind:class="row.highlight ? 'bg-gray-50 dark:bg-white/[0.03]' : ''">
+                                                                        <span class="text-theme-sm font-medium text-gray-500 dark:text-gray-400" x-text="row.label"></span>
+                                                                        <span class="text-base font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="row.value"></span>
                                                                     </div>
                                                                 </template>
                                                             </div>
@@ -1219,13 +1231,106 @@
                 },
                 details: { loading: false, error: '', reading: null, images: [], breakdowns: {} },
                 lightbox: { open: false, url: '' },
+                liveRefreshTimer: null,
+                liveRefreshInFlight: false,
                 init() {
                     this.resetForm();
                     this.initDatePickers();
                     this.restoreToast();
+                    this.startLivePolling();
 
                     if (this.initialReadingId > 0) {
                         this.$nextTick(() => this.viewDetails(this.initialReadingId));
+                    }
+                },
+                startLivePolling() {
+                    window.clearInterval(this.liveRefreshTimer);
+                    this.liveRefreshTimer = window.setInterval(() => this.refreshLiveSections(), 5000);
+                },
+                async refreshLiveSections(options = {}) {
+                    if (this.liveRefreshInFlight) {
+                        return;
+                    }
+
+                    this.liveRefreshInFlight = true;
+
+                    try {
+                        const response = await fetch(window.location.href, {
+                            headers: {
+                                'Accept': 'text/html',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            cache: 'no-store',
+                            credentials: 'same-origin'
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Unable to refresh shift readings.');
+                        }
+
+                        const html = await response.text();
+                        const sourceDocument = new DOMParser().parseFromString(html, 'text/html');
+                        const refreshed = [
+                            this.replaceLiveRegion(sourceDocument, '[data-staff-shift-live-summary]'),
+                            this.replaceLiveRegion(sourceDocument, '[data-staff-shift-live-admin-remarks]'),
+                            this.replaceLiveRegion(sourceDocument, '[data-staff-shift-live-history]')
+                        ].some(Boolean);
+
+                        if (!refreshed) {
+                            throw new Error('Shift reading live regions were not found.');
+                        }
+
+                        this.applyLiveState(sourceDocument);
+                    } catch (error) {
+                        if (options.showErrors) {
+                            this.showNotice('error', error.message || 'Unable to refresh shift readings.');
+                        }
+                    } finally {
+                        this.liveRefreshInFlight = false;
+                    }
+                },
+                replaceLiveRegion(sourceDocument, selector) {
+                    const current = document.querySelector(selector);
+                    const fresh = sourceDocument.querySelector(selector);
+
+                    if (!current || !fresh) {
+                        return false;
+                    }
+
+                    current.innerHTML = fresh.innerHTML;
+                    this.$nextTick(() => this.initLiveRegion(current));
+
+                    return true;
+                },
+                initLiveRegion(region) {
+                    if (window.Alpine && typeof window.Alpine.initTree === 'function') {
+                        window.Alpine.initTree(region);
+                    }
+                },
+                applyLiveState(sourceDocument) {
+                    const sourceState = sourceDocument.querySelector('[data-staff-shift-live-state]');
+
+                    if (!sourceState) {
+                        return;
+                    }
+
+                    try {
+                        const state = JSON.parse(sourceState.textContent || '{}');
+                        config.prevReadings = state.prevReadings || {};
+                        config.latestSubmitted = state.latestSubmitted || null;
+                        config.latestReadingLabel = state.latestReadingLabel || '';
+                        config.liveSales = Array.isArray(state.liveSales) ? state.liveSales : [];
+                        this.latestReadingExists = Boolean(state.latestReadingExists);
+                        this.latestReadingLabel = config.latestReadingLabel;
+                        this.liveSales = config.liveSales;
+
+                        const currentState = document.querySelector('[data-staff-shift-live-state]');
+
+                        if (currentState) {
+                            currentState.textContent = sourceState.textContent;
+                        }
+                    } catch (error) {
+                        return;
                     }
                 },
                 initDatePickers() {
@@ -1688,7 +1793,11 @@
                             return;
                         }
 
-                        this.reloadWithToast(data.message || 'Settlement submitted.');
+                        this.saving = false;
+                        this.modal = null;
+                        this.resetForm();
+                        this.showNotice('success', data.message || 'Settlement submitted.');
+                        await this.refreshLiveSections({ showErrors: true });
                     } catch (error) {
                         this.showNotice('error', 'An unexpected error occurred.');
                     } finally {
@@ -2115,7 +2224,8 @@
                             return;
                         }
 
-                        this.reloadWithToast(data.message || 'Settlement voided.');
+                        this.showNotice('success', data.message || 'Settlement voided.');
+                        await this.refreshLiveSections({ showErrors: true });
                     } catch (error) {
                         this.showNotice('error', 'An unexpected error occurred.');
                     }
@@ -2142,13 +2252,8 @@
                     this.toast = { open: false, message: '', timer: null };
                 },
                 reloadWithToast(message) {
-                    try {
-                        window.sessionStorage.setItem('staff-reading-toast', message);
-                    } catch (error) {
-                        this.showToast(message);
-                    }
-
-                    window.location.reload();
+                    this.showToast(message);
+                    this.refreshLiveSections({ showErrors: true });
                 },
                 restoreToast() {
                     try {
