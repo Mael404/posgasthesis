@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Services\LitersMovementTrackingService;
 use App\Support\StaffHeaderNotifications;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,7 @@ class MenuHelper
     private static ?int $pendingShiftReadingsCount = null;
     private static ?int $unreadAnnouncementsCount = null;
     private static ?int $unreadShiftReadingRemarksCount = null;
+    private static ?int $litersMovementAlertCount = null;
 
     public static function getMainNavItems()
     {
@@ -88,6 +90,7 @@ class MenuHelper
         return match (Auth::user()?->role) {
             'vp_admin' => [
                 'admin-pending-shift-readings' => self::getPendingShiftReadingsCount(),
+                'admin-liters-movement' => self::getLitersMovementAlertCount(),
             ],
             'staff' => [
                 'staff-shift-readings' => self::getUnreadShiftReadingRemarksCount(),
@@ -161,6 +164,7 @@ class MenuHelper
     private static function getVpAdminItems(): array
     {
         $pendingReadingsCount = self::getPendingShiftReadingsCount();
+        $litersMovementAlertCount = self::getLitersMovementAlertCount();
 
         return [
             [
@@ -188,6 +192,13 @@ class MenuHelper
                             '/sales',
                             '/sales/*',
                         ],
+                    ],
+                    [
+                        'name' => 'Liters Movement',
+                        'path' => self::routePath('admin.liters-movement.index', '/admin/liters-movement'),
+                        'badge' => $litersMovementAlertCount,
+                        'badgeKey' => 'admin-liters-movement',
+                        'activePatterns' => ['/admin/liters-movement', '/admin/liters-movement/*'],
                     ],
                     [
                         'name' => 'Shift Reconciliation',
@@ -294,6 +305,12 @@ class MenuHelper
                 'activePatterns' => ['/staff/pump-station', '/staff/pump-station/*', '/staff/pump', '/staff/pump/*'],
             ],
             [
+                'icon' => 'charts',
+                'name' => 'Liters Tracking',
+                'path' => self::routePath('staff.liters-tracking.index', '/staff/liters-tracking'),
+                'activePatterns' => ['/staff/liters-tracking', '/staff/liters-tracking/*'],
+            ],
+            [
                 'icon' => 'task',
                 'name' => 'Shift Readings',
                 'path' => self::routePath('staff.readings.index', '/staff/shift-readings'),
@@ -398,6 +415,20 @@ class MenuHelper
                 ->unreadShiftReadingRemarksCount($userId);
         } catch (Throwable) {
             return self::$unreadShiftReadingRemarksCount = 0;
+        }
+    }
+
+    private static function getLitersMovementAlertCount(): int
+    {
+        if (self::$litersMovementAlertCount !== null) {
+            return self::$litersMovementAlertCount;
+        }
+
+        try {
+            return self::$litersMovementAlertCount = app(LitersMovementTrackingService::class)
+                ->activeLimitReachedWithoutCreatingPeriod();
+        } catch (Throwable) {
+            return self::$litersMovementAlertCount = 0;
         }
     }
 

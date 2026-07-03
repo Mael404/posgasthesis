@@ -13,6 +13,7 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
+use App\Http\Controllers\LitersMovementController;
 use App\Http\Controllers\PrintedTransactionController;
 use App\Http\Controllers\ShiftReconciliationController;
 use App\Http\Controllers\StaffAnnouncementController;
@@ -77,6 +78,12 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/admin/sales/print', [AdminReportController::class, 'print'])
             ->name('admin.sales.print');
+
+        Route::prefix('admin/liters-movement')->name('admin.liters-movement.')->group(function () {
+            Route::get('/', [LitersMovementController::class, 'admin'])->name('index');
+            Route::post('/limit', [LitersMovementController::class, 'updateLimit'])->name('limit');
+            Route::post('/generate', [LitersMovementController::class, 'generate'])->name('generate');
+        });
 
         Route::prefix('admin/reconciliation')->name('admin.reconcile.')->group(function () {
             Route::get('/', [ShiftReconciliationController::class, 'index'])->name('index');
@@ -246,6 +253,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/sales-history', [StaffSalesController::class, 'index'])->name('sales.history');
 
         Route::get('/sales-history/print', [StaffSalesController::class, 'print'])->name('sales.print');
+
+        Route::get('/liters-tracking', [LitersMovementController::class, 'staff'])->name('liters-tracking.index');
 
         Route::prefix('printed-transactions')->name('printed-transactions.')->group(function () {
             Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');

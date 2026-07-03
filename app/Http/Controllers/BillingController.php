@@ -1322,9 +1322,18 @@ class BillingController extends Controller
                     === Carbon::parse($reversal->transaction_date)->toDateString();
             });
 
-            $original = $sameDateCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
-                ?? $candidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
-                ?? $sameDateCandidates->filter(fn ($row) => (int) $row->id > (int) $reversal->id)->first();
+            $referencedCandidates = $this->reversalReferencedChargeCandidates($candidates, $reversal);
+
+            if ($referencedCandidates->isNotEmpty()) {
+                $original = $referencedCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? $referencedCandidates->first();
+            } elseif ($this->reversalReferenceTokens($reversal) !== []) {
+                continue;
+            } else {
+                $original = $sameDateCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? $candidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? $sameDateCandidates->filter(fn ($row) => (int) $row->id > (int) $reversal->id)->first();
+            }
 
             if ($original) {
                 $skipIds[] = (int) $reversal->id;
@@ -1337,6 +1346,58 @@ class BillingController extends Controller
         return $ledgerRows
             ->reject(fn ($row) => in_array((int) $row->id, $skipIds, true))
             ->values();
+    }
+
+    private function reversalReferencedChargeCandidates($candidates, $reversal)
+    {
+        $referenceTokens = $this->reversalReferenceTokens($reversal);
+
+        if ($referenceTokens === []) {
+            return collect();
+        }
+
+        return $candidates->filter(function ($row) use ($referenceTokens) {
+            $rowReferences = array_values(array_filter([
+                trim((string) ($row->reference_no ?? '')),
+                trim((string) ($row->or_number ?? '')),
+            ], fn ($value) => $value !== ''));
+
+            foreach ($rowReferences as $rowReference) {
+                foreach ($referenceTokens as $referenceToken) {
+                    if (strcasecmp($rowReference, $referenceToken) === 0) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        });
+    }
+
+    private function reversalReferenceTokens($reversal): array
+    {
+        $tokens = [];
+        $referenceNo = trim((string) ($reversal->reference_no ?? ''));
+        $description = (string) ($reversal->description ?? '');
+
+        if (preg_match('/^EDIT-\d+$/i', $referenceNo)) {
+            $tokens[] = $referenceNo;
+        }
+
+        foreach ([
+            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*([A-Z0-9][A-Z0-9-]*)/i',
+            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*([^()]+?)(?:\s*\(|$)/i',
+            '/\bfrom\s+([A-Z0-9][A-Z0-9-]*)/i',
+            '/\bfrom\s+([^()]+?)(?:\s*\(|$)/i',
+        ] as $pattern) {
+            if (preg_match_all($pattern, $description, $matches)) {
+                foreach ($matches[1] as $match) {
+                    $tokens[] = trim((string) $match, " \t\n\r\0\x0B.,;:");
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($tokens, fn ($token) => $token !== '')));
     }
 
     private function findMatchingSaleForLedger($ledger)
