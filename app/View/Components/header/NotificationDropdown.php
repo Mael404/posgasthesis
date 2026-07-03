@@ -1,6 +1,6 @@
 <?php
 
-namespace App\View\Components\header;
+namespace App\View\Components\Header;
 
 use App\Support\AdminHeaderNotifications;
 use App\Support\StaffHeaderNotifications;

@@ -1,4 +1,71 @@
 {{-- Notification Dropdown Component --}}
+@php
+    $hasComponentData = isset($notifications)
+        || isset($notificationsUrl)
+        || isset($seenStorageKey)
+        || isset($viewLinks);
+
+    $notifications = $notifications ?? [];
+    $notificationsUrl = $notificationsUrl ?? null;
+    $title = $title ?? 'Notifications';
+    $summaryLabel = $summaryLabel ?? 'recent admin alerts';
+    $emptyTitle = $emptyTitle ?? 'No new notifications';
+    $emptySubtitle = $emptySubtitle ?? 'Staff comments and pending readings will appear here.';
+    $seenStorageKey = $seenStorageKey ?? 'adminHeaderNotificationSeenKeys';
+    $defaultUrl = $defaultUrl ?? '#';
+    $viewLinks = $viewLinks ?? [];
+
+    if (! $hasComponentData && auth()->check()) {
+        $role = auth()->user()->role ?? null;
+
+        if ($role === 'staff') {
+            $userId = (int) auth()->id();
+            $notifications = app(\App\Support\StaffHeaderNotifications::class)->get($userId);
+            $notificationsUrl = \Illuminate\Support\Facades\Route::has('staff.notifications.header')
+                ? route('staff.notifications.header', [], false)
+                : null;
+            $summaryLabel = 'staff alerts';
+            $emptySubtitle = 'Announcements, admin replies, and shift-reading remarks will appear here.';
+            $seenStorageKey = 'staffHeaderNotificationSeenKeys-' . $userId;
+            $defaultUrl = \Illuminate\Support\Facades\Route::has('staff.notifications.index')
+                ? route('staff.notifications.index', [], false)
+                : '/staff/notifications';
+            $viewLinks = [
+                [
+                    'label' => 'Notifications',
+                    'url' => $defaultUrl,
+                ],
+                [
+                    'label' => 'Shift Readings',
+                    'url' => \Illuminate\Support\Facades\Route::has('staff.readings.index')
+                        ? route('staff.readings.index', [], false)
+                        : '/staff/shift-readings',
+                ],
+            ];
+        } elseif ($role === 'vp_admin') {
+            $notifications = app(\App\Support\AdminHeaderNotifications::class)->get();
+            $notificationsUrl = \Illuminate\Support\Facades\Route::has('admin.shift-readings.notifications')
+                ? route('admin.shift-readings.notifications', [], false)
+                : null;
+            $defaultUrl = \Illuminate\Support\Facades\Route::has('admin.reconcile.index')
+                ? route('admin.reconcile.index', [], false)
+                : '/admin/reconciliation';
+            $viewLinks = [
+                [
+                    'label' => 'Shift Readings',
+                    'url' => $defaultUrl,
+                ],
+                [
+                    'label' => 'Announcements',
+                    'url' => \Illuminate\Support\Facades\Route::has('admin.announcements.index')
+                        ? route('admin.announcements.index', [], false)
+                        : '/admin/announcements',
+                ],
+            ];
+        }
+    }
+@endphp
+
 @once
     <script>
         window.headerNotificationDropdown = function(initialNotifications, notificationUrl, options = {}) {
