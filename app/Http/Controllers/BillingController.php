@@ -1322,12 +1322,13 @@ class BillingController extends Controller
                     === Carbon::parse($reversal->transaction_date)->toDateString();
             });
 
-            $referencedCandidates = $this->reversalReferencedChargeCandidates($candidates, $reversal);
+            $referenceTokens = $this->reversalReferenceTokens($reversal);
+            $referencedCandidates = $this->reversalReferencedChargeCandidates($candidates, $reversal, $referenceTokens);
 
             if ($referencedCandidates->isNotEmpty()) {
                 $original = $referencedCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
                     ?? $referencedCandidates->first();
-            } elseif ($this->reversalReferenceTokens($reversal) !== []) {
+            } elseif ($this->hasStrictReversalReferenceToken($referenceTokens)) {
                 continue;
             } else {
                 $original = $sameDateCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
@@ -1348,9 +1349,9 @@ class BillingController extends Controller
             ->values();
     }
 
-    private function reversalReferencedChargeCandidates($candidates, $reversal)
+    private function reversalReferencedChargeCandidates($candidates, $reversal, ?array $referenceTokens = null)
     {
-        $referenceTokens = $this->reversalReferenceTokens($reversal);
+        $referenceTokens = $referenceTokens ?? $this->reversalReferenceTokens($reversal);
 
         if ($referenceTokens === []) {
             return collect();
@@ -1374,6 +1375,17 @@ class BillingController extends Controller
         });
     }
 
+    private function hasStrictReversalReferenceToken(array $referenceTokens): bool
+    {
+        foreach ($referenceTokens as $referenceToken) {
+            if (! preg_match('/^\d+$/', $referenceToken)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function reversalReferenceTokens($reversal): array
     {
         $tokens = [];
@@ -1386,18 +1398,36 @@ class BillingController extends Controller
 
         foreach ([
             '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*([A-Z0-9][A-Z0-9-]*)/i',
-            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*([^()]+?)(?:\s*\(|$)/i',
+            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*(.+)$/i',
             '/\bfrom\s+([A-Z0-9][A-Z0-9-]*)/i',
-            '/\bfrom\s+([^()]+?)(?:\s*\(|$)/i',
+            '/\bfrom\s+(.+)$/i',
         ] as $pattern) {
             if (preg_match_all($pattern, $description, $matches)) {
                 foreach ($matches[1] as $match) {
-                    $tokens[] = trim((string) $match, " \t\n\r\0\x0B.,;:");
+                    $cleanToken = $this->cleanReversalReferenceToken($match);
+
+                    if ($cleanToken !== null) {
+                        $tokens[] = $cleanToken;
+                    }
                 }
             }
         }
 
         return array_values(array_unique(array_filter($tokens, fn ($token) => $token !== '')));
+    }
+
+    private function cleanReversalReferenceToken($value): ?string
+    {
+        $value = trim((string) $value, " \t\n\r\0\x0B.,;:");
+
+        do {
+            $previous = $value;
+            $value = preg_replace('/\s+\((?:Total\s+)?(?:Discount|Excess):[^)]*\)\s*$/i', '', $value);
+        } while ($value !== $previous);
+
+        $value = trim((string) $value, " \t\n\r\0\x0B.,;:");
+
+        return $value === '' ? null : $value;
     }
 
     private function findMatchingSaleForLedger($ledger)
