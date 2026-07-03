@@ -35,6 +35,7 @@ class User extends Authenticatable
         'phone',
         'password',
         'password_changed_at',
+        'last_auto_backup_downloaded_on',
         'status',
     ];
 
@@ -58,6 +59,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password_changed_at' => 'datetime',
+            'last_auto_backup_downloaded_on' => 'date',
             'password' => 'hashed',
         ];
     }

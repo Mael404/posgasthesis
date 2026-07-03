@@ -498,6 +498,7 @@
         let customMetricStats = @json($customMetricStats);
         let customPeriodLabels = @json($customPeriodLabels);
         let metricDateFilterNames = @json($metricDateFilterNames);
+        const automaticBackupDownloadUrl = @json(session('admin_auto_backup_download_url'));
 
         const dashboardState = {
             netSalesSource: 'sales_table',
@@ -1149,6 +1150,13 @@
 
         initDashboardDatePickers();
         updateAll();
+
+        if (automaticBackupDownloadUrl) {
+            window.setTimeout(function() {
+                window.location.href = automaticBackupDownloadUrl;
+            }, 500);
+        }
+
         setInterval(refreshDashboard, 10000);
         });
     </script>

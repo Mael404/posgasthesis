@@ -1393,7 +1393,7 @@ class AdminDashboardController extends Controller
         return round((float) $value, 2);
     }
 
-    public function backupDatabase()
+    public function backupDatabase(Request $request)
     {
         try {
             $connectionName = config('database.default');
@@ -1457,6 +1457,8 @@ class AdminDashboardController extends Controller
             }
 
             if (File::isFile($storagePath) && File::size($storagePath) > 0) {
+                $this->rememberAutomaticBackupDownload($request);
+
                 return response()
                     ->download($storagePath, $filename, ['Content-Type' => 'application/sql'])
                     ->deleteFileAfterSend(true);
@@ -1485,6 +1487,19 @@ class AdminDashboardController extends Controller
         }
 
         return 'mysqldump';
+    }
+
+    private function rememberAutomaticBackupDownload(Request $request): void
+    {
+        $user = $request->user();
+
+        if ($request->query('auto') !== 'daily-login' || ! $user || ! Schema::hasColumn('users', 'last_auto_backup_downloaded_on')) {
+            return;
+        }
+
+        $user->forceFill([
+            'last_auto_backup_downloaded_on' => Carbon::now(config('app.timezone', 'Asia/Manila'))->toDateString(),
+        ])->save();
     }
 
     private function mysqldumpEnvironment(string $binary): array
