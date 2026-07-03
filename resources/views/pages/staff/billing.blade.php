@@ -27,13 +27,18 @@
         $textareaClass = 'min-h-[84px] w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
-        $printIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15';
-        $payIconButtonClass = 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-success-200 bg-success-50 text-success-700 shadow-theme-xs transition hover:border-success-300 hover:bg-success-100 dark:border-success-500/25 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/15';
+        $printIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15';
+        $payIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-success-200 bg-success-50 text-success-700 shadow-theme-xs transition hover:border-success-300 hover:bg-success-100 dark:border-success-500/25 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/15';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $thCompactClass = 'px-3 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $thCompactNumberClass = 'px-3 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
+        $tdCustomerClass = 'px-3 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
+        $tdCompactClass = 'px-3 py-4 align-middle text-theme-xs text-gray-700 dark:text-gray-300';
+        $tdCompactNumberClass = 'px-3 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 5.25V3.75M16 5.25V3.75M4.75 9.25h14.5M6 20.25h12A2.25 2.25 0 0 0 20.25 18V7A2.25 2.25 0 0 0 18 4.75H6A2.25 2.25 0 0 0 3.75 7v11A2.25 2.25 0 0 0 6 20.25Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 
         $dateLabel = function ($value, $format = 'M d, Y') {
@@ -259,43 +264,43 @@
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="{{ $activeBillingTab === 'partial' ? 'min-w-[980px]' : 'min-w-[920px]' }} w-full table-fixed">
+                    <table class="w-full table-fixed">
                         @if ($activeBillingTab === 'partial')
                             <colgroup>
-                                <col class="w-[15%]">
-                                <col class="w-[24%]">
-                                <col class="w-[15%]">
-                                <col class="w-[15%]">
-                                <col class="w-[15%]">
-                                <col class="w-[8%]">
-                                <col class="w-[8%]">
+                                <col class="w-[13%]">
+                                <col class="w-[25%]">
+                                <col class="w-[13%]">
+                                <col class="w-[13%]">
+                                <col class="w-[14%]">
+                                <col class="w-[10%]">
+                                <col class="w-[12%]">
                             </colgroup>
                         @else
                             <colgroup>
-                                <col class="w-[15%]">
+                                <col class="w-[13%]">
                                 <col class="w-[25%]">
                                 <col class="w-[16%]">
+                                <col class="w-[11%]">
                                 <col class="w-[13%]">
-                                <col class="w-[15%]">
-                                <col class="w-[8%]">
-                                <col class="w-[8%]">
+                                <col class="w-[10%]">
+                                <col class="w-[12%]">
                             </colgroup>
                         @endif
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
-                                <th class="{{ $thClass }}">Invoice #</th>
-                                <th class="{{ $thClass }}">Customer</th>
+                                <th class="{{ $thCompactClass }}">Invoice #</th>
+                                <th class="{{ $thCompactClass }}">Customer</th>
                                 @if ($activeBillingTab === 'partial')
-                                    <th class="{{ $thNumberClass }}">Total Billed</th>
-                                    <th class="{{ $thNumberClass }}">Paid So Far</th>
-                                    <th class="{{ $thNumberClass }}">Remaining Bal.</th>
+                                    <th class="{{ $thCompactNumberClass }}">Total Billed</th>
+                                    <th class="{{ $thCompactNumberClass }}">Paid So Far</th>
+                                    <th class="{{ $thCompactNumberClass }}">Remaining Bal.</th>
                                 @else
-                                    <th class="{{ $thClass }}">Period Covered</th>
-                                    <th class="{{ $thClass }}">Due Date</th>
-                                    <th class="{{ $thNumberClass }}">Amount Due</th>
+                                    <th class="{{ $thCompactClass }}">Period Covered</th>
+                                    <th class="{{ $thCompactClass }}">Due Date</th>
+                                    <th class="{{ $thCompactNumberClass }}">Amount Due</th>
                                 @endif
-                                <th class="{{ $thClass }}">Status</th>
-                                <th class="{{ $thClass }}">Action</th>
+                                <th class="{{ $thCompactClass }}">Status</th>
+                                <th class="{{ $thCompactClass }}">Action</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -304,30 +309,30 @@
                                     $invoiceRow = $invoicePayloadFor($invoice);
                                 @endphp
                                 <tr>
-                                    <td class="{{ $tdPrimaryClass }}">{{ $invoiceRow['invoice_number'] }}</td>
-                                    <td class="{{ $tdClass }}">
-                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $invoiceRow['customer_name'] }}</div>
+                                    <td class="{{ $tdCompactClass }} font-medium text-gray-800 dark:text-white/90">{{ $invoiceRow['invoice_number'] }}</td>
+                                    <td class="{{ $tdCustomerClass }}">
+                                        <div class="break-words font-medium leading-snug text-gray-800 dark:text-white/90">{{ $invoiceRow['customer_name'] }}</div>
                                         <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{!! $formatBalanceLabel($invoiceRow['current_balance']) !!}</div>
                                     </td>
                                     @if ($activeBillingTab === 'partial')
-                                        <td class="{{ $tdNumberClass }} font-semibold">&#8369;{{ number_format((float) $invoiceRow['total_amount_due'], 2) }}</td>
-                                        <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">&#8369;{{ number_format((float) $invoiceRow['payments_received'], 2) }}</td>
-                                        <td class="{{ $tdNumberClass }} font-semibold text-error-600 dark:text-error-400">&#8369;{{ number_format((float) $invoiceRow['remaining_balance'], 2) }}</td>
+                                        <td class="{{ $tdCompactNumberClass }} font-semibold">&#8369;{{ number_format((float) $invoiceRow['total_amount_due'], 2) }}</td>
+                                        <td class="{{ $tdCompactNumberClass }} font-semibold text-success-600 dark:text-success-500">&#8369;{{ number_format((float) $invoiceRow['payments_received'], 2) }}</td>
+                                        <td class="{{ $tdCompactNumberClass }} font-semibold text-error-600 dark:text-error-400">&#8369;{{ number_format((float) $invoiceRow['remaining_balance'], 2) }}</td>
                                     @else
-                                        <td class="{{ $tdClass }}">{{ $invoiceRow['period_label'] }}</td>
-                                        <td class="{{ $tdClass }} font-medium text-error-600 dark:text-error-400">{{ $invoiceRow['due_label'] }}</td>
-                                        <td class="{{ $tdNumberClass }} font-semibold text-error-600 dark:text-error-400">&#8369;{{ number_format((float) $invoiceRow['remaining_balance'], 2) }}</td>
+                                        <td class="{{ $tdCompactClass }}">{{ $invoiceRow['period_label'] }}</td>
+                                        <td class="{{ $tdCompactClass }} font-medium text-error-600 dark:text-error-400">{{ $invoiceRow['due_label'] }}</td>
+                                        <td class="{{ $tdCompactNumberClass }} font-semibold text-error-600 dark:text-error-400">&#8369;{{ number_format((float) $invoiceRow['remaining_balance'], 2) }}</td>
                                     @endif
-                                    <td class="{{ $tdClass }}">
+                                    <td class="{{ $tdCompactClass }}">
                                         <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-semibold {{ $statusBadgeClass($invoiceRow['status']) }}">{{ strtoupper($invoiceRow['status']) }}</span>
                                     </td>
-                                    <td class="{{ $tdClass }}">
-                                        <div class="flex min-w-[5.5rem] items-center gap-2">
+                                    <td class="{{ $tdCompactClass }}">
+                                        <div class="flex items-center gap-1.5">
                                             <a href="{{ $invoiceRow['print_url'] }}" target="_blank" class="{{ $printIconButtonClass }}" title="Print invoice" aria-label="Print invoice">
-                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8V4h10v4M7 17H5.75A2.75 2.75 0 0 1 3 14.25v-3.5A2.75 2.75 0 0 1 5.75 8h12.5A2.75 2.75 0 0 1 21 10.75v3.5A2.75 2.75 0 0 1 18.25 17H17M7 14h10v6H7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8V4h10v4M7 17H5.75A2.75 2.75 0 0 1 3 14.25v-3.5A2.75 2.75 0 0 1 5.75 8h12.5A2.75 2.75 0 0 1 21 10.75v3.5A2.75 2.75 0 0 1 18.25 17H17M7 14h10v6H7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                             </a>
                                             <button type="button" x-on:click="openPayment(@js($invoiceRow))" class="{{ $payIconButtonClass }}" title="Process payment" aria-label="Process payment">
-                                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7.75h16v8.5H4v-8.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 12h.01M17 12h.01M12 14.75a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7.75h16v8.5H4v-8.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 12h.01M17 12h.01M12 14.75a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                                             </button>
                                         </div>
                                     </td>

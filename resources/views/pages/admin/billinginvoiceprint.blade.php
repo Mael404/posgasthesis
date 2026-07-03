@@ -411,7 +411,7 @@
                 <table class="header-table">
                     <tr>
                         <td style="width: 20%;">
-                            <img src="{{ asset('img/logojrs.png') }}" alt="JR-M Fuel Station Logo" class="logo">
+                            <img src="{{ asset('images/logojrs.png') }}" alt="JR-M Fuel Station Logo" class="logo">
                         </td>
                         <td style="width: 45%;">
                             <h1 class="company-name">JR-M FUEL STATION</h1>
