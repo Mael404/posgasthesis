@@ -116,11 +116,20 @@
         };
 
         $customerPayload = $customers->map(function ($customer) use ($customerLabel, $customerFuelPrice) {
+            $label = $customerLabel($customer);
+            $businessName = trim((string) ($customer->business_name ?? ''));
+            $ownerName = trim((string) ($customer->owner_name ?? ''));
+            $contactNumber = trim((string) ($customer->contact_number ?? ''));
+            $businessName = strtoupper($businessName) === 'N/A' ? '' : $businessName;
+            $ownerName = strtoupper($ownerName) === 'N/A' ? '' : $ownerName;
+
             return [
                 'id' => (int) $customer->id,
-                'label' => $customerLabel($customer),
-                'business_name' => $customer->business_name,
-                'owner_name' => $customer->owner_name,
+                'label' => $label,
+                'business_name' => $businessName,
+                'owner_name' => $ownerName,
+                'contact_number' => $contactNumber,
+                'search' => strtolower($label . ' ' . $businessName . ' ' . $ownerName . ' ' . $contactNumber),
                 'balance' => round((float) ($customer->current_balance ?? 0), 2),
                 'limit' => round((float) ($customer->credit_limit ?? 0), 2),
                 'prices' => [
@@ -200,16 +209,51 @@
         [x-cloak] { display: none !important; }
 
         .sale-transaction-modal .sale-modal-control {
-            height: 2.75rem;
-            min-height: 2.75rem;
+            height: 2.5rem;
+            min-height: 2.5rem;
             min-width: 0;
-            font-size: 0.9375rem;
-            line-height: 1.375rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
         }
 
         .sale-transaction-modal .sale-modal-affix {
-            height: 2.75rem;
-            font-size: 0.9375rem;
+            height: 2.5rem;
+            font-size: 0.875rem;
+        }
+
+        .sale-transaction-modal .sale-modal-entry-control {
+            height: 3rem;
+            min-height: 3rem;
+            font-size: 1rem;
+            line-height: 1.5rem;
+        }
+
+        .sale-transaction-modal .sale-modal-entry-affix {
+            height: 3rem;
+            font-size: 1rem;
+        }
+
+        .sale-transaction-modal .sale-modal-control:focus {
+            border-color: #12b76a !important;
+            box-shadow: 0 0 0 3px rgba(18, 183, 106, 0.18) !important;
+        }
+
+        .sale-transaction-modal input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
+        .sale-transaction-modal input[type="number"]::-webkit-inner-spin-button,
+        .sale-transaction-modal input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .sale-transaction-modal .bg-brand-500 {
+            background-color: #12b76a !important;
+        }
+
+        .sale-transaction-modal .hover\:bg-brand-600:hover {
+            background-color: #0e9f6e !important;
         }
 
         .sale-modal-digital {
@@ -569,70 +613,155 @@
         </section>
 
         <template x-teleport="body">
-            <div x-show="saleModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-hidden bg-gray-950/75 p-2 backdrop-blur-md sm:p-4">
+            <div x-show="saleModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-hidden bg-gray-950/75 p-1.5 backdrop-blur-md sm:p-3">
                 <div
                     x-on:click.outside="if (!feedbackActive()) closeSaleModal()"
-                    class="sale-transaction-modal flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 max-w-6xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:rounded-2xl">
-                    <div class="flex shrink-0 items-start justify-between gap-3 px-4 py-3 text-white sm:px-5 sm:py-4" :class="fuelTheme(sale.fuel_type).header">
-                        <div class="min-w-0">
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-white/75 sm:text-xs" x-text="sale.id ? 'Edit Transaction' : 'New Transaction'"></p>
-                            <h2 class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-lg font-semibold sm:gap-2 sm:text-xl">
-                                <span class="truncate" x-text="sale.pumpLabel || 'Pump'"></span>
-                                <span class="text-white/55">/</span>
-                                <span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold sm:text-sm" :class="fuelTheme(sale.fuel_type).badge" x-text="sale.fuel_type || 'Fuel'"></span>
-                            </h2>
-                            <p class="mt-1 hidden truncate text-sm text-white/80 sm:block" x-text="sale.mode === 'credit' ? 'Charge this transaction to a customer account.' : 'Record a walk-in transaction.'"></p>
+                    class="sale-transaction-modal flex h-[95dvh] max-h-[95dvh] w-[calc(100vw-0.75rem)] min-w-0 max-w-[100rem] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:w-[92vw] sm:rounded-2xl">
+                    <div class="flex shrink-0 items-start justify-between gap-3 px-4 py-3 text-white sm:px-5 sm:py-3.5" :class="fuelTheme(sale.fuel_type).header">
+                        <div class="flex min-w-0 items-start gap-3">
+                            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-white ring-1 ring-white/20 sm:size-10">
+                                <svg class="size-5 sm:size-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M5.75 20.25h8.5M7 20V5.75C7 4.784 7.784 4 8.75 4h4.5c.966 0 1.75.784 1.75 1.75V20M8.75 8h4.5M15 8.5h1.25c.966 0 1.75.784 1.75 1.75v5.25a1.5 1.5 0 0 0 3 0v-4.25c0-.828-.672-1.5-1.5-1.5H18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-wide text-white/75 sm:text-xs" x-text="sale.id ? 'Edit Transaction' : 'New Transaction'"></p>
+                                <h2 class="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xl font-bold leading-tight sm:gap-2">
+                                    <span class="truncate" x-text="sale.pumpLabel || 'Pump'"></span>
+                                    <span class="text-white/65">/</span>
+                                    <span class="truncate" x-text="sale.fuel_type || 'Fuel'"></span>
+                                </h2>
+                                <p class="mt-0.5 hidden truncate text-xs font-medium text-white/85 md:block" x-text="sale.mode === 'credit' ? 'Charge this transaction to a customer account.' : 'Record a walk-in transaction.'"></p>
+                            </div>
                         </div>
-                        <button type="button" x-on:click="closeSaleModal" class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/85 transition hover:bg-white/20 hover:text-white sm:size-10" aria-label="Close transaction modal">
-                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <button type="button" x-on:click="closeSaleModal" class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/85 transition hover:bg-white/20 hover:text-white sm:size-9" aria-label="Close transaction modal">
+                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <path d="m6.75 6.75 10.5 10.5M17.25 6.75 6.75 17.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                             </svg>
                         </button>
                     </div>
 
                     <form x-on:submit.prevent="submitSale" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:p-4 lg:p-5">
-                    <div class="mb-4 grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
-                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Pump</p>
-                            <p class="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-white/90 sm:text-base">
-                                <span x-text="sale.pumpLabel || 'Pump'"></span>
-                                <span class="text-gray-400">/</span>
-                                <span x-text="sale.fuel_type || 'Fuel'"></span>
-                            </p>
+                    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-white p-2.5 dark:bg-gray-950/30 sm:p-4 lg:p-4">
+                    <div class="mb-3 grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-400">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M5.75 20.25h8.5M7 20V5.75C7 4.784 7.784 4 8.75 4h4.5c.966 0 1.75.784 1.75 1.75V20M8.75 8h4.5M15 8.5h1.25c.966 0 1.75.784 1.75 1.75v5.25a1.5 1.5 0 0 0 3 0v-4.25c0-.828-.672-1.5-1.5-1.5H18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Pump</p>
+                                <p class="mt-0.5 truncate text-sm font-semibold text-gray-800 dark:text-white/90">
+                                    <span x-text="sale.pumpLabel || 'Pump'"></span>
+                                    <span class="text-gray-400">/</span>
+                                    <span x-text="sale.fuel_type || 'Fuel'"></span>
+                                </p>
+                            </div>
                         </div>
-                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Customer</p>
-                            <p class="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-white/90 sm:text-base" x-text="sale.mode === 'credit' ? (selectedCreditCustomer?.label || 'Select customer') : (pricingCustomer()?.label || sale.walkin_name || 'Walk-in customer')"></p>
+                        <div class="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-400">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.75 20.25a7.25 7.25 0 0 1 14.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Customer</p>
+                                <p class="mt-0.5 truncate text-sm font-semibold text-success-700 dark:text-success-400" x-text="sale.mode === 'credit' ? (selectedCreditCustomer?.label || 'Select customer') : (pricingCustomer()?.label || sale.walkin_name || 'Walk-in customer')"></p>
+                            </div>
                         </div>
-                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Liters</p>
-                            <p class="sale-modal-digital mt-1 truncate text-base font-bold text-gray-800 dark:text-white/90 sm:text-lg" x-text="liters().toFixed(2) + ' L'"></p>
+                        <div class="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-400">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M12 3.75s5.25 5.25 5.25 9.5a5.25 5.25 0 1 1-10.5 0c0-4.25 5.25-9.5 5.25-9.5Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.75 13.5a2.25 2.25 0 0 0 2.25 2.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                                </svg>
+                            </span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Liters</p>
+                                <p class="sale-modal-digital mt-0.5 truncate text-base font-bold text-success-700 dark:text-success-400" x-text="liters().toFixed(2) + ' L'"></p>
+                            </div>
                         </div>
-                        <div class="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
-                            <p class="truncate text-xs font-medium uppercase text-gray-500 dark:text-gray-400" x-text="sale.mode === 'credit' ? 'Charge Total' : 'Collect Total'"></p>
-                            <p class="sale-modal-digital mt-1 truncate text-base font-bold text-gray-900 dark:text-white sm:text-lg" x-text="money(totalAmount())"></p>
+                        <div class="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-400">
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M4.75 7.75A2.75 2.75 0 0 1 7.5 5h9a2.75 2.75 0 0 1 2.75 2.75v8.5A2.75 2.75 0 0 1 16.5 19h-9a2.75 2.75 0 0 1-2.75-2.75v-8.5ZM4.75 9h14.5M8 15h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </span>
+                            <div class="min-w-0">
+                                <p class="truncate text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Charge Total</p>
+                                <p class="sale-modal-digital mt-0.5 truncate text-base font-bold text-success-700 dark:text-success-400" x-text="money(totalAmount())"></p>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="mb-4 grid min-w-0 grid-cols-2 gap-1.5 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <button type="button" x-on:click="setSaleMode('credit')" class="min-h-10 min-w-0 rounded-lg px-2 py-2 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('credit')">Credit Customer</button>
-                        <button type="button" x-on:click="setSaleMode('walkin')" class="min-h-10 min-w-0 rounded-lg px-2 py-2 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('walkin')">Walk-In Customer</button>
+                    <div class="mb-3 grid min-w-0 grid-cols-2 gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                        <button type="button" x-on:click="setSaleMode('credit')" class="inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('credit')">
+                            <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.75 20.25a7.25 7.25 0 0 1 14.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="truncate">Credit Customer</span>
+                        </button>
+                        <button type="button" x-on:click="setSaleMode('walkin')" class="inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:px-4" :class="saleModeButtonClass('walkin')">
+                            <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M10.5 5.25h3M9.75 8.25h4.5M10.25 21l.75-5.5-2-3.5 1.5-3.75M13.75 21 13 15.5l2-3.5-1.5-3.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="truncate">Walk-In Customer</span>
+                        </button>
                     </div>
 
-                    <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.85fr)] lg:gap-5">
-                        <div class="min-w-0 space-y-4">
+                    <div class="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(28rem,0.95fr)] xl:gap-4">
+                        <div class="min-w-0 space-y-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
                             <div x-show="sale.mode === 'credit'" x-cloak>
-                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                    <span>Credit Account</span>
-                                    <select x-model="sale.customer_id" x-on:change="syncRegisteredSaleCustomer('credit')" class="sale-modal-control mt-1.5 {{ $selectClass }}" :required="sale.mode === 'credit'">
-                                        <option value="">Select customer</option>
-                                        <template x-for="customer in customers" :key="customer.id">
-                                            <option :value="customer.id" x-text="customer.label"></option>
+                                <div class="relative min-w-0" x-on:click.outside="saleCreditCustomerDropdownOpen = false">
+                                    <span class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Credit Account</span>
+                                    <div class="relative mt-1.5">
+                                        <span class="pointer-events-none absolute left-3 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center text-success-700 dark:text-success-400">
+                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.75 20.25a7.25 7.25 0 0 1 14.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </span>
+                                        <input
+                                            type="search"
+                                            x-model="saleCreditCustomerSearch"
+                                            x-on:focus="saleCreditCustomerDropdownOpen = true"
+                                            x-on:input="handleSaleCustomerInput('credit')"
+                                            x-on:keydown.escape.prevent="saleCreditCustomerDropdownOpen = false"
+                                            class="sale-modal-control {{ $inputClass }} !rounded-xl pl-11 pr-11"
+                                            placeholder="Type company or customer name"
+                                            autocomplete="off"
+                                            :required="sale.mode === 'credit'">
+                                        <button
+                                            type="button"
+                                            x-show="saleCreditCustomerSearch"
+                                            x-on:click="clearSaleCustomer('credit')"
+                                            class="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.05] dark:hover:text-gray-200"
+                                            aria-label="Clear credit customer search">
+                                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                        </button>
+                                    </div>
+                                    <div
+                                        x-show="saleCreditCustomerDropdownOpen"
+                                        x-transition.origin.top
+                                        class="absolute left-0 right-0 z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-lg dark:border-gray-800 dark:bg-gray-900">
+                                        <template x-for="customer in filteredSaleCustomers('credit')" :key="customer.id">
+                                            <button
+                                                type="button"
+                                                x-on:click="selectSaleCustomer(customer, 'credit')"
+                                                class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-white/[0.04]"
+                                                :class="String(sale.customer_id) === String(customer.id) ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300' : 'text-gray-700 dark:text-gray-300'">
+                                                <span class="min-w-0">
+                                                    <span class="block truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="customer.business_name || customer.label"></span>
+                                                    <span class="mt-0.5 block truncate text-theme-xs text-gray-500 dark:text-gray-400" x-text="customerSubtext(customer)"></span>
+                                                </span>
+                                                <span x-show="String(sale.customer_id) === String(customer.id)" class="mt-0.5 text-theme-xs font-medium text-brand-600 dark:text-brand-300">Selected</span>
+                                            </button>
                                         </template>
-                                    </select>
-                                </label>
-                                <div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 sm:text-sm" x-show="selectedCreditCustomer">
+                                        <p x-show="filteredSaleCustomers('credit').length === 0" class="px-3 py-4 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                            No customers match that search.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300" x-show="selectedCreditCustomer">
                                     <div class="flex flex-wrap gap-x-4 gap-y-1">
                                         <span>Balance: <strong x-text="money(selectedCreditCustomer?.balance || 0)"></strong></span>
                                         <span>Limit: <strong x-text="money(selectedCreditCustomer?.limit || 0)"></strong></span>
@@ -641,99 +770,188 @@
                                 </div>
                             </div>
 
-                            <div x-show="sale.mode === 'walkin'" x-cloak class="space-y-4">
-                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                    <span>Registered Customer</span>
-                                    <select x-model="sale.walkin_customer_id" x-on:change="syncRegisteredSaleCustomer('walkin')" class="sale-modal-control mt-1.5 {{ $selectClass }}">
-                                        <option value="">Walk-in or typed name</option>
-                                        <template x-for="customer in customers" :key="customer.id">
-                                            <option :value="customer.id" x-text="customer.label"></option>
+                            <div x-show="sale.mode === 'walkin'" x-cloak class="space-y-3">
+                                <div class="relative min-w-0" x-on:click.outside="saleWalkinCustomerDropdownOpen = false">
+                                    <span class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Registered Customer</span>
+                                    <div class="relative mt-1.5">
+                                        <span class="pointer-events-none absolute left-3 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center text-success-700 dark:text-success-400">
+                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.75 20.25a7.25 7.25 0 0 1 14.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </span>
+                                        <input
+                                            type="search"
+                                            x-model="saleWalkinCustomerSearch"
+                                            x-on:focus="saleWalkinCustomerDropdownOpen = true"
+                                            x-on:input="handleSaleCustomerInput('walkin')"
+                                            x-on:keydown.escape.prevent="saleWalkinCustomerDropdownOpen = false"
+                                            class="sale-modal-control {{ $inputClass }} !rounded-xl pl-11 pr-11"
+                                            placeholder="Type company or customer name"
+                                            autocomplete="off">
+                                        <button
+                                            type="button"
+                                            x-show="saleWalkinCustomerSearch"
+                                            x-on:click="clearSaleCustomer('walkin')"
+                                            class="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.05] dark:hover:text-gray-200"
+                                            aria-label="Clear registered customer search">
+                                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                        </button>
+                                    </div>
+                                    <div
+                                        x-show="saleWalkinCustomerDropdownOpen"
+                                        x-transition.origin.top
+                                        class="absolute left-0 right-0 z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-lg dark:border-gray-800 dark:bg-gray-900">
+                                        <template x-for="customer in filteredSaleCustomers('walkin')" :key="customer.id">
+                                            <button
+                                                type="button"
+                                                x-on:click="selectSaleCustomer(customer, 'walkin')"
+                                                class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-white/[0.04]"
+                                                :class="String(sale.walkin_customer_id) === String(customer.id) ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300' : 'text-gray-700 dark:text-gray-300'">
+                                                <span class="min-w-0">
+                                                    <span class="block truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="customer.business_name || customer.label"></span>
+                                                    <span class="mt-0.5 block truncate text-theme-xs text-gray-500 dark:text-gray-400" x-text="customerSubtext(customer)"></span>
+                                                </span>
+                                                <span x-show="String(sale.walkin_customer_id) === String(customer.id)" class="mt-0.5 text-theme-xs font-medium text-brand-600 dark:text-brand-300">Selected</span>
+                                            </button>
                                         </template>
-                                    </select>
-                                </label>
-                                <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <p x-show="filteredSaleCustomers('walkin').length === 0" class="px-3 py-4 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                            No customers match that search.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
                                     <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                         <span>Customer Name</span>
-                                        <input type="text" x-model="sale.walkin_name" x-on:input="touchSale" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="Walk-in customer">
+                                        <input type="text" x-model="sale.walkin_name" x-on:input="touchSale" class="sale-modal-control mt-1.5 {{ $inputClass }} !rounded-xl" placeholder="Walk-in customer">
                                     </label>
                                     <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                         <span>Plate Number</span>
-                                        <input type="text" x-model="sale.plate_no" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="ABC-1234">
+                                        <input type="text" x-model="sale.plate_no" class="sale-modal-control mt-1.5 {{ $inputClass }} !rounded-xl" placeholder="ABC-1234">
                                     </label>
                                 </div>
                             </div>
 
-                            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                                <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                            <div class="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+                                <label class="block min-w-0 text-xs font-semibold uppercase text-success-700 dark:text-success-400">
                                     <span>Liters Dispensed</span>
-                                    <input type="number" x-model.number="sale.liters" x-on:input="touchSale" min="0.1" step="0.01" class="sale-modal-control sale-modal-digital mt-1.5 {{ $inputClass }} text-right font-bold" placeholder="0.00" required>
+                                    <div class="relative mt-1.5">
+                                        <span class="pointer-events-none absolute left-3 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center text-success-700 dark:text-success-400">
+                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M12 3.75s5.25 5.25 5.25 9.5a5.25 5.25 0 1 1-10.5 0c0-4.25 5.25-9.5 5.25-9.5Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </span>
+                                        <input type="number" x-model.number="sale.liters" x-on:input="touchSale" min="0.1" step="0.01" class="sale-modal-control sale-modal-entry-control sale-modal-digital {{ $inputClass }} !rounded-xl pl-11 pr-10 text-right font-bold" placeholder="0.00" required>
+                                        <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500 dark:text-gray-400">L</span>
+                                    </div>
                                 </label>
                                 <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>OR Number</span>
-                                    <input type="text" x-model="sale.or_number" class="sale-modal-control mt-1.5 {{ $inputClass }}" placeholder="Optional">
+                                    <div class="relative mt-1.5">
+                                        <span class="pointer-events-none absolute left-3 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center text-success-700 dark:text-success-400">
+                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M8 4.75h8A1.25 1.25 0 0 1 17.25 6v13.25L15 18l-2 1.25-2-1.25-2 1.25L6.75 18V6A1.25 1.25 0 0 1 8 4.75ZM9.5 9h5M9.5 12h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </span>
+                                        <input type="text" x-model="sale.or_number" class="sale-modal-control sale-modal-entry-control {{ $inputClass }} !rounded-xl pl-11" placeholder="Optional">
+                                    </div>
                                 </label>
                             </div>
 
-                            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div class="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
                                 <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Manual Discount</span>
-                                    <div class="mt-1.5 flex min-w-0 rounded-lg shadow-theme-xs">
-                                        <span class="sale-modal-affix inline-flex shrink-0 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                        <input type="number" x-model.number="sale.manual_discount" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-digital min-w-0 w-full rounded-r-lg border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
+                                    <div class="mt-1.5 flex min-w-0 rounded-xl shadow-theme-xs">
+                                        <span class="sale-modal-affix sale-modal-entry-affix inline-flex shrink-0 items-center rounded-l-xl border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                        <input type="number" x-model.number="sale.manual_discount" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-entry-control sale-modal-digital min-w-0 w-full rounded-r-xl border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-success-400 focus:outline-hidden focus:ring-3 focus:ring-success-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-success-500" placeholder="0.00">
                                     </div>
                                 </label>
                                 <label class="block min-w-0 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                     <span>Manual Excess</span>
-                                    <div class="mt-1.5 flex min-w-0 rounded-lg shadow-theme-xs">
-                                        <span class="sale-modal-affix inline-flex shrink-0 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                        <input type="number" x-model.number="sale.manual_excess" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-digital min-w-0 w-full rounded-r-lg border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00">
+                                    <div class="mt-1.5 flex min-w-0 rounded-xl shadow-theme-xs">
+                                        <span class="sale-modal-affix sale-modal-entry-affix inline-flex shrink-0 items-center rounded-l-xl border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                        <input type="number" x-model.number="sale.manual_excess" x-on:input="touchSale" min="0" step="0.01" class="sale-modal-control sale-modal-entry-control sale-modal-digital min-w-0 w-full rounded-r-xl border border-gray-300 bg-transparent px-3 py-2 text-right font-semibold text-gray-800 focus:border-success-400 focus:outline-hidden focus:ring-3 focus:ring-success-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-success-500" placeholder="0.00">
                                     </div>
                                 </label>
                             </div>
 
-                            <div x-show="creditWarning" x-cloak class="rounded-lg border border-error-200 bg-error-50 p-3 text-sm font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300" x-text="creditWarning"></div>
+                            <div x-show="creditWarning" x-cloak class="rounded-lg border border-error-200 bg-error-50 p-2.5 text-sm font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300" x-text="creditWarning"></div>
                         </div>
 
-                        <div class="min-w-0 space-y-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4">
-                            <div class="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-1 xl:grid-cols-2">
-                                <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
-                                    <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Standard Price</p>
-                                    <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-800 dark:text-white/90 sm:text-xl" x-text="money(standardPrice()) + ' / L'"></p>
+                        <div class="min-w-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+                            <p class="mb-3 text-xs font-bold uppercase tracking-wide text-success-700 dark:text-success-400">Pricing Details</p>
+
+                            <div class="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-2">
+                                <div class="flex min-w-0 items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                    <span class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+                                        <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                            <path d="M4.75 11.25 12 18.5l7.25-7.25-7.25-7.25H4.75v7.25Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.75 8.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                                        </svg>
+                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Standard Price</p>
+                                        <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-900 dark:text-white" x-text="money(standardPrice()) + ' / L'"></p>
+                                    </div>
                                 </div>
-                                <div class="min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
-                                    <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Applied Price</p>
-                                    <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-xl" x-text="money(appliedPrice()) + ' / L'"></p>
+                                <div class="flex min-w-0 items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                    <span class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-white text-success-700 dark:bg-gray-900 dark:text-success-400">
+                                        <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                            <path d="m7.75 12.25 2.75 2.75 5.75-6.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/>
+                                        </svg>
+                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Applied Price</p>
+                                        <p class="sale-modal-digital mt-1.5 truncate text-lg font-bold text-gray-900 dark:text-white" x-text="money(appliedPrice()) + ' / L'"></p>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="space-y-2">
-                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-gray-800 dark:bg-gray-900">
-                                    <span class="text-gray-500 dark:text-gray-400">Subtotal</span>
-                                    <span class="sale-modal-digital min-w-0 truncate font-bold text-gray-800 dark:text-white/90" x-text="money(subtotalBeforeManual())"></span>
+                            <div class="mt-3 rounded-xl border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+                                <p class="text-xs font-bold uppercase tracking-wide text-success-700 dark:text-success-400">Summary</p>
+                                <div class="mt-3 space-y-2 text-sm">
+                                    <div class="flex min-w-0 items-center justify-between gap-3">
+                                        <span class="text-gray-600 dark:text-gray-300">
+                                            Subtotal (<span x-text="liters().toFixed(2) + ' L'"></span>)
+                                        </span>
+                                        <span class="sale-modal-digital min-w-0 truncate font-semibold text-gray-800 dark:text-white/90" x-text="money(subtotalBeforeManual())"></span>
+                                    </div>
+                                    <div class="flex min-w-0 items-center justify-between gap-3 text-error-600 dark:text-error-400">
+                                        <span>Manual Discount</span>
+                                        <span class="sale-modal-digital min-w-0 truncate font-semibold" x-text="'- ' + money(totalDiscount())"></span>
+                                    </div>
+                                    <div class="flex min-w-0 items-center justify-between gap-3 text-success-700 dark:text-success-400">
+                                        <span>Manual Excess</span>
+                                        <span class="sale-modal-digital min-w-0 truncate font-semibold" x-text="'+ ' + money(totalExcess())"></span>
+                                    </div>
                                 </div>
-                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-success-100 bg-success-50 p-3 text-sm text-success-700 dark:border-success-500/20 dark:bg-success-500/10 dark:text-success-400" x-show="totalDiscount() > 0" x-cloak>
-                                    <span>Total Discount</span>
-                                    <span class="sale-modal-digital min-w-0 truncate font-bold" x-text="'-' + money(totalDiscount())"></span>
-                                </div>
-                                <div class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-400" x-show="totalExcess() > 0" x-cloak>
-                                    <span>Total Excess</span>
-                                    <span class="sale-modal-digital min-w-0 truncate font-bold" x-text="'+' + money(totalExcess())"></span>
-                                </div>
-                            </div>
 
-                            <div class="min-w-0 rounded-xl bg-gray-900 p-4 text-center shadow-theme-sm dark:bg-gray-950">
-                                <p class="truncate text-xs font-semibold uppercase tracking-wide text-white/65" x-text="sale.mode === 'credit' ? 'Total Amount to Charge' : 'Total Amount Collected'"></p>
-                                <p class="sale-modal-digital mt-2 truncate text-2xl font-bold text-white sm:text-3xl" x-text="money(totalAmount())"></p>
+                                <div class="my-3 border-t border-dashed border-gray-300 dark:border-gray-700"></div>
+
+                                <div class="text-center">
+                                    <p class="truncate text-xs font-bold uppercase tracking-wide text-gray-700 dark:text-gray-300" x-text="sale.mode === 'credit' ? 'Total Amount to Charge' : 'Total Amount Collected'"></p>
+                                    <p class="sale-modal-digital mt-2 truncate text-3xl font-bold text-success-700 dark:text-success-400" x-text="money(totalAmount())"></p>
+                                </div>
+
                             </div>
                         </div>
                     </div>
                     </div>
 
-                    <div class="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:justify-end sm:px-4">
-                        <button type="button" x-on:click="closeSaleModal" class="{{ $secondaryButtonClass }} !h-10 px-4 !text-sm sm:!h-11">Cancel</button>
-                        <button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-theme-xs transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-11" :class="saleSubmitButtonClass()" :disabled="savingSale || !!creditWarning">
-                            <span x-text="savingSale ? 'Saving...' : (sale.id ? 'Update Transaction' : 'Record Transaction')"></span>
-                        </button>
+                    <div class="sticky bottom-0 z-10 flex shrink-0 flex-col gap-2 border-t border-gray-200 bg-white/95 p-3 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                        <div class="inline-flex min-w-0 items-center gap-2 rounded-lg bg-success-50 px-3 py-1.5 text-xs font-medium text-success-700 dark:bg-success-500/10 dark:text-success-400 sm:max-w-lg">
+                            <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M12 3.75 4.75 11.5h4L7.5 20.25l7.75-9h-4L12 3.75Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="truncate">Tip: Double-check the liters and customer details before recording.</span>
+                        </div>
+                        <div class="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                            <button type="button" x-on:click="closeSaleModal" class="{{ $secondaryButtonClass }} !h-10 rounded-lg px-4 !text-sm">Cancel</button>
+                            <button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg !bg-success-600 px-5 py-2 text-sm font-semibold text-white shadow-theme-xs transition hover:!bg-success-700 disabled:cursor-not-allowed disabled:opacity-60" :class="saleSubmitButtonClass()" :disabled="savingSale || !!creditWarning">
+                                <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path d="M5 20.25h14A1.25 1.25 0 0 0 20.25 19V7.75L16.5 4H5A1.25 1.25 0 0 0 3.75 5.25V19A1.25 1.25 0 0 0 5 20.25ZM7.75 20v-6.25h8.5V20M7.75 4v5h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                <span x-text="savingSale ? 'Saving...' : (sale.id ? 'Update Transaction' : 'Record Transaction')"></span>
+                            </button>
+                        </div>
                     </div>
                 </form>
                 </div>
@@ -768,15 +986,50 @@
                                                 <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">Choose the account receiving the payment.</p>
                                             </div>
                                         </div>
-                                        <label class="mt-3 block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                            <span>Credit Customer</span>
-                                            <select x-model="payment.customer_id" x-on:change="loadInvoices" class="mt-1.5 {{ $selectClass }}" required>
-                                                <option value="">Select customer</option>
-                                                <template x-for="customer in customers" :key="customer.id">
-                                                    <option :value="customer.id" x-text="customer.label"></option>
+                                        <div class="relative mt-3" x-on:click.outside="paymentCustomerDropdownOpen = false">
+                                            <span class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Credit Customer</span>
+                                            <div class="relative mt-1.5">
+                                                <input
+                                                    type="search"
+                                                    x-model="paymentCustomerSearch"
+                                                    x-on:focus="paymentCustomerDropdownOpen = true"
+                                                    x-on:input="handlePaymentCustomerInput()"
+                                                    x-on:keydown.escape.prevent="paymentCustomerDropdownOpen = false"
+                                                    class="{{ $inputClass }} pr-11"
+                                                    placeholder="Type company or customer name"
+                                                    autocomplete="off"
+                                                    required>
+                                                <button
+                                                    type="button"
+                                                    x-show="paymentCustomerSearch"
+                                                    x-on:click="clearPaymentCustomer()"
+                                                    class="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.05] dark:hover:text-gray-200"
+                                                    aria-label="Clear customer search">
+                                                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                                </button>
+                                            </div>
+                                            <div
+                                                x-show="paymentCustomerDropdownOpen"
+                                                x-transition.origin.top
+                                                class="absolute left-0 right-0 z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-lg dark:border-gray-800 dark:bg-gray-900">
+                                                <template x-for="customer in filteredPaymentCustomers()" :key="customer.id">
+                                                    <button
+                                                        type="button"
+                                                        x-on:click="selectPaymentCustomer(customer)"
+                                                        class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-white/[0.04]"
+                                                        :class="String(payment.customer_id) === String(customer.id) ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300' : 'text-gray-700 dark:text-gray-300'">
+                                                        <span class="min-w-0">
+                                                            <span class="block truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="customer.business_name || customer.label"></span>
+                                                            <span class="mt-0.5 block truncate text-theme-xs text-gray-500 dark:text-gray-400" x-text="customerSubtext(customer)"></span>
+                                                        </span>
+                                                        <span x-show="String(payment.customer_id) === String(customer.id)" class="mt-0.5 text-theme-xs font-medium text-brand-600 dark:text-brand-300">Selected</span>
+                                                    </button>
                                                 </template>
-                                            </select>
-                                        </label>
+                                                <p x-show="filteredPaymentCustomers().length === 0" class="px-3 py-4 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                                    No customers match that search.
+                                                </p>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div class="rounded-xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-4">
@@ -1137,6 +1390,12 @@
                 selectedInvoice: null,
                 sale: {},
                 payment: {},
+                saleCreditCustomerSearch: '',
+                saleCreditCustomerDropdownOpen: false,
+                saleWalkinCustomerSearch: '',
+                saleWalkinCustomerDropdownOpen: false,
+                paymentCustomerSearch: '',
+                paymentCustomerDropdownOpen: false,
                 selectedCreditCustomer: null,
                 selectedPaymentCustomer: null,
                 creditWarning: '',
@@ -1159,6 +1418,64 @@
                 feedbackActive() {
                     return this.feedbackClosing || this.confirmation.open || this.messageDialog.open || this.passwordDialog.open;
                 },
+                normalizeCustomerSearch(value) {
+                    return String(value || '').toLowerCase().trim();
+                },
+                customerSubtext(customer) {
+                    const parts = [];
+                    const label = this.normalizeCustomerSearch(customer.label);
+                    const businessName = this.normalizeCustomerSearch(customer.business_name);
+                    const ownerName = this.normalizeCustomerSearch(customer.owner_name);
+
+                    if (customer.owner_name && ownerName !== businessName && ownerName !== label) {
+                        parts.push(customer.owner_name);
+                    }
+
+                    if (customer.contact_number) {
+                        parts.push(customer.contact_number);
+                    }
+
+                    return parts.length ? parts.join(' - ') : `Customer #${customer.id}`;
+                },
+                customerMatchesSearch(customer, query) {
+                    const terms = this.normalizeCustomerSearch(query).split(/\s+/).filter(Boolean);
+
+                    if (!terms.length) {
+                        return true;
+                    }
+
+                    const haystack = this.normalizeCustomerSearch(customer.search || customer.label);
+
+                    return terms.every((term) => haystack.includes(term));
+                },
+                filteredPaymentCustomers() {
+                    return this.customers
+                        .filter((customer) => this.customerMatchesSearch(customer, this.paymentCustomerSearch))
+                        .slice(0, 50);
+                },
+                saleCustomerSearchValue(mode) {
+                    return mode === 'credit' ? this.saleCreditCustomerSearch : this.saleWalkinCustomerSearch;
+                },
+                filteredSaleCustomers(mode) {
+                    return this.customers
+                        .filter((customer) => this.customerMatchesSearch(customer, this.saleCustomerSearchValue(mode)))
+                        .slice(0, 50);
+                },
+                exactCustomerMatch(query) {
+                    const normalizedQuery = this.normalizeCustomerSearch(query);
+
+                    if (!normalizedQuery) {
+                        return null;
+                    }
+
+                    return this.customers.find((customer) => {
+                        return [
+                            customer.label,
+                            customer.business_name,
+                            customer.owner_name,
+                        ].some((value) => this.normalizeCustomerSearch(value) === normalizedQuery);
+                    }) || null;
+                },
                 resetSale() {
                     this.sale = {
                         id: null,
@@ -1180,6 +1497,10 @@
                         original_amount: 0,
                         original_price_applied: null
                     };
+                    this.saleCreditCustomerSearch = '';
+                    this.saleCreditCustomerDropdownOpen = false;
+                    this.saleWalkinCustomerSearch = '';
+                    this.saleWalkinCustomerDropdownOpen = false;
                     this.selectedCreditCustomer = null;
                     this.creditWarning = '';
                     this.savingSale = false;
@@ -1195,6 +1516,8 @@
                     this.invoices = [];
                     this.selectedInvoice = null;
                     this.selectedPaymentCustomer = null;
+                    this.paymentCustomerSearch = '';
+                    this.paymentCustomerDropdownOpen = false;
                     this.paymentAdvanceMessage = '';
                     this.savingPayment = false;
                     this.loadingInvoices = false;
@@ -1218,8 +1541,11 @@
                     this.sale.standard_price = Number(pump.standard_price || this.priceForFuel(row.fuel_type));
                     this.sale.mode = row.payment_type === 'credit' ? 'credit' : 'walkin';
                     const registeredCustomerId = row.customer_id ? String(row.customer_id) : '';
+                    const registeredCustomer = registeredCustomerId ? this.customersById[registeredCustomerId] : null;
                     this.sale.customer_id = registeredCustomerId;
                     this.sale.walkin_customer_id = registeredCustomerId;
+                    this.saleCreditCustomerSearch = registeredCustomer?.label || '';
+                    this.saleWalkinCustomerSearch = registeredCustomer?.label || '';
                     this.sale.walkin_name = row.payment_type !== 'credit' && !row.customer_id ? (row.customer_name || '') : '';
                     this.sale.plate_no = row.plate_no || '';
                     this.sale.liters = Number(row.liters || 0);
@@ -1243,6 +1569,68 @@
                     this.sale.mode = mode;
                     this.touchSale();
                 },
+                handleSaleCustomerInput(mode) {
+                    const selectedCustomer = this.selectedSaleCustomer(mode);
+                    const query = this.saleCustomerSearchValue(mode);
+
+                    if (mode === 'credit') {
+                        this.saleCreditCustomerDropdownOpen = true;
+                    } else {
+                        this.saleWalkinCustomerDropdownOpen = true;
+                    }
+
+                    if (
+                        selectedCustomer
+                        && this.normalizeCustomerSearch(query) === this.normalizeCustomerSearch(selectedCustomer.label)
+                    ) {
+                        return;
+                    }
+
+                    const field = mode === 'credit' ? 'customer_id' : 'walkin_customer_id';
+                    this.sale[field] = '';
+                    this.touchSale();
+
+                    const exactMatch = this.exactCustomerMatch(query);
+
+                    if (exactMatch) {
+                        this.selectSaleCustomer(exactMatch, mode);
+                    }
+                },
+                selectedSaleCustomer(mode) {
+                    const customerId = mode === 'credit'
+                        ? String(this.sale.customer_id || '')
+                        : String(this.sale.walkin_customer_id || '');
+
+                    return customerId ? this.customersById[customerId] : null;
+                },
+                selectSaleCustomer(customer, mode) {
+                    const customerId = String(customer.id);
+
+                    if (mode === 'credit') {
+                        this.sale.customer_id = customerId;
+                        this.saleCreditCustomerSearch = customer.label;
+                        this.saleCreditCustomerDropdownOpen = false;
+                    } else {
+                        this.sale.walkin_customer_id = customerId;
+                        this.saleWalkinCustomerSearch = customer.label;
+                        this.saleWalkinCustomerDropdownOpen = false;
+                    }
+
+                    this.syncRegisteredSaleCustomer(mode);
+                },
+                clearSaleCustomer(mode) {
+                    if (mode === 'credit') {
+                        this.sale.customer_id = '';
+                        this.saleCreditCustomerSearch = '';
+                        this.saleCreditCustomerDropdownOpen = true;
+                    } else {
+                        this.sale.walkin_customer_id = '';
+                        this.saleWalkinCustomerSearch = '';
+                        this.saleWalkinCustomerDropdownOpen = true;
+                    }
+
+                    this.touchSale();
+                },
                 syncRegisteredSaleCustomer(sourceMode) {
                     if (this.syncingSaleCustomers) {
                         return;
@@ -1257,8 +1645,14 @@
                         return;
                     }
 
+                    const customer = this.customersById[customerId];
                     this.syncingSaleCustomers = true;
                     this.sale[targetField] = customerId;
+                    if (sourceMode === 'credit') {
+                        this.saleWalkinCustomerSearch = customer.label;
+                    } else {
+                        this.saleCreditCustomerSearch = customer.label;
+                    }
                     this.syncingSaleCustomers = false;
                     this.touchSale();
                 },
@@ -1483,6 +1877,46 @@
                 closePaymentModal() {
                     this.paymentModalOpen = false;
                     this.resetPayment();
+                },
+                handlePaymentCustomerInput() {
+                    const selectedCustomer = this.selectedPaymentCustomer;
+                    this.paymentCustomerDropdownOpen = true;
+
+                    if (
+                        selectedCustomer
+                        && this.normalizeCustomerSearch(this.paymentCustomerSearch) === this.normalizeCustomerSearch(selectedCustomer.label)
+                    ) {
+                        return;
+                    }
+
+                    this.payment.customer_id = '';
+                    this.payment.invoice_id = '';
+                    this.selectedInvoice = null;
+                    this.selectedPaymentCustomer = null;
+                    this.invoices = [];
+                    this.paymentAdvanceMessage = '';
+
+                    const exactMatch = this.exactCustomerMatch(this.paymentCustomerSearch);
+
+                    if (exactMatch) {
+                        this.selectPaymentCustomer(exactMatch);
+                    }
+                },
+                selectPaymentCustomer(customer) {
+                    this.payment.customer_id = String(customer.id);
+                    this.paymentCustomerSearch = customer.label;
+                    this.paymentCustomerDropdownOpen = false;
+                    this.loadInvoices();
+                },
+                clearPaymentCustomer() {
+                    this.payment.customer_id = '';
+                    this.payment.invoice_id = '';
+                    this.paymentCustomerSearch = '';
+                    this.paymentCustomerDropdownOpen = true;
+                    this.invoices = [];
+                    this.selectedInvoice = null;
+                    this.selectedPaymentCustomer = null;
+                    this.paymentAdvanceMessage = '';
                 },
                 syncPaymentCustomer() {
                     this.selectedPaymentCustomer = this.payment.customer_id ? this.customersById[String(this.payment.customer_id)] : null;

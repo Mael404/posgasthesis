@@ -57,11 +57,19 @@
 
         $customerPayload = $customers->map(function ($customer) use ($billingCustomerName) {
             $label = $billingCustomerName($customer);
+            $businessName = trim((string) ($customer->business_name ?? ''));
+            $ownerName = trim((string) ($customer->owner_name ?? ''));
+            $contactNumber = trim((string) ($customer->contact_number ?? ''));
+            $businessName = strtoupper($businessName) === 'N/A' ? '' : $businessName;
+            $ownerName = strtoupper($ownerName) === 'N/A' ? '' : $ownerName;
 
             return [
                 'id' => (int) $customer->id,
                 'label' => $label,
-                'search' => strtolower($label . ' ' . ($customer->contact_number ?? '')),
+                'business_name' => $businessName,
+                'owner_name' => $ownerName,
+                'contact_number' => $contactNumber,
+                'search' => strtolower($label . ' ' . $businessName . ' ' . $ownerName . ' ' . $contactNumber),
             ];
         })->values();
 
@@ -574,8 +582,8 @@
             </div>
         </section>
 
-        <div x-show="modal === 'generate'" x-cloak class="fixed inset-0 z-999999 flex items-center justify-center p-4">
-            <div x-show="modal === 'generate'" x-transition.opacity class="absolute inset-0 bg-gray-900/55"></div>
+        <div x-show="modal === 'generate'" x-cloak class="fixed inset-0 z-999999 flex items-center justify-center p-4 sm:p-6">
+            <div x-show="modal === 'generate'" x-transition.opacity class="absolute inset-0 bg-gray-950/60 backdrop-blur-md"></div>
             <div
                 x-show="modal === 'generate'"
                 x-transition:enter="transition ease-out duration-200"
@@ -584,7 +592,7 @@
                 x-transition:leave="transition ease-in duration-150"
                 x-transition:leave-start="opacity-100 translate-y-0 scale-100"
                 x-transition:leave-end="opacity-0 translate-y-3 scale-95"
-                class="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900">
+                class="relative max-h-[82vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 sm:max-h-[84vh] sm:p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Generate Billing Statement</h3>
@@ -596,28 +604,62 @@
                 </div>
 
                 <div class="mt-6 space-y-5">
-                    <label class="block {{ $labelClass }}">
-                        <span>Customer</span>
-                        <select x-model="generationForm.customer_id" x-on:change="loadRolloverInvoices()" class="mt-1.5 {{ $selectClass }}">
-                            <option value="">Choose customer</option>
-                            <template x-for="customer in customers" :key="customer.id">
-                                <option :value="String(customer.id)" x-text="customer.label"></option>
+                    <div class="relative" x-on:click.outside="generationCustomerDropdownOpen = false">
+                        <span class="{{ $labelClass }}">Customer</span>
+                        <div class="relative mt-1.5">
+                            <input
+                                type="search"
+                                x-model="generationCustomerSearch"
+                                x-on:focus="generationCustomerDropdownOpen = true"
+                                x-on:input="handleGenerationCustomerInput()"
+                                x-on:keydown.escape.prevent="generationCustomerDropdownOpen = false"
+                                class="{{ $inputClass }} pr-11"
+                                placeholder="Type company or customer name"
+                                autocomplete="off">
+                            <button
+                                type="button"
+                                x-show="generationCustomerSearch"
+                                x-on:click="clearGenerationCustomer()"
+                                class="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.05] dark:hover:text-gray-200"
+                                aria-label="Clear customer search">
+                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                            </button>
+                        </div>
+                        <div
+                            x-show="generationCustomerDropdownOpen"
+                            x-transition.origin.top
+                            class="absolute left-0 right-0 z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-lg dark:border-gray-800 dark:bg-gray-900">
+                            <template x-for="customer in filteredGenerationCustomers()" :key="customer.id">
+                                <button
+                                    type="button"
+                                    x-on:click="selectGenerationCustomer(customer)"
+                                    class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-white/[0.04]"
+                                    :class="String(generationForm.customer_id) === String(customer.id) ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300' : 'text-gray-700 dark:text-gray-300'">
+                                    <span class="min-w-0">
+                                        <span class="block truncate text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="customer.business_name || customer.label"></span>
+                                        <span class="mt-0.5 block truncate text-theme-xs text-gray-500 dark:text-gray-400" x-text="generationCustomerSubtext(customer)"></span>
+                                    </span>
+                                    <span x-show="String(generationForm.customer_id) === String(customer.id)" class="mt-0.5 text-theme-xs font-medium text-brand-600 dark:text-brand-300">Selected</span>
+                                </button>
                             </template>
-                        </select>
-                    </label>
+                            <p x-show="filteredGenerationCustomers().length === 0" class="px-3 py-4 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                No customers match that search.
+                            </p>
+                        </div>
+                    </div>
 
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <label class="block {{ $labelClass }}">
                             <span>Start Date</span>
                             <span class="relative mt-1.5 block custom-datepicker">
-                                <input type="text" x-model="generationForm.period_start" autocomplete="off" class="{{ $dateInputClass }}" data-billing-date>
+                                <input type="text" x-model="generationForm.period_start" autocomplete="off" class="{{ $dateInputClass }}" data-billing-date data-billing-floating-date>
                                 {!! $dateIcon !!}
                             </span>
                         </label>
                         <label class="block {{ $labelClass }}">
                             <span>End Date</span>
                             <span class="relative mt-1.5 block custom-datepicker">
-                                <input type="text" x-model="generationForm.period_end" autocomplete="off" class="{{ $dateInputClass }}" data-billing-date>
+                                <input type="text" x-model="generationForm.period_end" autocomplete="off" class="{{ $dateInputClass }}" data-billing-date data-billing-floating-date>
                                 {!! $dateIcon !!}
                             </span>
                         </label>
@@ -837,6 +879,8 @@
                     period_start: config.defaultPeriodStart,
                     period_end: config.defaultPeriodEnd
                 },
+                generationCustomerSearch: '',
+                generationCustomerDropdownOpen: false,
                 rolloverInvoices: [],
                 selectedRolloverIds: [],
                 rolloverLoading: false,
@@ -880,8 +924,9 @@
                         document.querySelectorAll('[data-billing-date]').forEach((input) => {
                             if (input._billingDatePicker) return;
 
-                            input._billingDatePicker = window.flatpickr(input, {
-                                static: true,
+                            const floatingPicker = input.hasAttribute('data-billing-floating-date');
+                            const pickerOptions = {
+                                static: !floatingPicker,
                                 monthSelectorType: 'static',
                                 dateFormat: 'Y-m-d',
                                 defaultDate: input.value || null,
@@ -891,7 +936,19 @@
                                     input.value = dateStr;
                                     input.dispatchEvent(new Event('input', { bubbles: true }));
                                 }
-                            });
+                            };
+
+                            if (floatingPicker) {
+                                const liftCalendar = (selectedDates, dateStr, instance) => {
+                                    instance.calendarContainer.style.zIndex = '1000010';
+                                };
+
+                                pickerOptions.appendTo = document.body;
+                                pickerOptions.onReady = liftCalendar;
+                                pickerOptions.onOpen = liftCalendar;
+                            }
+
+                            input._billingDatePicker = window.flatpickr(input, pickerOptions);
                         });
                     });
                 },
@@ -978,12 +1035,110 @@
                     this.resetReceiptPage();
                 },
 
+                normalizeCustomerSearch(value) {
+                    return String(value || '').toLowerCase().trim();
+                },
+
+                selectedGenerationCustomer() {
+                    const customerId = String(this.generationForm.customer_id || '');
+
+                    return this.customers.find((customer) => String(customer.id) === customerId) || null;
+                },
+
+                generationCustomerSubtext(customer) {
+                    const parts = [];
+                    const label = this.normalizeCustomerSearch(customer.label);
+                    const businessName = this.normalizeCustomerSearch(customer.business_name);
+                    const ownerName = this.normalizeCustomerSearch(customer.owner_name);
+
+                    if (customer.owner_name && ownerName !== businessName && ownerName !== label) {
+                        parts.push(customer.owner_name);
+                    }
+
+                    if (customer.contact_number) {
+                        parts.push(customer.contact_number);
+                    }
+
+                    return parts.length ? parts.join(' - ') : `Customer #${customer.id}`;
+                },
+
+                filteredGenerationCustomers() {
+                    const query = this.normalizeCustomerSearch(this.generationCustomerSearch);
+
+                    if (!query) {
+                        return this.customers.slice(0, 50);
+                    }
+
+                    const terms = query.split(/\s+/).filter(Boolean);
+
+                    return this.customers
+                        .filter((customer) => {
+                            const haystack = this.normalizeCustomerSearch(customer.search || customer.label);
+
+                            return terms.every((term) => haystack.includes(term));
+                        })
+                        .slice(0, 50);
+                },
+
+                handleGenerationCustomerInput() {
+                    const selectedCustomer = this.selectedGenerationCustomer();
+                    this.generationCustomerDropdownOpen = true;
+
+                    if (
+                        selectedCustomer
+                        && this.normalizeCustomerSearch(this.generationCustomerSearch) === this.normalizeCustomerSearch(selectedCustomer.label)
+                    ) {
+                        return;
+                    }
+
+                    this.generationForm.customer_id = '';
+                    this.rolloverInvoices = [];
+                    this.selectedRolloverIds = [];
+                },
+
+                selectGenerationCustomer(customer) {
+                    this.generationForm.customer_id = String(customer.id);
+                    this.generationCustomerSearch = customer.label;
+                    this.generationCustomerDropdownOpen = false;
+                    this.loadRolloverInvoices();
+                },
+
+                clearGenerationCustomer() {
+                    this.generationForm.customer_id = '';
+                    this.generationCustomerSearch = '';
+                    this.generationCustomerDropdownOpen = true;
+                    this.rolloverInvoices = [];
+                    this.selectedRolloverIds = [];
+                },
+
+                syncExactGenerationCustomer() {
+                    if (this.generationForm.customer_id) return;
+
+                    const query = this.normalizeCustomerSearch(this.generationCustomerSearch);
+                    if (!query) return;
+
+                    const exactMatch = this.customers.find((customer) => {
+                        return [
+                            customer.label,
+                            customer.business_name,
+                            customer.owner_name,
+                        ].some((value) => this.normalizeCustomerSearch(value) === query);
+                    });
+
+                    if (exactMatch) {
+                        this.generationForm.customer_id = String(exactMatch.id);
+                        this.generationCustomerSearch = exactMatch.label;
+                    }
+                },
+
                 openGenerate() {
                     this.generationForm = {
                         customer_id: '',
                         period_start: config.defaultPeriodStart,
                         period_end: config.defaultPeriodEnd
                     };
+                    this.generationCustomerSearch = '';
+                    this.generationCustomerDropdownOpen = false;
                     this.rolloverInvoices = [];
                     this.selectedRolloverIds = [];
                     this.modal = 'generate';
@@ -1015,6 +1170,8 @@
                 },
 
                 async submitGenerate() {
+                    this.syncExactGenerationCustomer();
+
                     if (!this.generationForm.customer_id || !this.generationForm.period_start || !this.generationForm.period_end) {
                         this.showMessage('Choose a customer and billing period.');
                         return;
