@@ -679,6 +679,8 @@ class ShiftReconciliationController extends Controller
             return $query->whereRaw('1 = 0');
         }
 
+        $this->excludeVoidedCustomerPayments($query);
+
         if ($this->readingHasLockedSales($reading)) {
             return $query->where('sales.locked_by_shift_reading_id', $reading->id);
         }
@@ -703,9 +705,12 @@ class ShiftReconciliationController extends Controller
         $readingId = (int) $reading->id;
 
         if (! array_key_exists($readingId, $this->lockedSalesPresence)) {
-            $this->lockedSalesPresence[$readingId] = DB::table('sales')
-                ->where('locked_by_shift_reading_id', $readingId)
-                ->exists();
+            $query = DB::table('sales')
+                ->where('locked_by_shift_reading_id', $readingId);
+
+            $this->excludeVoidedCustomerPayments($query);
+
+            $this->lockedSalesPresence[$readingId] = $query->exists();
         }
 
         return $this->lockedSalesPresence[$readingId];
@@ -725,6 +730,8 @@ class ShiftReconciliationController extends Controller
         $query = DB::table('sales')
             ->whereNull('locked_by_shift_reading_id');
 
+        $this->excludeVoidedCustomerPayments($query);
+
         if ($this->hasColumn('sales', 'user_id') && isset($reading->user_id)) {
             $query->where('user_id', $reading->user_id);
         }
@@ -740,6 +747,15 @@ class ShiftReconciliationController extends Controller
         }
 
         $query->update($updates);
+    }
+
+    private function excludeVoidedCustomerPayments($query)
+    {
+        if ($this->hasColumn('sales', 'customer_payment_voided_at')) {
+            $query->whereNull('sales.customer_payment_voided_at');
+        }
+
+        return $query;
     }
 
     private function unlockSalesForReading(object $reading): void
