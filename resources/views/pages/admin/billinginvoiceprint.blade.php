@@ -35,10 +35,17 @@
         }
         @media print {
             body { background: #fff; }
-            .sheet { box-shadow: none; margin: 0; max-width: none; min-height: 100vh; padding: 0; }
+            .sheet { box-shadow: none; margin: 0; max-width: none; min-height: 277mm; padding: 0; }
             .no-print, .edit-input, .screen-actions { display: none !important; }
             .display-value { display: inline !important; }
         }
+        .sheet {
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            min-height: 277mm;
+        }
+        .main-content { flex: 1; }
         .toolbar {
             display: flex;
             flex-wrap: wrap;
@@ -240,7 +247,7 @@
             padding: 8px !important;
         }
         .advance-total { background: #039855; }
-        .bottom-section { margin-top: 28px; page-break-inside: avoid; }
+        .bottom-section { margin-top: auto; padding-top: 28px; page-break-inside: avoid; }
         .instructions {
             background: #f8f9fc;
             border-left: 4px solid #465fff;
@@ -402,7 +409,7 @@
     </div>
 
     <main class="sheet">
-        <div style="position: relative;">
+        <div class="main-content" style="position: relative;">
             @if ($invoice->status === 'Paid')
                 <div class="status-stamp">PAID IN FULL</div>
             @endif

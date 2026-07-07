@@ -102,6 +102,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/bulk-mark', [PrintedTransactionController::class, 'bulkMark'])->name('bulk-mark');
             Route::delete('/bulk-delete', [PrintedTransactionController::class, 'bulkDestroy'])->name('bulk-destroy');
             Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
+            Route::post('/{batch}/print/signatories', [PrintedTransactionController::class, 'savePrintSignatories'])->name('print.signatories');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
             Route::delete('/{batch}', [PrintedTransactionController::class, 'destroy'])->name('destroy');
         });
@@ -261,6 +262,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/', [PrintedTransactionController::class, 'storeSelected'])->name('store');
             Route::post('/bulk-mark', [PrintedTransactionController::class, 'bulkMark'])->name('bulk-mark');
             Route::get('/{batch}/print', [PrintedTransactionController::class, 'printBatch'])->name('print');
+            Route::post('/{batch}/print/signatories', [PrintedTransactionController::class, 'savePrintSignatories'])->name('print.signatories');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
         });
 

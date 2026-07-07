@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -335,6 +336,11 @@ class PrintedTransactionController extends Controller
         $staff = DB::table('users')->where('id', $printedBatch->staff_id)->first() ?: auth()->user();
         $printedAt = Carbon::parse($printedBatch->printed_at ?: $printedBatch->created_at);
         $isPaidInFullReceipt = $this->isPaidInFullPrintout($transactions);
+        $printSignatories = $this->printSignatories((int) $printedBatch->id);
+        $signatorySaveUrl = $request->routeIs('admin.printed-transactions.*')
+            ? route('admin.printed-transactions.print.signatories', $printedBatch->id)
+            : route('staff.printed-transactions.print.signatories', $printedBatch->id);
+        $signatorySignedAt = $printSignatories->signed_at ?? now();
         $title = 'Print Transaction Batch';
 
         return view('pages.printedtransactions-print', compact(
@@ -345,8 +351,54 @@ class PrintedTransactionController extends Controller
             'printedAt',
             'isPaidInFullReceipt',
             'printedBatch',
+            'printSignatories',
+            'signatorySaveUrl',
+            'signatorySignedAt',
             'title'
         ));
+    }
+
+    public function savePrintSignatories(Request $request, $batch): JsonResponse
+    {
+        $this->ensureTrackingTableReady();
+
+        $validated = $request->validate([
+            'prepared_by' => ['nullable', 'string', 'max:255'],
+            'acknowledged_by' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $printedBatch = $this->findBatchForRoute($request, (int) $batch);
+
+        if (! Schema::hasTable('acknowledgement_receipt_signatories')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The signatories table is not ready. Please run php artisan migrate.',
+            ], 500);
+        }
+
+        $signedAt = now();
+        $receiptKey = $this->printSignatoryKey((int) $printedBatch->id);
+        $values = [
+            'receipt_key' => $receiptKey,
+            'invoice_id' => (int) $printedBatch->id,
+            'payment_ledger_id' => null,
+            'received_by' => $this->cleanNullableText($validated['prepared_by'] ?? null),
+            'paid_by' => $this->cleanNullableText($validated['acknowledged_by'] ?? null),
+            'signed_at' => $signedAt,
+            'saved_by' => auth()->id(),
+            'updated_at' => now(),
+        ];
+
+        $this->upsertPrintSignatory($receiptKey, $values);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Printed transaction signatories saved.',
+            'prepared_by' => $values['received_by'] ?? '',
+            'acknowledged_by' => $values['paid_by'] ?? '',
+            'signed_at' => $signedAt->format('F d, Y h:i A'),
+            'signed_at_input' => $signedAt->format('Y-m-d\TH:i'),
+        ]);
     }
 
     private function createBatchFromSelectedTransactions(Request $request): object
@@ -713,6 +765,63 @@ class PrintedTransactionController extends Controller
         if (! Schema::hasTable('printed_transaction_batches')) {
             abort(500, 'Printed transaction tracking table is not ready. Please run php artisan migrate.');
         }
+    }
+
+    private function printSignatories(int $batchId): object
+    {
+        $emptySignatories = (object) [
+            'prepared_by' => null,
+            'acknowledged_by' => null,
+            'signed_at' => null,
+        ];
+
+        if (! Schema::hasTable('acknowledgement_receipt_signatories')) {
+            return $emptySignatories;
+        }
+
+        $signatories = DB::table('acknowledgement_receipt_signatories')
+            ->where('receipt_key', $this->printSignatoryKey($batchId))
+            ->first();
+
+        if (! $signatories) {
+            return $emptySignatories;
+        }
+
+        return (object) [
+            'prepared_by' => $signatories->received_by,
+            'acknowledged_by' => $signatories->paid_by,
+            'signed_at' => $signatories->signed_at,
+        ];
+    }
+
+    private function upsertPrintSignatory(string $receiptKey, array $values): void
+    {
+        $exists = DB::table('acknowledgement_receipt_signatories')
+            ->where('receipt_key', $receiptKey)
+            ->exists();
+
+        if ($exists) {
+            DB::table('acknowledgement_receipt_signatories')
+                ->where('receipt_key', $receiptKey)
+                ->update($values);
+
+            return;
+        }
+
+        DB::table('acknowledgement_receipt_signatories')
+            ->insert($values + ['created_at' => now()]);
+    }
+
+    private function printSignatoryKey(int $batchId): string
+    {
+        return 'printed-transaction:' . $batchId . ':print';
+    }
+
+    private function cleanNullableText($value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
     }
 
     private function canViewAllPrintedTransactions(): bool
