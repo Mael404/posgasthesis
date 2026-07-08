@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Customer Ledger - {{ $customer->business_name }}</title>
+    @include('layouts.browser-icon')
     <style>
         @page { margin: 1cm; size: A4 portrait; }
         body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #222; line-height: 1.35; margin: 0; }

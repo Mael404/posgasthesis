@@ -3,6 +3,9 @@
 @section('content')
     @php
         $customers = collect($customers ?? []);
+        $customerPaginator = $customerPaginator ?? null;
+        $hasCustomerPaginator = is_object($customerPaginator) && method_exists($customerPaginator, 'items');
+        $customerRows = $hasCustomerPaginator ? collect($customerPaginator->items()) : collect($customerRows ?? $customers);
         $inactiveCustomers = collect($inactiveCustomers ?? []);
         $adminPayments = collect($adminPayments ?? []);
         $summary = array_merge([
@@ -18,6 +21,13 @@
         $activeTab = in_array(request('tab'), ['list', 'ledger', 'payments'], true) ? request('tab') : 'list';
         $activeTab = $activeTab === 'payments' && ! $canManageCredit ? 'list' : $activeTab;
         $allCustomers = $customers->concat($inactiveCustomers)->unique('id')->values();
+        $customerSearch = trim((string) ($customerSearch ?? ''));
+        $perPageOptions = $perPageOptions ?? [10, 20, 50, 100];
+        $perPage = (int) ($perPage ?? 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
+        $customerTotal = is_object($customerPaginator) && method_exists($customerPaginator, 'total') ? $customerPaginator->total() : $customerRows->count();
+        $customerFirstItem = is_object($customerPaginator) && method_exists($customerPaginator, 'firstItem') ? $customerPaginator->firstItem() : ($customerTotal > 0 ? 1 : null);
+        $customerLastItem = is_object($customerPaginator) && method_exists($customerPaginator, 'lastItem') ? $customerPaginator->lastItem() : $customerRows->count();
 
         $customerLabel = function ($customer) {
             $businessName = trim((string) ($customer->business_name ?? ''));
@@ -207,10 +217,14 @@
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Customer List & Balances</h2>
                     <p class="mt-1 {{ $captionClass }}">Active credit accounts and balance status.</p>
                 </div>
-                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                    <span>Search customers</span>
-                    <input type="search" x-model.debounce.150ms="customerSearch" class="mt-1.5 {{ $inputClass }}" placeholder="Business, owner, or contact">
-                </label>
+                <form method="GET" action="{{ route('customers.index') }}" class="w-full">
+                    <input type="hidden" name="tab" value="list">
+                    <input type="hidden" name="per_page" value="{{ $perPage }}">
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>Search customers</span>
+                        <input type="search" name="customer_search" value="{{ $customerSearch }}" class="mt-1.5 {{ $inputClass }}" placeholder="Business, owner, or contact">
+                    </label>
+                </form>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
@@ -235,11 +249,11 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                            @forelse ($customers as $customer)
+                            @forelse ($customerRows as $customer)
                                 @php
                                     $balance = $balanceMeta($customer);
                                 @endphp
-                                <tr x-show="customerMatches('{{ $customer->id }}', customerSearch)">
+                                <tr>
                                     <td class="{{ $tdPrimaryClass }}">{{ strtoupper($customer->business_name ?? 'N/A') }}</td>
                                     <td class="{{ $tdClass }}">
                                         <div class="font-medium text-gray-800 dark:text-white/90">{{ $customer->owner_name ? ucwords(strtolower($customer->owner_name)) : 'N/A' }}</div>
@@ -268,12 +282,76 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No active credit customers found.</td>
+                                    <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">{{ $customerSearch !== '' ? 'No active customers match your search.' : 'No active credit customers found.' }}</td>
                                 </tr>
                             @endforelse
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <div class="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <p class="{{ $captionClass }}">
+                        @if ($customerTotal > 0 && $customerFirstItem)
+                            Showing {{ number_format($customerFirstItem) }}-{{ number_format($customerLastItem) }} of {{ number_format($customerTotal) }} customer{{ $customerTotal === 1 ? '' : 's' }}.
+                        @else
+                            No customers found.
+                        @endif
+                    </p>
+                    <form method="GET" action="{{ route('customers.index') }}" class="flex items-center gap-2">
+                        <input type="hidden" name="tab" value="list">
+                        @if ($customerSearch !== '')
+                            <input type="hidden" name="customer_search" value="{{ $customerSearch }}">
+                        @endif
+                        <label for="customer-list-per-page" class="text-theme-sm text-gray-500 dark:text-gray-400">Rows</label>
+                        <select id="customer-list-per-page" name="per_page" class="h-9 w-20 rounded-lg border border-gray-300 bg-transparent px-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800" onchange="this.form.submit()">
+                            @foreach ($perPageOptions as $option)
+                                <option value="{{ $option }}" {{ (int) $perPage === (int) $option ? 'selected' : '' }}>{{ $option }}</option>
+                            @endforeach
+                        </select>
+                    </form>
+                </div>
+
+                @if (is_object($customerPaginator) && method_exists($customerPaginator, 'hasPages') && $customerPaginator->hasPages())
+                    @php
+                        $customerCurrentPage = method_exists($customerPaginator, 'currentPage') ? (int) $customerPaginator->currentPage() : 1;
+                        $customerLastPageNumber = method_exists($customerPaginator, 'lastPage') ? (int) $customerPaginator->lastPage() : $customerCurrentPage;
+                        $customerPageNumbers = collect([1, $customerCurrentPage - 1, $customerCurrentPage, $customerCurrentPage + 1, $customerLastPageNumber])
+                            ->filter(fn ($page) => $page >= 1 && $page <= $customerLastPageNumber)
+                            ->unique()
+                            ->sort()
+                            ->values();
+                        $previousCustomerPage = null;
+                    @endphp
+                    <nav class="flex flex-wrap items-center gap-2 lg:justify-end" role="navigation" aria-label="Customer pagination">
+                        @if ($customerPaginator->onFirstPage())
+                            <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Prev</span>
+                        @else
+                            <a href="{{ $customerPaginator->previousPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Prev</a>
+                        @endif
+
+                        @foreach ($customerPageNumbers as $page)
+                            @if ($previousCustomerPage && $page > $previousCustomerPage + 1)
+                                <span class="inline-flex h-9 min-w-9 items-center justify-center px-1 text-theme-sm text-gray-400 dark:text-gray-600">...</span>
+                            @endif
+
+                            @if ($page === $customerCurrentPage)
+                                <span class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-sm font-medium text-white" aria-current="page">{{ $page }}</span>
+                            @else
+                                <a href="{{ $customerPaginator->url($page) }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">{{ $page }}</a>
+                            @endif
+
+                            @php $previousCustomerPage = $page; @endphp
+                        @endforeach
+
+                        @if ($customerPaginator->hasMorePages())
+                            <a href="{{ $customerPaginator->nextPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Next</a>
+                        @else
+                            <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Next</span>
+                        @endif
+                    </nav>
+                @endif
             </div>
         </section>
 

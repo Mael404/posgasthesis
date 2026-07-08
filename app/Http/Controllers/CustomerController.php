@@ -18,16 +18,23 @@ class CustomerController extends Controller
     {
         $request->validate([
             'tab' => 'nullable|in:list,ledger,payments',
+            'per_page' => 'nullable|integer|in:10,20,50,100',
+            'customer_search' => 'nullable|string|max:255',
         ]);
 
-        $customers = $this->customerQuery()
-            ->where(function ($query) {
-                $query->where('status', 'Active')
-                    ->orWhereNull('status')
-                    ->orWhere('status', '');
-            })
+        $perPageOptions = [10, 20, 50, 100];
+        $perPage = (int) $request->input('per_page', 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
+        $customerSearch = trim((string) $request->input('customer_search', ''));
+
+        $customers = $this->activeCustomerQuery()
             ->orderBy('business_name')
             ->get();
+
+        $customerPaginator = $this->applyCustomerSearch($this->activeCustomerQuery(), $customerSearch)
+            ->orderBy('business_name')
+            ->paginate($perPage, ['*'], 'customer_page')
+            ->withQueryString();
 
         $inactiveCustomers = $this->customerQuery()
             ->where('status', 'Inactive')
@@ -39,11 +46,15 @@ class CustomerController extends Controller
         return view('pages.admin.customersandcredit', [
             'title' => 'Customers & Credit',
             'customers' => $customers,
+            'customerPaginator' => $customerPaginator,
             'inactiveCustomers' => $inactiveCustomers,
             'adminPayments' => $adminPayments,
             'summary' => $this->summary($customers, $inactiveCustomers),
             'canManageCredit' => auth()->check() && auth()->user()->role !== 'semiadmin',
             'missingCustomerTables' => $this->missingTables(['customers', 'customer_ledgers']),
+            'customerSearch' => $customerSearch,
+            'perPage' => $perPage,
+            'perPageOptions' => $perPageOptions,
         ]);
     }
 
@@ -421,6 +432,31 @@ class CustomerController extends Controller
     private function customerQuery()
     {
         return DB::table('customers');
+    }
+
+    private function activeCustomerQuery()
+    {
+        return $this->customerQuery()
+            ->where(function ($query) {
+                $query->where('status', 'Active')
+                    ->orWhereNull('status')
+                    ->orWhere('status', '');
+            });
+    }
+
+    private function applyCustomerSearch($query, string $search)
+    {
+        if ($search === '') {
+            return $query;
+        }
+
+        $like = "%{$search}%";
+
+        return $query->where(function ($query) use ($like) {
+            $query->where('business_name', 'like', $like)
+                ->orWhere('owner_name', 'like', $like)
+                ->orWhere('contact_number', 'like', $like);
+        });
     }
 
     private function adminPaymentRows()

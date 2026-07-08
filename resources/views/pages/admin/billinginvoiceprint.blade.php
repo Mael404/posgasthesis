@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $invoice->invoice_number }} - Billing Statement</title>
+    @include('layouts.browser-icon')
     <style>
         @page { margin: 1cm; size: A4 portrait; }
         body {

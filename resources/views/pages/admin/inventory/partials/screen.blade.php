@@ -87,6 +87,11 @@
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
+        $tankTransactionThClass = 'px-3 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $tankTransactionThNumberClass = 'px-3 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
+        $tankTransactionTdClass = 'px-3 py-4 align-middle text-theme-sm leading-6 text-gray-700 dark:text-gray-300';
+        $tankTransactionTdPrimaryClass = 'px-3 py-4 align-middle text-theme-sm font-medium leading-6 text-gray-800 dark:text-white/90';
+        $tankTransactionTdNumberClass = 'whitespace-nowrap px-3 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" class="size-6"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 2C8.41421 2 8.75 2.33579 8.75 2.75V3.75H15.25V2.75C15.25 2.33579 15.5858 2 16 2C16.4142 2 16.75 2.33579 16.75 2.75V3.75H18.5C19.7426 3.75 20.75 4.75736 20.75 6V9V19C20.75 20.2426 19.7426 21.25 18.5 21.25H5.5C4.25736 21.25 3.25 20.2426 3.25 19V9V6C3.25 4.75736 4.25736 3.75 5.5 3.75H7.25V2.75C7.25 2.33579 7.58579 2 8 2ZM8 5.25H5.5C5.08579 5.25 4.75 5.58579 4.75 6V8.25H19.25V6C19.25 5.58579 18.9142 5.25 18.5 5.25H16H8ZM19.25 9.75H4.75V19C4.75 19.4142 5.08579 19.75 5.5 19.75H18.5C18.9142 19.75 19.25 19.4142 19.25 19V9.75Z" fill="currentColor"></path></svg></span>';
 
         $dateLabel = function ($value, $format = 'M d, Y') {
@@ -549,50 +554,50 @@
                         </div>
 
                         <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                            <div class="max-h-[520px] max-w-full overflow-auto custom-scrollbar">
-                                <table class="min-w-[1120px] w-full table-fixed">
+                            <div class="max-h-[520px] max-w-full overflow-y-auto overflow-x-hidden custom-scrollbar">
+                                <table class="w-full table-fixed">
                                     <colgroup>
-                                        <col class="w-[15%]">
+                                        <col class="w-[16%]">
                                         <col class="w-[12%]">
+                                        <col class="w-[6%]">
+                                        <col class="w-[12%]">
+                                        <col class="w-[20%]">
                                         <col class="w-[8%]">
-                                        <col class="w-[13%]">
-                                        <col class="w-[19%]">
+                                        <col class="w-[8%]">
+                                        <col class="w-[8%]">
                                         <col class="w-[10%]">
-                                        <col class="w-[9%]">
-                                        <col class="w-[7%]">
-                                        <col class="w-[7%]">
                                     </colgroup>
                                     <thead class="sticky top-0 z-1 border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
                                         <tr>
-                                            <th class="{{ $thClass }}">Date / Time</th>
-                                            <th class="{{ $thClass }}">Ref</th>
-                                            <th class="{{ $thClass }}">Pump</th>
-                                            <th class="{{ $thClass }}">Staff</th>
-                                            <th class="{{ $thClass }}">Customer</th>
-                                            <th class="{{ $thClass }}">Payment</th>
-                                            <th class="{{ $thNumberClass }}">Liters</th>
-                                            <th class="{{ $thNumberClass }}">Price/L</th>
-                                            <th class="{{ $thNumberClass }}">Amount</th>
+                                            <th class="{{ $tankTransactionThClass }}">Date / Time</th>
+                                            <th class="{{ $tankTransactionThClass }}">Ref</th>
+                                            <th class="{{ $tankTransactionThClass }}">Pump</th>
+                                            <th class="{{ $tankTransactionThClass }}">Staff</th>
+                                            <th class="{{ $tankTransactionThClass }}">Customer</th>
+                                            <th class="{{ $tankTransactionThClass }}">Payment</th>
+                                            <th class="{{ $tankTransactionThNumberClass }}">Liters</th>
+                                            <th class="{{ $tankTransactionThNumberClass }}">Price/L</th>
+                                            <th class="{{ $tankTransactionThNumberClass }}">Amount</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                                         @forelse ($tankTransactionRows as $transaction)
                                             <tr>
-                                                <td class="{{ $tdClass }}">{{ $transaction->created_at ? \Carbon\Carbon::parse($transaction->created_at)->format('M d, Y h:i A') : 'N/A' }}</td>
-                                                <td class="{{ $tdPrimaryClass }}">{{ $transaction->or_number ?: 'TXN-' . $transaction->id }}</td>
-                                                <td class="{{ $tdClass }}">P{{ $transaction->pump_id }}</td>
-                                                <td class="{{ $tdClass }}">{{ $transaction->staff_name }}</td>
-                                                <td class="{{ $tdClass }}">{{ $transaction->customer_display }}</td>
-                                                <td class="{{ $tdClass }}">
+                                                <td class="{{ $tankTransactionTdClass }}">{{ $transaction->created_at ? \Carbon\Carbon::parse($transaction->created_at)->format('M d, Y h:i A') : 'N/A' }}</td>
+                                                <td class="{{ $tankTransactionTdPrimaryClass }} break-words">{{ $transaction->or_number ?: 'TXN-' . $transaction->id }}</td>
+                                                <td class="{{ $tankTransactionTdClass }}">P{{ $transaction->pump_id }}</td>
+                                                <td class="{{ $tankTransactionTdClass }} break-words">{{ $transaction->staff_name }}</td>
+                                                <td class="{{ $tankTransactionTdClass }} break-words">{{ $transaction->customer_display }}</td>
+                                                <td class="{{ $tankTransactionTdClass }}">
                                                     @if (strtolower((string) $transaction->payment_type) === 'credit')
                                                         <span class="inline-flex rounded-full bg-warning-50 px-2.5 py-0.5 text-theme-xs font-medium text-warning-700 dark:bg-warning-500/15 dark:text-warning-400">Credit</span>
                                                     @else
                                                         <span class="inline-flex rounded-full bg-success-50 px-2.5 py-0.5 text-theme-xs font-medium text-success-700 dark:bg-success-500/15 dark:text-success-500">Walk-In</span>
                                                     @endif
                                                 </td>
-                                                <td class="{{ $tdNumberClass }}">{{ number_format((float) $transaction->liters, 2) }} L</td>
-                                                <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $transaction->price_applied, 2) }}</td>
-                                                <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) $transaction->amount, 2) }}</td>
+                                                <td class="{{ $tankTransactionTdNumberClass }}">{{ number_format((float) $transaction->liters, 2) }} L</td>
+                                                <td class="{{ $tankTransactionTdNumberClass }}">&#8369;{{ number_format((float) $transaction->price_applied, 2) }}</td>
+                                                <td class="{{ $tankTransactionTdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) $transaction->amount, 2) }}</td>
                                             </tr>
                                         @empty
                                             <tr>

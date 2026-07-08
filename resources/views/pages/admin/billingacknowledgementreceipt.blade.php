@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Acknowledgement Receipt - {{ $invoice->invoice_number }}</title>
+    @include('layouts.browser-icon')
     <style>
         @page { margin: 1.2cm; size: A4 portrait; }
         body {

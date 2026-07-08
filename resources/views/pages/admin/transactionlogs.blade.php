@@ -309,6 +309,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             const chartElement = document.getElementById('reportSalesChart');
             let reportSalesChart = null;
+            let reportChartResizeTimer = null;
 
             function initReportDatePickers() {
                 if (!window.flatpickr) {
@@ -342,7 +343,6 @@
                             width: '100%'
                         }
                     }, false, true);
-                    window.dispatchEvent(new Event('resize'));
                 });
             }
 
@@ -426,12 +426,14 @@
 
             window.addEventListener('report-tab-changed', function(event) {
                 if (event.detail && event.detail.tab === 'sales') {
-                    setTimeout(syncReportSalesChart, 40);
+                    window.clearTimeout(reportChartResizeTimer);
+                    reportChartResizeTimer = window.setTimeout(syncReportSalesChart, 40);
                 }
             });
 
             window.addEventListener('resize', function() {
-                setTimeout(syncReportSalesChart, 40);
+                window.clearTimeout(reportChartResizeTimer);
+                reportChartResizeTimer = window.setTimeout(syncReportSalesChart, 80);
             });
         });
     </script>

@@ -9,10 +9,28 @@
             'rejected' => 0,
             'voided' => 0,
         ], $summary ?? []);
+        $filters = array_merge([
+            'date_from' => '',
+            'date_to' => '',
+            'staff_id' => null,
+        ], $filters ?? []);
+        $staffOptions = collect($staffOptions ?? []);
+        $perPageOptions = $perPageOptions ?? [10, 20, 50, 100];
+        $perPage = (int) ($perPage ?? 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
+        $filterDateFrom = (string) ($filters['date_from'] ?? '');
+        $filterDateTo = (string) ($filters['date_to'] ?? '');
+        $filterStaffId = (string) ($filters['staff_id'] ?? '');
+        $hasReconciliationFilters = $filterDateFrom !== '' || $filterDateTo !== '' || $filterStaffId !== '';
+        $readingTotal = method_exists($readings, 'total') ? $readings->total() : collect($readings ?? [])->count();
+        $readingFirstItem = method_exists($readings, 'firstItem') ? $readings->firstItem() : ($readingTotal > 0 ? 1 : null);
+        $readingLastItem = method_exists($readings, 'lastItem') ? $readings->lastItem() : $readingTotal;
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
+        $dateInputClass = 'h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent py-2.5 pl-4 pr-11 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
@@ -26,11 +44,13 @@
         $undoIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-error-200 bg-error-50 text-error-600 shadow-theme-xs transition hover:border-error-300 hover:bg-error-100 dark:border-error-500/25 dark:bg-error-500/10 dark:text-error-400 dark:hover:bg-error-500/15';
         $primaryButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-brand-600';
         $dangerButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg bg-error-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-error-600';
+        $secondaryButtonClass = 'inline-flex h-9 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 text-theme-xs font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $eyeIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $messageIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $checkIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $xIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         $undoIcon = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 14 4 9l5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h10.5a5.5 5.5 0 1 1 0 11H11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" class="size-6"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 2C8.41421 2 8.75 2.33579 8.75 2.75V3.75H15.25V2.75C15.25 2.33579 15.5858 2 16 2C16.4142 2 16.75 2.33579 16.75 2.75V3.75H18.5C19.7426 3.75 20.75 4.75736 20.75 6V9V19C20.75 20.2426 19.7426 21.25 18.5 21.25H5.5C4.25736 21.25 3.25 20.2426 3.25 19V9V6C3.25 4.75736 4.25736 3.75 5.5 3.75H7.25V2.75C7.25 2.33579 7.58579 2 8 2ZM8 5.25H5.5C5.08579 5.25 4.75 5.58579 4.75 6V8.25H19.25V6C19.25 5.58579 18.9142 5.25 18.5 5.25H16H8ZM19.25 9.75H4.75V19C4.75 19.4142 5.08579 19.75 5.5 19.75H18.5C18.9142 19.75 19.25 19.4142 19.25 19V9.75Z" fill="currentColor"></path></svg></span>';
 
         $dipstickValue = function ($reading, array $fields) {
             foreach ($fields as $field) {
@@ -227,9 +247,42 @@
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement Queue</h2>
-                    <p class="mt-1 {{ $captionClass }}">Newest readings appear first.</p>
+                    <p class="mt-1 {{ $captionClass }}">{{ $hasReconciliationFilters ? 'Filtered readings appear first.' : 'Newest readings appear first.' }}</p>
                 </div>
             </div>
+
+            <form method="GET" action="{{ route('admin.reconcile.index') }}" class="border-b border-gray-100 px-5 py-4 dark:border-gray-800" data-shift-reconciliation-filters>
+                <input type="hidden" name="per_page" value="{{ $perPage }}">
+                <div class="flex flex-col gap-3 lg:flex-row lg:flex-nowrap lg:items-center">
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
+                        <span class="shrink-0">Date From</span>
+                        <span class="relative block custom-datepicker lg:w-44 xl:w-52">
+                            <input type="text" name="date_from" value="{{ $filterDateFrom }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker>
+                            {!! $dateIcon !!}
+                        </span>
+                    </label>
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
+                        <span class="shrink-0">Date To</span>
+                        <span class="relative block custom-datepicker lg:w-44 xl:w-52">
+                            <input type="text" name="date_to" value="{{ $filterDateTo }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker>
+                            {!! $dateIcon !!}
+                        </span>
+                    </label>
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
+                        <span class="shrink-0">Staff</span>
+                        <select name="staff_id" class="{{ $selectClass }} lg:w-52 xl:w-64">
+                            <option value="">All Staff</option>
+                            @foreach ($staffOptions as $staff)
+                                <option value="{{ $staff->id }}" {{ $filterStaffId === (string) $staff->id ? 'selected' : '' }}>{{ $staff->name }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <div class="flex flex-col gap-2 sm:flex-row lg:shrink-0">
+                        <button type="submit" class="{{ $primaryButtonClass }} h-11 w-full px-4 text-theme-sm lg:w-auto">Filter</button>
+                        <a href="{{ route('admin.reconcile.index') }}" class="{{ $secondaryButtonClass }} h-11 w-full px-4 text-theme-sm lg:w-auto">Reset</a>
+                    </div>
+                </div>
+            </form>
 
             <div class="max-w-full overflow-x-auto">
                 <table class="min-w-[1040px] w-full table-fixed">
@@ -329,8 +382,8 @@
                             <tr>
                                 <td colspan="7" class="px-5 py-12 text-center">
                                     <div class="mx-auto max-w-md">
-                                        <p class="text-theme-sm font-medium text-gray-800 dark:text-white/90">No shift readings found.</p>
-                                        <p class="mt-1 {{ $captionClass }}">Submitted staff readings will appear here for reconciliation.</p>
+                                        <p class="text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $hasReconciliationFilters ? 'No shift readings match the selected filters.' : 'No shift readings found.' }}</p>
+                                        <p class="mt-1 {{ $captionClass }}">{{ $hasReconciliationFilters ? 'Adjust the date range or staff filter and try again.' : 'Submitted staff readings will appear here for reconciliation.' }}</p>
                                     </div>
                                 </td>
                             </tr>
@@ -339,11 +392,74 @@
                 </table>
             </div>
 
-            @if ($readings->hasPages())
-                <div class="border-t border-gray-100 px-5 py-4 dark:border-gray-800">
-                    {{ $readings->onEachSide(1)->links() }}
+            <div class="flex flex-col gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <p class="{{ $captionClass }}">
+                        @if ($readingTotal > 0 && $readingFirstItem)
+                            Showing {{ number_format($readingFirstItem) }}-{{ number_format($readingLastItem) }} of {{ number_format($readingTotal) }} settlement{{ $readingTotal === 1 ? '' : 's' }}.
+                        @else
+                            No settlements found.
+                        @endif
+                    </p>
+                    <form method="GET" action="{{ route('admin.reconcile.index') }}" class="flex items-center gap-2">
+                        @if ($filterDateFrom !== '')
+                            <input type="hidden" name="date_from" value="{{ $filterDateFrom }}">
+                        @endif
+                        @if ($filterDateTo !== '')
+                            <input type="hidden" name="date_to" value="{{ $filterDateTo }}">
+                        @endif
+                        @if ($filterStaffId !== '')
+                            <input type="hidden" name="staff_id" value="{{ $filterStaffId }}">
+                        @endif
+                        <label for="reconciliation-per-page" class="text-theme-sm text-gray-500 dark:text-gray-400">Rows</label>
+                        <select id="reconciliation-per-page" name="per_page" class="h-9 w-20 rounded-lg border border-gray-300 bg-transparent px-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800" onchange="this.form.submit()">
+                            @foreach ($perPageOptions as $option)
+                                <option value="{{ $option }}" {{ (int) $perPage === (int) $option ? 'selected' : '' }}>{{ $option }}</option>
+                            @endforeach
+                        </select>
+                    </form>
                 </div>
-            @endif
+
+                @if ($readings->hasPages())
+                    @php
+                        $readingCurrentPage = method_exists($readings, 'currentPage') ? (int) $readings->currentPage() : 1;
+                        $readingLastPageNumber = method_exists($readings, 'lastPage') ? (int) $readings->lastPage() : $readingCurrentPage;
+                        $readingPageNumbers = collect([1, $readingCurrentPage - 1, $readingCurrentPage, $readingCurrentPage + 1, $readingLastPageNumber])
+                            ->filter(fn ($page) => $page >= 1 && $page <= $readingLastPageNumber)
+                            ->unique()
+                            ->sort()
+                            ->values();
+                        $previousReadingPage = null;
+                    @endphp
+                    <nav class="flex flex-wrap items-center gap-2 lg:justify-end" role="navigation" aria-label="Shift reconciliation pagination">
+                        @if ($readings->onFirstPage())
+                            <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Prev</span>
+                        @else
+                            <a href="{{ $readings->previousPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Prev</a>
+                        @endif
+
+                        @foreach ($readingPageNumbers as $page)
+                            @if ($previousReadingPage && $page > $previousReadingPage + 1)
+                                <span class="inline-flex h-9 min-w-9 items-center justify-center px-1 text-theme-sm text-gray-400 dark:text-gray-600">...</span>
+                            @endif
+
+                            @if ($page === $readingCurrentPage)
+                                <span class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-theme-sm font-medium text-white" aria-current="page">{{ $page }}</span>
+                            @else
+                                <a href="{{ $readings->url($page) }}" class="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">{{ $page }}</a>
+                            @endif
+
+                            @php $previousReadingPage = $page; @endphp
+                        @endforeach
+
+                        @if ($readings->hasMorePages())
+                            <a href="{{ $readings->nextPageUrl() }}" class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-theme-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]">Next</a>
+                        @else
+                            <span class="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-theme-sm font-medium text-gray-400 dark:border-gray-800 dark:text-gray-600">Next</span>
+                        @endif
+                    </nav>
+                @endif
+            </div>
         </section>
 
         <script type="application/json" id="reconciliationRowsData">@json($rowPayloads)</script>
@@ -704,6 +820,30 @@
             }
         }
 
+        function initReconciliationDatePickers() {
+            if (!window.flatpickr) {
+                return;
+            }
+
+            document.querySelectorAll('[data-reconciliation-datepicker]').forEach((input) => {
+                if (input._reconciliationDatePicker) {
+                    return;
+                }
+
+                input._reconciliationDatePicker = window.flatpickr(input, {
+                    dateFormat: 'Y-m-d',
+                    allowInput: true,
+                    disableMobile: true
+                });
+            });
+        }
+
+        function reconciliationFilterIsActive() {
+            const active = document.activeElement;
+
+            return Boolean(active && active.closest('[data-shift-reconciliation-filters]'));
+        }
+
         function rowsFromDocument(sourceDocument = document) {
             const script = sourceDocument.querySelector('#reconciliationRowsData');
 
@@ -753,6 +893,10 @@
                 return;
             }
 
+            if (!options.force && reconciliationFilterIsActive()) {
+                return;
+            }
+
             reconciliationRefreshInFlight = true;
 
             try {
@@ -779,6 +923,9 @@
                 }
 
                 syncReconciliationRows(sourceDocument);
+                if (didReplaceList) {
+                    initReconciliationDatePickers();
+                }
             } catch (error) {
                 if (options.showErrors) {
                     showToast(error.message || 'Unable to refresh shift readings.', 'error');
@@ -1374,6 +1521,7 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             showQueuedToast();
+            initReconciliationDatePickers();
             startReconciliationLivePolling();
 
             document.querySelectorAll('[data-close-modal]').forEach((button) => {

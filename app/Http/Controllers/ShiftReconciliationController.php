@@ -29,19 +29,37 @@ class ShiftReconciliationController extends Controller
     ) {
     }
 
-    public function index(): View
+    public function index(Request $request): View
     {
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date'],
+            'staff_id' => ['nullable', 'integer'],
+            'per_page' => ['nullable', 'integer', 'in:10,20,50,100'],
+        ]);
+
+        $perPageOptions = [10, 20, 50, 100];
+        $perPage = (int) ($validated['per_page'] ?? 10);
+        $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
+        $filters = [
+            'date_from' => $validated['date_from'] ?? null,
+            'date_to' => $validated['date_to'] ?? null,
+            'staff_id' => isset($validated['staff_id']) ? (int) $validated['staff_id'] : null,
+        ];
         $dataWarning = null;
+        $staffOptions = collect();
 
         if (! $this->hasTable('shift_readings')) {
-            $readings = $this->emptyPaginator();
+            $readings = $this->emptyPaginator($perPage);
             $summary = $this->emptySummary();
             $dataWarning = 'Shift reading records are not available yet.';
         } else {
-            $readings = $this->readingQuery()
+            $staffOptions = $this->staffFilterOptions();
+            $readings = $this->applyReadingFilters($this->readingQuery(), $filters)
                 ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderByDesc('shift_readings.created_at'))
                 ->when(! $this->hasColumn('shift_readings', 'created_at') && $this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderByDesc('shift_readings.id'))
-                ->paginate(15)
+                ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderByDesc('shift_readings.id'))
+                ->paginate($perPage, ['*'], 'reconciliation_page')
                 ->withQueryString();
 
             $readings->setCollection(
@@ -52,7 +70,7 @@ class ShiftReconciliationController extends Controller
                 })
             );
 
-            $summary = $this->summaryStats();
+            $summary = $this->summaryStats($filters);
         }
 
         return view('pages.admin.shiftreconciliation', [
@@ -60,6 +78,10 @@ class ShiftReconciliationController extends Controller
             'readings' => $readings,
             'summary' => $summary,
             'dataWarning' => $dataWarning,
+            'filters' => $filters,
+            'staffOptions' => $staffOptions,
+            'perPage' => $perPage,
+            'perPageOptions' => $perPageOptions,
         ]);
     }
 
@@ -302,6 +324,86 @@ class ShiftReconciliationController extends Controller
         }
 
         return $query->select($selects);
+    }
+
+    private function applyReadingFilters($query, array $filters)
+    {
+        $staffId = (int) ($filters['staff_id'] ?? 0);
+
+        if ($staffId > 0 && $this->hasColumn('shift_readings', 'user_id')) {
+            $query->where('shift_readings.user_id', $staffId);
+        }
+
+        $dateFrom = $filters['date_from'] ?? null;
+        $dateTo = $filters['date_to'] ?? null;
+
+        if ($dateFrom || $dateTo) {
+            $from = $dateFrom ? Carbon::parse($dateFrom)->toDateString() : null;
+            $to = $dateTo ? Carbon::parse($dateTo)->toDateString() : null;
+            $hasPeriodFrom = $this->hasColumn('shift_readings', 'period_from');
+            $hasPeriodTo = $this->hasColumn('shift_readings', 'period_to');
+
+            if ($hasPeriodFrom && $hasPeriodTo) {
+                if ($from && $to) {
+                    $query->whereDate('shift_readings.period_from', '<=', $to)
+                        ->whereDate('shift_readings.period_to', '>=', $from);
+                } elseif ($from) {
+                    $query->whereDate('shift_readings.period_to', '>=', $from);
+                } elseif ($to) {
+                    $query->whereDate('shift_readings.period_from', '<=', $to);
+                }
+            } elseif ($hasPeriodFrom) {
+                $query->when($from, fn ($query) => $query->whereDate('shift_readings.period_from', '>=', $from))
+                    ->when($to, fn ($query) => $query->whereDate('shift_readings.period_from', '<=', $to));
+            } elseif ($hasPeriodTo) {
+                $query->when($from, fn ($query) => $query->whereDate('shift_readings.period_to', '>=', $from))
+                    ->when($to, fn ($query) => $query->whereDate('shift_readings.period_to', '<=', $to));
+            } elseif ($this->hasColumn('shift_readings', 'created_at')) {
+                $query->when($from, fn ($query) => $query->whereDate('shift_readings.created_at', '>=', $from))
+                    ->when($to, fn ($query) => $query->whereDate('shift_readings.created_at', '<=', $to));
+            }
+        }
+
+        return $query;
+    }
+
+    private function staffFilterOptions()
+    {
+        if (! $this->hasTable('shift_readings') || ! $this->hasColumn('shift_readings', 'user_id')) {
+            return collect();
+        }
+
+        $staffIds = DB::table('shift_readings')
+            ->whereNotNull('user_id')
+            ->distinct()
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->values();
+
+        if ($staffIds->isEmpty()) {
+            return collect();
+        }
+
+        $names = collect();
+
+        if ($this->hasTable('users') && $this->hasColumn('users', 'id') && $this->hasColumn('users', 'name')) {
+            $names = DB::table('users')
+                ->whereIn('id', $staffIds->all())
+                ->pluck('name', 'id');
+        }
+
+        return $staffIds
+            ->map(function (int $id) use ($names) {
+                $name = trim((string) ($names[$id] ?? ''));
+
+                return (object) [
+                    'id' => $id,
+                    'name' => $name !== '' ? $name : "Staff #{$id}",
+                ];
+            })
+            ->sortBy(fn ($staff) => strtolower($staff->name))
+            ->values();
     }
 
     private function findReadingForAction(int $id, bool $lockForUpdate = false)
@@ -1234,7 +1336,7 @@ class ShiftReconciliationController extends Controller
         return DB::raw("{$default} as {$alias}");
     }
 
-    private function summaryStats(): array
+    private function summaryStats(array $filters = []): array
     {
         $summary = $this->emptySummary();
 
@@ -1243,12 +1345,12 @@ class ShiftReconciliationController extends Controller
         }
 
         if (! $this->hasColumn('shift_readings', 'status')) {
-            $summary['total'] = DB::table('shift_readings')->count();
+            $summary['total'] = $this->applyReadingFilters(DB::table('shift_readings'), $filters)->count();
 
             return $summary;
         }
 
-        DB::table('shift_readings')
+        $this->applyReadingFilters(DB::table('shift_readings'), $filters)
             ->selectRaw("LOWER(COALESCE(status, 'pending')) as status_key, COUNT(*) as total")
             ->groupBy('status_key')
             ->get()
@@ -1282,14 +1384,17 @@ class ShiftReconciliationController extends Controller
         ];
     }
 
-    private function emptyPaginator(): LengthAwarePaginator
+    private function emptyPaginator(int $perPage = 10): LengthAwarePaginator
     {
         return new LengthAwarePaginator(
             collect(),
             0,
-            15,
-            LengthAwarePaginator::resolveCurrentPage(),
-            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+            $perPage,
+            LengthAwarePaginator::resolveCurrentPage('reconciliation_page'),
+            [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => 'reconciliation_page',
+            ]
         );
     }
 
