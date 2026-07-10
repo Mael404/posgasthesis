@@ -71,4 +71,18 @@ class LitersMovementController extends Controller
             return back()->with('error', $e->getMessage());
         }
     }
+
+    public function voidGenerated(Request $request, int $period, LitersMovementTrackingService $tracking): RedirectResponse
+    {
+        try {
+            $result = $tracking->voidGeneratedPeriod($period, (int) $request->user()->id);
+            $periodCode = $result['period']->period_code ?? 'generated record';
+            $liters = number_format((float) ($result['restored_liters'] ?? 0), 2);
+            $submissions = number_format((int) ($result['restored_count'] ?? 0));
+
+            return back()->with('success', "Voided {$periodCode}. Restored {$submissions} submissions with {$liters} liters to the active period.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
 }

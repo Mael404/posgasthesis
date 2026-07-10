@@ -14,6 +14,7 @@ class LitersMovementTrackingService
     private const DEFAULT_LIMIT = 4000.0;
     private const ACTIVE_STATUS = 'active';
     private const GENERATED_STATUS = 'generated';
+    private const VOIDED_STATUS = 'voided';
     private const DEFAULT_FUEL_TYPES = ['Unleaded', 'Premium', 'Diesel'];
     private const DEFAULT_FUEL_LIMITS = [
         'regular' => 4000.0,
@@ -211,6 +212,126 @@ class LitersMovementTrackingService
         });
     }
 
+    public function voidGeneratedPeriod(int $periodId, int $voidedBy): array
+    {
+        if (! $this->isReady()) {
+            throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
+        }
+
+        return DB::transaction(function () use ($periodId, $voidedBy) {
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', $periodId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                throw new \RuntimeException('Generated history record was not found.');
+            }
+
+            if (($period->status ?? null) === self::VOIDED_STATUS) {
+                throw new \RuntimeException('This generated history record is already voided.');
+            }
+
+            if (($period->status ?? null) !== self::GENERATED_STATUS) {
+                throw new \RuntimeException('Only generated history records can be voided.');
+            }
+
+            $snapshot = $this->decodeSnapshot($period->totals_snapshot ?? null);
+            $readingIds = collect($snapshot['shift_reading_ids'] ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
+
+            if ($readingIds === []) {
+                $readingIds = DB::table('shift_readings')
+                    ->where('liters_tracking_period_id', $period->id)
+                    ->orderBy('id')
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+            }
+
+            if ($readingIds === []) {
+                throw new \RuntimeException('This generated record has no shift-reading submissions to restore.');
+            }
+
+            $activePeriod = DB::table('liters_tracking_periods')
+                ->where('status', self::ACTIVE_STATUS)
+                ->lockForUpdate()
+                ->orderByDesc('started_at')
+                ->orderByDesc('id')
+                ->first();
+
+            if (! $activePeriod) {
+                $activePeriod = DB::table('liters_tracking_periods')
+                    ->where('id', $this->createPeriod(
+                        (float) ($period->liters_limit ?? self::DEFAULT_LIMIT),
+                        now(),
+                        $this->storedTankLimitsForPeriod($period, $this->preparedTanks())
+                    ))
+                    ->first();
+            }
+
+            $restoredIds = DB::table('shift_readings')
+                ->whereIn('id', $readingIds)
+                ->where('liters_tracking_period_id', $period->id)
+                ->orderBy('id')
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($restoredIds === []) {
+                throw new \RuntimeException('The included shift-reading submissions are no longer attached to this generated record.');
+            }
+
+            DB::table('shift_readings')
+                ->whereIn('id', $restoredIds)
+                ->update(['liters_tracking_period_id' => $activePeriod->id]);
+
+            $voidedAt = now();
+            $restoredLiters = $this->liters(collect($snapshot['tank_breakdown'] ?? [])
+                ->flatMap(fn ($tank) => $tank['entries'] ?? [])
+                ->filter(fn ($entry) => in_array((int) ($entry['id'] ?? 0), $restoredIds, true))
+                ->sum(fn ($entry) => (float) ($entry['liters'] ?? 0)));
+
+            if ($restoredLiters <= 0) {
+                $restoredLiters = $this->liters((float) ($snapshot['total_liters'] ?? 0));
+            }
+
+            $snapshot['voided_at'] = $voidedAt->toDateTimeString();
+            $snapshot['voided_by'] = $voidedBy;
+            $snapshot['reverted_to_period_id'] = (int) $activePeriod->id;
+            $snapshot['reverted_shift_reading_ids'] = $restoredIds;
+            $snapshot['reverted_liters'] = $restoredLiters;
+
+            $updates = [
+                'status' => self::VOIDED_STATUS,
+                'totals_snapshot' => json_encode($snapshot),
+                'updated_at' => $voidedAt,
+            ];
+
+            if ($this->hasColumn('liters_tracking_periods', 'voided_at')) {
+                $updates['voided_at'] = $voidedAt;
+            }
+
+            if ($this->hasColumn('liters_tracking_periods', 'voided_by')) {
+                $updates['voided_by'] = $voidedBy;
+            }
+
+            DB::table('liters_tracking_periods')->where('id', $period->id)->update($updates);
+
+            return [
+                'period' => DB::table('liters_tracking_periods')->where('id', $period->id)->first(),
+                'active_period' => DB::table('liters_tracking_periods')->where('id', $activePeriod->id)->first(),
+                'restored_shift_reading_ids' => $restoredIds,
+                'restored_count' => count($restoredIds),
+                'restored_liters' => $restoredLiters,
+            ];
+        });
+    }
+
     public function history(int $perPage = 10, string $pageName = 'history_page'): LengthAwarePaginator
     {
         if (! $this->hasTable('liters_tracking_periods')) {
@@ -218,13 +339,31 @@ class LitersMovementTrackingService
         }
 
         $query = DB::table('liters_tracking_periods')
-            ->where('liters_tracking_periods.status', self::GENERATED_STATUS);
+            ->whereIn('liters_tracking_periods.status', [self::GENERATED_STATUS, self::VOIDED_STATUS]);
 
         if ($this->hasTable('users') && $this->hasColumn('users', 'name')) {
-            $query->leftJoin('users', 'liters_tracking_periods.generated_by', '=', 'users.id')
-                ->select('liters_tracking_periods.*', DB::raw("COALESCE(users.name, 'Admin') as generated_by_name"));
+            $query->leftJoin('users as generators', 'liters_tracking_periods.generated_by', '=', 'generators.id');
+
+            if ($this->hasColumn('liters_tracking_periods', 'voided_by')) {
+                $query->leftJoin('users as voiders', 'liters_tracking_periods.voided_by', '=', 'voiders.id')
+                    ->select(
+                        'liters_tracking_periods.*',
+                        DB::raw("COALESCE(generators.name, 'Admin') as generated_by_name"),
+                        DB::raw('voiders.name as voided_by_name')
+                    );
+            } else {
+                $query->select(
+                    'liters_tracking_periods.*',
+                    DB::raw("COALESCE(generators.name, 'Admin') as generated_by_name"),
+                    DB::raw('NULL as voided_by_name')
+                );
+            }
         } else {
-            $query->select('liters_tracking_periods.*', DB::raw("'Admin' as generated_by_name"));
+            $query->select(
+                'liters_tracking_periods.*',
+                DB::raw("'Admin' as generated_by_name"),
+                DB::raw('NULL as voided_by_name')
+            );
         }
 
         $paginator = $query

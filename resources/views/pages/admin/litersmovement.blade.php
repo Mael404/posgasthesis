@@ -46,6 +46,8 @@
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $dangerButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600 disabled:cursor-not-allowed disabled:opacity-60';
+        $smallSecondaryButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-theme-xs font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
+        $smallDangerButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-error-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-error-600';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
@@ -119,6 +121,81 @@
 
             return ['label' => 'Pending', 'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400'];
         };
+
+        $historyStatusStyle = function ($status) {
+            $status = strtolower(trim((string) $status));
+
+            if ($status === 'voided') {
+                return ['label' => 'Voided', 'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300'];
+            }
+
+            return ['label' => 'Generated', 'class' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'];
+        };
+
+        $historyDetailsPayload = $historyItems->mapWithKeys(function ($record) use ($dateLabel) {
+            $snapshot = is_array($record->snapshot ?? null) ? $record->snapshot : [];
+            $recordId = (int) ($record->id ?? 0);
+            $recordStatus = strtolower(trim((string) ($record->status ?? 'generated'))) ?: 'generated';
+            $recordLimit = (float) ($snapshot['liters_limit'] ?? $record->liters_limit ?? 0);
+            $recordLiters = (float) ($snapshot['total_liters'] ?? 0);
+            $recordSubmissions = (int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0);
+            $voidedAt = $record->voided_at ?? ($snapshot['voided_at'] ?? null);
+
+            $tanks = collect($snapshot['tank_breakdown'] ?? [])->map(function ($tank) use ($dateLabel) {
+                $tankName = (string) ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank');
+                $fuelType = (string) ($tank['fuel_type'] ?? 'Fuel');
+
+                $entries = collect($tank['entries'] ?? [])->map(function ($entry) use ($dateLabel, $tankName, $fuelType) {
+                    $periodFrom = $entry['period_from'] ?? null;
+                    $periodTo = $entry['period_to'] ?? null;
+                    $periodLabel = $periodFrom || $periodTo
+                        ? $dateLabel($periodFrom, 'M d, Y') . ' to ' . $dateLabel($periodTo, 'M d, Y')
+                        : 'N/A';
+
+                    return [
+                        'id' => (int) ($entry['id'] ?? 0),
+                        'staff_name' => (string) ($entry['staff_name'] ?? 'Staff'),
+                        'status' => (string) ($entry['status'] ?? 'Pending'),
+                        'created_at_label' => $dateLabel($entry['created_at'] ?? null),
+                        'period_label' => $periodLabel,
+                        'pump_id' => (int) ($entry['pump_id'] ?? 0),
+                        'tank_name' => $tankName,
+                        'fuel_type' => $fuelType,
+                        'liters' => (float) ($entry['liters'] ?? 0),
+                    ];
+                })->values()->all();
+
+                return [
+                    'id' => (string) ($tank['id'] ?? ''),
+                    'name' => $tankName,
+                    'fuel_type' => $fuelType,
+                    'connected_pumps' => (string) ($tank['connected_pumps_display'] ?? 'N/A'),
+                    'liters' => (float) ($tank['liters'] ?? 0),
+                    'limit' => isset($tank['limit']) ? (float) $tank['limit'] : null,
+                    'has_limit' => (bool) ($tank['has_limit'] ?? false),
+                    'status_label' => (string) ($tank['status']['label'] ?? 'Normal'),
+                    'entries' => $entries,
+                ];
+            })->values()->all();
+
+            return [$recordId => [
+                'id' => $recordId,
+                'period_code' => (string) ($record->period_code ?? 'Generated Record'),
+                'status' => $recordStatus,
+                'status_label' => ucfirst($recordStatus),
+                'started_at_label' => $dateLabel($record->started_at ?? null),
+                'ended_at_label' => $dateLabel($record->ended_at ?? null),
+                'generated_at_label' => $dateLabel($snapshot['generated_at'] ?? $record->ended_at ?? null),
+                'generated_by' => (string) ($record->generated_by_name ?? 'Admin'),
+                'voided_at_label' => ! empty($voidedAt) ? $dateLabel($voidedAt) : null,
+                'voided_by' => (string) ($record->voided_by_name ?? ''),
+                'limit' => $recordLimit,
+                'total_liters' => $recordLiters,
+                'submission_count' => $recordSubmissions,
+                'pump_entry_count' => (int) ($snapshot['pump_entry_count'] ?? 0),
+                'tanks' => $tanks,
+            ]];
+        })->all();
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Liters Movement" />
@@ -127,9 +204,10 @@
         x-data="litersMovementAdmin({
             sessionMessage: @js(session('success') ?: session('status')),
             sessionError: @js(session('error') ?: $errors->first()),
+            historyRecords: @js($historyDetailsPayload),
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
         class="space-y-6">
         <style>[x-cloak] { display: none !important; }</style>
@@ -479,15 +557,16 @@
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[1040px] w-full table-fixed">
+                    <table class="min-w-[1120px] w-full table-fixed">
                         <colgroup>
                             <col class="w-[17%]">
-                            <col class="w-[17%]">
-                            <col class="w-[17%]">
-                            <col class="w-[12%]">
-                            <col class="w-[12%]">
-                            <col class="w-[12%]">
                             <col class="w-[13%]">
+                            <col class="w-[13%]">
+                            <col class="w-[10%]">
+                            <col class="w-[10%]">
+                            <col class="w-[15%]">
+                            <col class="w-[10%]">
+                            <col class="w-[12%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
@@ -496,33 +575,65 @@
                                 <th class="{{ $thClass }}">Ended</th>
                                 <th class="{{ $thNumberClass }}">Limit</th>
                                 <th class="{{ $thNumberClass }}">Liters</th>
-                                <th class="{{ $thNumberClass }}">Meter Sales</th>
                                 <th class="{{ $thClass }}">Generated By</th>
+                                <th class="{{ $thClass }}">Status</th>
+                                <th class="{{ $thNumberClass }}">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             @forelse ($historyItems as $record)
                                 @php
                                     $snapshot = $record->snapshot ?? [];
+                                    $recordId = (int) ($record->id ?? 0);
+                                    $recordStatus = strtolower(trim((string) ($record->status ?? 'generated'))) ?: 'generated';
+                                    $historyStatus = $historyStatusStyle($recordStatus);
                                     $recordLiters = (float) ($snapshot['total_liters'] ?? 0);
-                                    $recordAmount = (float) ($snapshot['total_amount'] ?? 0);
                                     $recordLimit = (float) ($snapshot['liters_limit'] ?? $record->liters_limit ?? 0);
+                                    $recordSubmissions = (int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0);
+                                    $voidedAt = $record->voided_at ?? ($snapshot['voided_at'] ?? null);
                                 @endphp
                                 <tr>
                                     <td class="{{ $tdPrimaryClass }}">
                                         <div class="truncate" title="{{ $record->period_code }}">{{ $record->period_code }}</div>
-                                        <div class="mt-1 text-theme-xs font-normal text-gray-500 dark:text-gray-400">{{ number_format((int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0)) }} submissions</div>
+                                        <div class="mt-1 text-theme-xs font-normal text-gray-500 dark:text-gray-400">{{ number_format($recordSubmissions) }} submissions</div>
                                     </td>
                                     <td class="{{ $tdClass }}">{{ $dateLabel($record->started_at ?? null) }}</td>
                                     <td class="{{ $tdClass }}">{{ $dateLabel($record->ended_at ?? null) }}</td>
                                     <td class="{{ $tdNumberClass }}">{{ number_format($recordLimit, 2) }} L</td>
                                     <td class="{{ $tdNumberClass }}">{{ number_format($recordLiters, 2) }} L</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format($recordAmount, 2) }}</td>
-                                    <td class="{{ $tdClass }}">{{ $record->generated_by_name ?? 'Admin' }}</td>
+                                    <td class="{{ $tdClass }}">
+                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $record->generated_by_name ?? 'Admin' }}</div>
+                                        @if ($recordStatus === 'voided')
+                                            <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
+                                                Voided{{ ! empty($record->voided_by_name) ? ' by ' . $record->voided_by_name : '' }}{{ ! empty($voidedAt) ? ' on ' . $dateLabel($voidedAt) : '' }}
+                                            </div>
+                                        @endif
+                                    </td>
+                                    <td class="{{ $tdClass }}">
+                                        <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $historyStatus['class'] }}">{{ $historyStatus['label'] }}</span>
+                                    </td>
+                                    <td class="{{ $tdClass }}">
+                                        <div class="flex items-center justify-end gap-2">
+                                            <button type="button" x-on:click="openHistoryDetails({{ $recordId }})" class="{{ $smallSecondaryButtonClass }}" title="View included shift-reading submissions">
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 12s3.5-6.25 9.25-6.25S21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                                                Details
+                                            </button>
+
+                                            @if ($recordStatus === 'generated')
+                                                <form id="void-liters-period-{{ $recordId }}" method="POST" action="{{ route('admin.liters-movement.history.void', $recordId) }}" class="hidden">
+                                                    @csrf
+                                                </form>
+                                                <button type="button" x-on:click="confirmVoid(@js($record->period_code), 'void-liters-period-{{ $recordId }}', {{ $recordLiters }}, {{ $recordSubmissions }})" class="{{ $smallDangerButtonClass }}" title="Void this generated record and restore its included readings">
+                                                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.75 7.75h8.5a5.5 5.5 0 1 1-3.9 9.39" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.5 4.5 4.25 7.75 7.5 11" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                                    Void
+                                                </button>
+                                            @endif
+                                        </div>
+                                    </td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="7" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                    <td colspan="8" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
                                         No generated records yet.
                                     </td>
                                 </tr>
@@ -538,6 +649,192 @@
                 </div>
             @endif
         </section>
+
+        <div x-show="historyDetails.open" x-cloak class="fixed inset-0 z-[100040] flex items-center justify-center overflow-y-auto p-4">
+            <div x-show="historyDetails.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+            <div
+                x-show="historyDetails.open"
+                x-transition
+                x-on:click.outside="closeHistoryDetails()"
+                class="relative z-10 flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+                <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="truncate text-lg font-semibold text-gray-800 dark:text-white/90" x-text="historyDetails.record?.period_code || 'Generated Record'"></h3>
+                            <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium"
+                                :class="historyDetails.record?.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'"
+                                x-text="historyDetails.record?.status_label || 'Generated'"></span>
+                        </div>
+                        <p class="mt-1 {{ $captionClass }}">Included shift-reading submissions and pump movement saved in this generated record.</p>
+                    </div>
+                    <button type="button" x-on:click="closeHistoryDetails()" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close history details">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-5">
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Liters</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(historyDetails.record?.total_liters)"></span> L</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Submissions</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90" x-text="formatHistoryNumber(historyDetails.record?.submission_count, 0)"></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Generated</p>
+                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="historyDetails.record?.generated_at_label || 'N/A'"></p>
+                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="historyDetails.record?.generated_by || 'Admin'"></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Tracking Period</p>
+                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="historyDetails.record?.started_at_label || 'N/A'"></p>
+                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">to <span x-text="historyDetails.record?.ended_at_label || 'N/A'"></span></p>
+                        </div>
+                    </div>
+
+                    <div x-show="historyDetails.record?.status === 'voided'" class="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+                        Voided<span x-show="historyDetails.record?.voided_by"> by <span x-text="historyDetails.record?.voided_by"></span></span><span x-show="historyDetails.record?.voided_at_label"> on <span x-text="historyDetails.record?.voided_at_label"></span></span>. The included submissions were restored to the active liters movement period.
+                    </div>
+
+                    <div class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Per Tank Summary</h4>
+                        <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                            <div class="max-w-full overflow-x-auto">
+                                <table class="min-w-[760px] w-full table-fixed">
+                                    <colgroup>
+                                        <col class="w-[28%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[22%]">
+                                        <col class="w-[16%]">
+                                        <col class="w-[16%]">
+                                    </colgroup>
+                                    <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                                        <tr>
+                                            <th class="{{ $thClass }}">Tank</th>
+                                            <th class="{{ $thClass }}">Fuel</th>
+                                            <th class="{{ $thClass }}">Pumps</th>
+                                            <th class="{{ $thNumberClass }}">Liters</th>
+                                            <th class="{{ $thNumberClass }}">Limit</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        <template x-for="tank in historyTanks()" :key="tank.id || tank.name">
+                                            <tr>
+                                                <td class="{{ $tdPrimaryClass }}" x-text="tank.name"></td>
+                                                <td class="{{ $tdClass }}" x-text="tank.fuel_type"></td>
+                                                <td class="{{ $tdClass }}" x-text="tank.connected_pumps"></td>
+                                                <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(tank.liters)"></span> L</td>
+                                                <td class="{{ $tdNumberClass }}" x-text="formatTankLimit(tank)"></td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="historyTanks().length === 0">
+                                            <td colspan="5" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No tank movement was saved in this record.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h4>
+                        <div class="mt-3 space-y-3">
+                            <template x-for="submission in historySubmissions()" :key="submission.key">
+                                <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="font-semibold text-gray-800 dark:text-white/90">Shift Reading #<span x-text="submission.id"></span></p>
+                                                <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="submissionStatusClass(submission.status)" x-text="submission.status"></span>
+                                            </div>
+                                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Submitted <span x-text="submission.created_at_label"></span> by <span class="font-medium text-gray-700 dark:text-gray-300" x-text="submission.staff_name"></span></p>
+                                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="submission.period_label"></p>
+                                        </div>
+                                        <div class="text-left sm:text-right">
+                                            <p class="{{ $labelClass }}">Total Liters</p>
+                                            <p class="mt-1 font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(submission.total_liters)"></span> L</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-4 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-800">
+                                        <table class="w-full table-fixed">
+                                            <colgroup>
+                                                <col class="w-[18%]">
+                                                <col class="w-[34%]">
+                                                <col class="w-[28%]">
+                                                <col class="w-[20%]">
+                                            </colgroup>
+                                            <thead class="bg-gray-50 dark:bg-white/[0.02]">
+                                                <tr>
+                                                    <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Pump</th>
+                                                    <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Tank</th>
+                                                    <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Fuel</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Liters</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                                <template x-for="pump in submission.pumps" :key="`${submission.key}-${pump.pump_id}-${pump.tank_name}`">
+                                                    <tr>
+                                                        <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300">P<span x-text="pump.pump_id"></span></td>
+                                                        <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.tank_name"></td>
+                                                        <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.fuel_type"></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <div x-show="historySubmissions().length === 0" class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                No shift-reading submissions were saved in this record.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <button type="button" x-on:click="closeHistoryDetails()" class="{{ $secondaryButtonClass }}">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="voidConfirmation.open" x-cloak class="fixed inset-0 z-[100050] flex items-center justify-center overflow-y-auto p-4">
+            <div x-show="voidConfirmation.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+            <div
+                x-show="voidConfirmation.open"
+                x-transition
+                x-on:click.outside="resolveVoid(false)"
+                class="relative z-10 w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+                <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Void Generated Record</h3>
+                    <p class="mt-1 {{ $captionClass }}">Return the included shift-reading submissions to the active liters movement period?</p>
+                </div>
+                <div class="space-y-3 p-5">
+                    <div class="rounded-xl border border-gray-200 p-4 text-theme-sm dark:border-gray-800">
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Period</span>
+                            <span class="max-w-[12rem] truncate font-semibold text-gray-800 dark:text-white/90" x-text="voidConfirmation.periodCode"></span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Submissions to restore</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="formatHistoryNumber(voidConfirmation.submissions, 0)"></span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Liters to restore</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(voidConfirmation.liters)"></span> L</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
+                    <button type="button" x-on:click="resolveVoid(false)" class="{{ $secondaryButtonClass }}">Cancel</button>
+                    <button x-ref="voidPrimary" type="button" x-on:click="resolveVoid(true)" class="{{ $dangerButtonClass }}">Void & Restore</button>
+                </div>
+            </div>
+        </div>
 
         <div x-show="confirmation.open" x-cloak class="fixed inset-0 z-[100020] flex items-center justify-center overflow-y-auto p-4">
             <div x-show="confirmation.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
@@ -599,6 +896,9 @@
                 toast: { open: false, message: '', timer: null },
                 confirmation: { open: false },
                 messageDialog: { open: false, title: '', message: '' },
+                historyRecords: config.historyRecords || {},
+                historyDetails: { open: false, record: null },
+                voidConfirmation: { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 },
                 init() {
                     if (config.sessionMessage) {
                         this.showToast(config.sessionMessage);
@@ -641,9 +941,127 @@
                         this.$refs.generateForm.submit();
                     }
                 },
+                openHistoryDetails(recordId) {
+                    const record = this.historyRecords[String(recordId)] || this.historyRecords[recordId] || null;
+
+                    if (! record) {
+                        this.showMessage('Details Unavailable', 'This generated record has no saved details to display.');
+                        return;
+                    }
+
+                    this.historyDetails = {
+                        open: true,
+                        record: JSON.parse(JSON.stringify(record)),
+                    };
+                },
+                closeHistoryDetails() {
+                    this.historyDetails = { open: false, record: null };
+                },
+                historyTanks() {
+                    return this.historyDetails.record?.tanks || [];
+                },
+                historySubmissions() {
+                    const grouped = new Map();
+
+                    this.historyTanks().forEach((tank) => {
+                        (tank.entries || []).forEach((entry, index) => {
+                            const id = Number(entry.id || 0);
+                            const key = id > 0 ? String(id) : `${tank.id || tank.name}-${entry.pump_id || index}`;
+
+                            if (! grouped.has(key)) {
+                                grouped.set(key, {
+                                    key,
+                                    id: id > 0 ? id : 'N/A',
+                                    staff_name: entry.staff_name || 'Staff',
+                                    status: entry.status || 'Pending',
+                                    created_at_label: entry.created_at_label || 'N/A',
+                                    period_label: entry.period_label || 'N/A',
+                                    total_liters: 0,
+                                    pumps: [],
+                                });
+                            }
+
+                            const submission = grouped.get(key);
+                            const liters = Number(entry.liters || 0);
+
+                            submission.total_liters = Math.round((submission.total_liters + liters) * 100) / 100;
+                            submission.pumps.push({
+                                pump_id: entry.pump_id || 0,
+                                tank_name: entry.tank_name || tank.name || 'Tank',
+                                fuel_type: entry.fuel_type || tank.fuel_type || 'Fuel',
+                                liters,
+                            });
+                        });
+                    });
+
+                    return Array.from(grouped.values());
+                },
+                formatHistoryNumber(value, decimals = 2) {
+                    const number = Number(value || 0);
+
+                    return number.toLocaleString(undefined, {
+                        minimumFractionDigits: decimals,
+                        maximumFractionDigits: decimals,
+                    });
+                },
+                formatTankLimit(tank) {
+                    if (! tank || ! tank.has_limit) {
+                        return 'No limit';
+                    }
+
+                    return `${this.formatHistoryNumber(tank.limit)} L`;
+                },
+                submissionStatusClass(status) {
+                    const value = String(status || '').toLowerCase();
+
+                    if (value.includes('verified') || value.includes('approved')) {
+                        return 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500';
+                    }
+
+                    return 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400';
+                },
+                confirmVoid(periodCode, formId, liters, submissions) {
+                    this.voidConfirmation = {
+                        open: true,
+                        periodCode: periodCode || 'generated record',
+                        formId,
+                        liters: Number(liters || 0),
+                        submissions: Number(submissions || 0),
+                    };
+
+                    this.$nextTick(() => {
+                        if (this.$refs.voidPrimary) {
+                            this.$refs.voidPrimary.focus();
+                        }
+                    });
+                },
+                resolveVoid(confirmed) {
+                    const formId = this.voidConfirmation.formId;
+                    this.voidConfirmation = { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 };
+
+                    if (! confirmed || ! formId) {
+                        return;
+                    }
+
+                    const form = document.getElementById(formId);
+
+                    if (form) {
+                        form.submit();
+                    }
+                },
                 closeTopLayer() {
                     if (this.messageDialog.open) {
                         this.closeMessage();
+                        return;
+                    }
+
+                    if (this.voidConfirmation.open) {
+                        this.resolveVoid(false);
+                        return;
+                    }
+
+                    if (this.historyDetails.open) {
+                        this.closeHistoryDetails();
                         return;
                     }
 

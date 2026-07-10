@@ -34,6 +34,8 @@ beforeEach(function () {
         $table->timestamp('started_at')->nullable();
         $table->timestamp('ended_at')->nullable();
         $table->unsignedBigInteger('generated_by')->nullable();
+        $table->timestamp('voided_at')->nullable();
+        $table->unsignedBigInteger('voided_by')->nullable();
         $table->text('totals_snapshot')->nullable();
         $table->timestamps();
     });
@@ -151,4 +153,26 @@ test('generate record snapshots shift readings and starts a zeroed shared period
         ->and($newState['summary']['total_liters'])->toBe(0.0)
         ->and($newState['summary']['submission_count'])->toBe(0)
         ->and((int) $newState['period']->id)->not->toBe(1);
+});
+
+test('voiding a generated record restores its included shift readings to the active period', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $generatedPeriodId = (int) $generated['period']->id;
+    $activePeriodId = (int) $generated['new_period']->id;
+
+    $result = $service->voidGeneratedPeriod($generatedPeriodId, 88);
+    $snapshot = json_decode((string) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('totals_snapshot'), true);
+    $newState = $service->state();
+
+    expect($result['restored_shift_reading_ids'])->toBe([10, 11])
+        ->and($result['restored_count'])->toBe(2)
+        ->and($result['restored_liters'])->toBe(500.0)
+        ->and(DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('status'))->toBe('voided')
+        ->and((int) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('voided_by'))->toBe(88)
+        ->and($snapshot['reverted_to_period_id'])->toBe($activePeriodId)
+        ->and($snapshot['reverted_shift_reading_ids'])->toBe([10, 11])
+        ->and(DB::table('shift_readings')->whereIn('id', [10, 11])->pluck('liters_tracking_period_id', 'id')->all())->toBe([10 => $activePeriodId, 11 => $activePeriodId])
+        ->and($newState['summary']['total_liters'])->toBe(500.0)
+        ->and($newState['summary']['submission_count'])->toBe(2);
 });
