@@ -91,6 +91,148 @@ class LitersMovementTrackingService
         return (int) $this->ensureActivePeriod()->id;
     }
 
+    public function canAdjustLiters(): bool
+    {
+        return $this->isReady() && $this->hasTable('liters_movement_adjustments');
+    }
+
+    public function deductPumpLiters(
+        int $shiftReadingId,
+        int $pumpNumber,
+        float $liters,
+        int $createdBy,
+        int $authorizedBy,
+        ?string $reason = null
+    ): object {
+        $this->assertAdjustmentReady();
+
+        $pumpNumber = (int) $pumpNumber;
+        $liters = $this->liters($liters);
+
+        if (! array_key_exists($pumpNumber, self::PUMP_FUEL_TYPES)) {
+            throw new \RuntimeException('Choose a valid pump.');
+        }
+
+        if ($liters <= 0) {
+            throw new \RuntimeException('Enter liters greater than zero.');
+        }
+
+        return DB::transaction(function () use ($shiftReadingId, $pumpNumber, $liters, $createdBy, $authorizedBy, $reason) {
+            $period = $this->ensureActivePeriod();
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', (int) $period->id)
+                ->where('status', self::ACTIVE_STATUS)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                throw new \RuntimeException('Active liters movement period was not found.');
+            }
+
+            $this->attachUntrackedShiftReadingsToPeriod($period);
+
+            $reading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reading) {
+                throw new \RuntimeException('Shift-reading submission was not found.');
+            }
+
+            if ((int) ($reading->liters_tracking_period_id ?? 0) !== (int) $period->id) {
+                throw new \RuntimeException('Only submissions in the active liters movement period can be adjusted.');
+            }
+
+            if (! $this->isIncludedReadingStatus($reading->status ?? null)) {
+                throw new \RuntimeException('Only pending or verified submissions can be adjusted.');
+            }
+
+            $rawLiters = $this->rawPumpLiters($reading, $pumpNumber);
+
+            if ($rawLiters <= 0) {
+                throw new \RuntimeException("Pump {$pumpNumber} has no liters to deduct from this submission.");
+            }
+
+            $activeAdjustments = $this->adjustmentsForReadings([$reading->id], true)[(int) $reading->id] ?? [];
+            $alreadyDeducted = $this->activeAdjustmentLitersForPump($activeAdjustments, $pumpNumber);
+            $availableLiters = $this->liters(max(0, $rawLiters - $alreadyDeducted));
+
+            if ($liters > $availableLiters) {
+                throw new \RuntimeException('Deduction cannot exceed the remaining pump liters (' . number_format($availableLiters, 2) . ' L).');
+            }
+
+            $now = now();
+            $adjustmentId = DB::table('liters_movement_adjustments')->insertGetId([
+                'liters_tracking_period_id' => (int) $period->id,
+                'shift_reading_id' => (int) $reading->id,
+                'pump_number' => $pumpNumber,
+                'liters' => $liters,
+                'reason' => $this->cleanText($reason),
+                'created_by' => $createdBy,
+                'authorized_by' => $authorizedBy,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+            $this->touchPeriodAndReading((int) $period->id, (int) $reading->id, $now);
+
+            return DB::table('liters_movement_adjustments')->where('id', $adjustmentId)->first();
+        });
+    }
+
+    public function voidDeduction(int $adjustmentId, int $voidedBy, int $authorizedBy, ?string $reason = null): object
+    {
+        $this->assertAdjustmentReady();
+
+        return DB::transaction(function () use ($adjustmentId, $voidedBy, $authorizedBy, $reason) {
+            $adjustment = DB::table('liters_movement_adjustments')
+                ->where('id', $adjustmentId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $adjustment) {
+                throw new \RuntimeException('Liters deduction was not found.');
+            }
+
+            if (! empty($adjustment->voided_at)) {
+                throw new \RuntimeException('This liters deduction is already voided.');
+            }
+
+            $reading = DB::table('shift_readings')
+                ->where('id', (int) $adjustment->shift_reading_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reading) {
+                throw new \RuntimeException('The shift-reading submission for this deduction was not found.');
+            }
+
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', (int) ($reading->liters_tracking_period_id ?? 0))
+                ->where('status', self::ACTIVE_STATUS)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                throw new \RuntimeException('Only deductions attached to the active liters movement period can be voided from staff liters tracking.');
+            }
+
+            $now = now();
+            DB::table('liters_movement_adjustments')->where('id', $adjustment->id)->update([
+                'voided_at' => $now,
+                'voided_by' => $voidedBy,
+                'void_authorized_by' => $authorizedBy,
+                'void_reason' => $this->cleanText($reason),
+                'updated_at' => $now,
+            ]);
+
+            $this->touchPeriodAndReading((int) $period->id, (int) $reading->id, $now);
+
+            return DB::table('liters_movement_adjustments')->where('id', $adjustment->id)->first();
+        });
+    }
+
     public function updateActiveLimit(float $limit): object
     {
         return $this->updateActiveLimits(['legacy' => $limit]);
@@ -523,6 +665,7 @@ class LitersMovementTrackingService
         $totalLiters = 0.0;
         $totalAmount = 0.0;
         $pumpEntryCount = 0;
+        $adjustmentsByReading = $this->adjustmentsForReadings($rows->pluck('id')->all(), true);
 
         foreach ($rows as $reading) {
             $staffKey = (int) ($reading->user_id ?? 0);
@@ -542,7 +685,7 @@ class LitersMovementTrackingService
             $readingLiters = 0.0;
             $readingAmount = 0.0;
 
-            foreach ($this->pumpEntriesForReading($reading) as $entry) {
+            foreach ($this->pumpEntriesForReading($reading, $adjustmentsByReading[(int) ($reading->id ?? 0)] ?? []) as $entry) {
                 $liters = $entry['liters'];
                 $amount = $entry['amount'];
                 $fuel = $entry['fuel_type'];
@@ -583,6 +726,8 @@ class LitersMovementTrackingService
                     'staff_name' => trim((string) ($reading->staff_name ?? 'Staff')) ?: 'Staff',
                     'status' => trim((string) ($reading->status ?? 'Pending')) ?: 'Pending',
                     'liters' => $liters,
+                    'raw_liters' => $entry['raw_liters'] ?? $liters,
+                    'deducted_liters' => $entry['deducted_liters'] ?? 0,
                     'price_per_liter' => $entry['price_per_liter'],
                     'amount' => $amount,
                 ];
@@ -658,9 +803,20 @@ class LitersMovementTrackingService
             ->paginate($perPage, ['*'], $pageName)
             ->withQueryString();
 
-        $paginator->getCollection()->transform(function ($reading) {
-            $entries = $this->pumpEntriesForReading($reading);
+        $readingIds = $paginator->getCollection()
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->values()
+            ->all();
+        $activeAdjustmentsByReading = $this->adjustmentsForReadings($readingIds, true);
+        $allAdjustmentsByReading = $this->adjustmentsForReadings($readingIds, false);
+
+        $paginator->getCollection()->transform(function ($reading) use ($activeAdjustmentsByReading, $allAdjustmentsByReading) {
+            $readingId = (int) ($reading->id ?? 0);
+            $entries = $this->pumpEntriesForReading($reading, $activeAdjustmentsByReading[$readingId] ?? []);
             $reading->pump_entries = $entries;
+            $reading->liter_adjustments = $allAdjustmentsByReading[$readingId] ?? [];
             $reading->total_liters = $this->liters(collect($entries)->sum('liters'));
             $reading->total_amount = $this->money(collect($entries)->sum('amount'));
             $reading->status = trim((string) ($reading->status ?? 'Pending')) ?: 'Pending';
@@ -698,34 +854,127 @@ class LitersMovementTrackingService
         }
     }
 
-    private function pumpEntriesForReading(object $reading): array
+    private function pumpEntriesForReading(object $reading, array $activeAdjustments = []): array
     {
         $entries = [];
 
         foreach (self::PUMP_FUEL_TYPES as $pumpId => $fuelType) {
-            $litersStart = (float) ($reading->{"pump{$pumpId}_liters_start"} ?? 0);
-            $litersEnd = (float) ($reading->{"pump{$pumpId}_liters_end"} ?? $litersStart);
-            $liters = $this->liters(max(0, $litersEnd - $litersStart));
+            $rawLiters = $this->rawPumpLiters($reading, $pumpId);
+            $deductedLiters = $this->liters(min($rawLiters, $this->activeAdjustmentLitersForPump($activeAdjustments, $pumpId)));
+            $liters = $this->liters(max(0, $rawLiters - $deductedLiters));
 
-            if ($liters <= 0) {
+            if ($rawLiters <= 0 && $deductedLiters <= 0) {
                 continue;
             }
 
             $salesStart = (float) ($reading->{"pump{$pumpId}_sales_start"} ?? 0);
             $salesEnd = (float) ($reading->{"pump{$pumpId}_sales_end"} ?? $salesStart);
             $amount = $this->money(max(0, $salesEnd - $salesStart));
-            $price = $amount > 0 ? $amount / $liters : $this->priceForFuel($fuelType);
+            $price = $amount > 0 && $rawLiters > 0 ? $amount / $rawLiters : $this->priceForFuel($fuelType);
 
             $entries[] = [
                 'pump_id' => $pumpId,
                 'fuel_type' => $fuelType,
                 'liters' => $liters,
+                'raw_liters' => $rawLiters,
+                'deducted_liters' => $deductedLiters,
                 'price_per_liter' => $this->money($price),
                 'amount' => $amount,
+                'adjustments' => collect($activeAdjustments)
+                    ->filter(fn ($adjustment) => (int) ($adjustment['pump_number'] ?? 0) === $pumpId)
+                    ->values()
+                    ->all(),
             ];
         }
 
         return $entries;
+    }
+
+    private function rawPumpLiters(object $reading, int $pumpId): float
+    {
+        $litersStart = (float) ($reading->{"pump{$pumpId}_liters_start"} ?? 0);
+        $litersEnd = (float) ($reading->{"pump{$pumpId}_liters_end"} ?? $litersStart);
+
+        return $this->liters(max(0, $litersEnd - $litersStart));
+    }
+
+    private function adjustmentsForReadings(array $readingIds, bool $activeOnly = false): array
+    {
+        $readingIds = collect($readingIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($readingIds === [] || ! $this->hasTable('liters_movement_adjustments')) {
+            return [];
+        }
+
+        $query = DB::table('liters_movement_adjustments')
+            ->whereIn('liters_movement_adjustments.shift_reading_id', $readingIds);
+
+        if ($activeOnly) {
+            $query->whereNull('liters_movement_adjustments.voided_at');
+        }
+
+        $selects = ['liters_movement_adjustments.*'];
+
+        if ($this->hasTable('users') && $this->hasColumn('users', 'id') && $this->hasColumn('users', 'name')) {
+            $query
+                ->leftJoin('users as creators', 'liters_movement_adjustments.created_by', '=', 'creators.id')
+                ->leftJoin('users as authorizers', 'liters_movement_adjustments.authorized_by', '=', 'authorizers.id')
+                ->leftJoin('users as voiders', 'liters_movement_adjustments.voided_by', '=', 'voiders.id')
+                ->leftJoin('users as void_authorizers', 'liters_movement_adjustments.void_authorized_by', '=', 'void_authorizers.id');
+
+            $selects[] = DB::raw("COALESCE(creators.name, 'Staff') as created_by_name");
+            $selects[] = DB::raw("COALESCE(authorizers.name, 'Semi Admin') as authorized_by_name");
+            $selects[] = DB::raw('voiders.name as voided_by_name');
+            $selects[] = DB::raw('void_authorizers.name as void_authorized_by_name');
+        } else {
+            $selects[] = DB::raw("'Staff' as created_by_name");
+            $selects[] = DB::raw("'Semi Admin' as authorized_by_name");
+            $selects[] = DB::raw('NULL as voided_by_name');
+            $selects[] = DB::raw('NULL as void_authorized_by_name');
+        }
+
+        return $query
+            ->select($selects)
+            ->orderBy('liters_movement_adjustments.created_at')
+            ->orderBy('liters_movement_adjustments.id')
+            ->get()
+            ->map(fn ($adjustment) => $this->formatAdjustment($adjustment))
+            ->groupBy('shift_reading_id')
+            ->map(fn ($adjustments) => $adjustments->values()->all())
+            ->all();
+    }
+
+    private function formatAdjustment(object $adjustment): array
+    {
+        return [
+            'id' => (int) ($adjustment->id ?? 0),
+            'liters_tracking_period_id' => (int) ($adjustment->liters_tracking_period_id ?? 0),
+            'shift_reading_id' => (int) ($adjustment->shift_reading_id ?? 0),
+            'pump_number' => (int) ($adjustment->pump_number ?? 0),
+            'liters' => $this->liters($adjustment->liters ?? 0),
+            'reason' => (string) ($adjustment->reason ?? ''),
+            'created_at' => $adjustment->created_at ?? null,
+            'created_by' => trim((string) ($adjustment->created_by_name ?? 'Staff')) ?: 'Staff',
+            'authorized_by' => trim((string) ($adjustment->authorized_by_name ?? 'Semi Admin')) ?: 'Semi Admin',
+            'voided_at' => $adjustment->voided_at ?? null,
+            'voided_by' => trim((string) ($adjustment->voided_by_name ?? '')) ?: null,
+            'void_authorized_by' => trim((string) ($adjustment->void_authorized_by_name ?? '')) ?: null,
+            'void_reason' => (string) ($adjustment->void_reason ?? ''),
+            'status' => empty($adjustment->voided_at) ? 'active' : 'voided',
+        ];
+    }
+
+    private function activeAdjustmentLitersForPump(array $adjustments, int $pumpId): float
+    {
+        return $this->liters(collect($adjustments)
+            ->filter(fn ($adjustment) => (int) ($adjustment['pump_number'] ?? 0) === $pumpId)
+            ->filter(fn ($adjustment) => ($adjustment['status'] ?? 'active') === 'active')
+            ->sum(fn ($adjustment) => (float) ($adjustment['liters'] ?? 0)));
     }
 
     private function emptySummary(?object $period): array
@@ -1183,6 +1432,43 @@ class LitersMovementTrackingService
         $decoded = json_decode((string) $snapshot, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function assertAdjustmentReady(): void
+    {
+        if (! $this->isReady()) {
+            throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
+        }
+
+        if (! $this->hasTable('liters_movement_adjustments')) {
+            throw new \RuntimeException('Liters movement adjustments are not migrated yet. Run php artisan migrate.');
+        }
+    }
+
+    private function isIncludedReadingStatus($status): bool
+    {
+        $status = strtolower(trim((string) $status));
+
+        return $status === ''
+            || str_contains($status, 'pending')
+            || str_contains($status, 'verified')
+            || str_contains($status, 'approved');
+    }
+
+    private function touchPeriodAndReading(int $periodId, int $readingId, $timestamp): void
+    {
+        DB::table('liters_tracking_periods')->where('id', $periodId)->update(['updated_at' => $timestamp]);
+
+        if ($this->hasColumn('shift_readings', 'updated_at')) {
+            DB::table('shift_readings')->where('id', $readingId)->update(['updated_at' => $timestamp]);
+        }
+    }
+
+    private function cleanText($value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? Str::limit($value, 255, '') : null;
     }
 
     private function isReady(): bool

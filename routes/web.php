@@ -259,6 +259,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/sales-history/print', [StaffSalesController::class, 'print'])->name('sales.print');
 
         Route::get('/liters-tracking', [LitersMovementController::class, 'staff'])->name('liters-tracking.index');
+        Route::post('/liters-tracking/readings/{reading}/deductions', [LitersMovementController::class, 'storeDeduction'])
+            ->whereNumber('reading')
+            ->name('liters-tracking.deductions.store');
+        Route::post('/liters-tracking/deductions/{deduction}/void', [LitersMovementController::class, 'voidDeduction'])
+            ->whereNumber('deduction')
+            ->name('liters-tracking.deductions.void');
 
         Route::prefix('printed-transactions')->name('printed-transactions.')->group(function () {
             Route::get('/', [PrintedTransactionController::class, 'index'])->name('index');

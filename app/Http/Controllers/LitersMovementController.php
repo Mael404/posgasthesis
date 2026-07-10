@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Services\LitersMovementTrackingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\View\View;
 
 class LitersMovementController extends Controller
@@ -19,6 +21,7 @@ class LitersMovementController extends Controller
             'summary' => $state['summary'],
             'transactions' => $state['transactions'],
             'missingRequirements' => $state['missingRequirements'],
+            'canManageAdjustments' => $tracking->canAdjustLiters(),
         ]);
     }
 
@@ -72,6 +75,74 @@ class LitersMovementController extends Controller
         }
     }
 
+    public function storeDeduction(Request $request, int $reading, LitersMovementTrackingService $tracking): RedirectResponse
+    {
+        $validated = $request->validate([
+            'pump_number' => ['required', 'integer', 'in:1,2,3,4,5,6'],
+            'liters' => ['required', 'numeric', 'min:0.01', 'max:99999999'],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'semiadmin_password' => ['required', 'string'],
+        ]);
+
+        try {
+            $authorizingSemiadmin = $this->findSemiadminByPassword($validated['semiadmin_password']);
+
+            if (! $authorizingSemiadmin) {
+                return back()
+                    ->with('error', 'Invalid semi-admin password.')
+                    ->withInput($request->except('semiadmin_password'));
+            }
+
+            $adjustment = $tracking->deductPumpLiters(
+                $reading,
+                (int) $validated['pump_number'],
+                (float) $validated['liters'],
+                (int) $request->user()->id,
+                (int) $authorizingSemiadmin->id,
+                $validated['reason'] ?? null
+            );
+
+            $liters = number_format((float) ($adjustment->liters ?? $validated['liters']), 2);
+            $pump = (int) ($adjustment->pump_number ?? $validated['pump_number']);
+
+            return back()->with('success', "Deducted {$liters} L from Pump {$pump}.");
+        } catch (\Throwable $e) {
+            return back()
+                ->with('error', $e->getMessage())
+                ->withInput($request->except('semiadmin_password'));
+        }
+    }
+
+    public function voidDeduction(Request $request, int $deduction, LitersMovementTrackingService $tracking): RedirectResponse
+    {
+        $validated = $request->validate([
+            'void_reason' => ['nullable', 'string', 'max:255'],
+            'semiadmin_password' => ['required', 'string'],
+        ]);
+
+        try {
+            $authorizingSemiadmin = $this->findSemiadminByPassword($validated['semiadmin_password']);
+
+            if (! $authorizingSemiadmin) {
+                return back()->with('error', 'Invalid semi-admin password.');
+            }
+
+            $adjustment = $tracking->voidDeduction(
+                $deduction,
+                (int) $request->user()->id,
+                (int) $authorizingSemiadmin->id,
+                $validated['void_reason'] ?? null
+            );
+
+            $liters = number_format((float) ($adjustment->liters ?? 0), 2);
+            $pump = (int) ($adjustment->pump_number ?? 0);
+
+            return back()->with('success', "Voided the {$liters} L deduction for Pump {$pump}.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
     public function voidGenerated(Request $request, int $period, LitersMovementTrackingService $tracking): RedirectResponse
     {
         try {
@@ -84,5 +155,15 @@ class LitersMovementController extends Controller
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
+    }
+
+    private function findSemiadminByPassword(string $password)
+    {
+        return DB::table('users')
+            ->where('role', 'semiadmin')
+            ->get()
+            ->first(function ($user) use ($password) {
+                return Hash::check($password, $user->password);
+            });
     }
 }
