@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\HandlesVoidedSettlementDisplay;
+use App\Services\LitersMovementTrackingService;
 use App\Services\ShiftReadingInventoryService;
 use App\Support\StaffHeaderNotifications;
 use Carbon\Carbon;
@@ -28,7 +29,8 @@ class StaffReadingController extends Controller
     private array $columnPresence = [];
 
     public function __construct(
-        private readonly ShiftReadingInventoryService $shiftReadingInventory
+        private readonly ShiftReadingInventoryService $shiftReadingInventory,
+        private readonly LitersMovementTrackingService $litersMovementTracking
     ) {
     }
 
@@ -134,6 +136,10 @@ class StaffReadingController extends Controller
                     'updated_at' => now(),
                 ];
 
+                if ($this->hasColumn('shift_readings', 'liters_tracking_period_id')) {
+                    $payload['liters_tracking_period_id'] = $this->litersMovementTracking->activePeriodIdForNewShiftReading();
+                }
+
                 for ($pump = 1; $pump <= self::PUMP_COUNT; $pump++) {
                     foreach (['sales_start', 'sales_end', 'liters_start', 'liters_end'] as $suffix) {
                         $payload["pump{$pump}_{$suffix}"] = $validated["pump{$pump}_{$suffix}"];
@@ -166,7 +172,7 @@ class StaffReadingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Settlement submitted. Its meter-recorded fuel was deducted from the connected tanks and is pending verification.',
+                'message' => 'Settlement submitted. Its meter-recorded fuel was added to the shared liters movement, deducted from the connected tanks, and is pending verification.',
                 'id' => $readingId,
             ]);
         } catch (ValidationException $e) {

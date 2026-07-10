@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\LitersMovementTrackingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -90,8 +89,6 @@ class StaffPumpController extends Controller
                 $manualExcess = (float) ($validated['manual_excess'] ?? 0);
                 $orNumber = $this->cleanOptionalText($validated['or_number'] ?? null);
                 $referenceNo = $this->generateTransactionReference();
-                $litersTrackingPeriodId = app(LitersMovementTrackingService::class)->activePeriodIdForNewFuelSale();
-
                 $creditCustomer = null;
                 $walkinCustomerId = null;
                 $walkinName = $this->normalizeWalkinName($validated['walkin_name'] ?? null);
@@ -175,7 +172,6 @@ class StaffPumpController extends Controller
                     'discount' => $autoDiscount,
                     'manual_discount' => $manualDiscount,
                     'surcharge' => $totalSurcharge,
-                    'liters_tracking_period_id' => $litersTrackingPeriodId,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);

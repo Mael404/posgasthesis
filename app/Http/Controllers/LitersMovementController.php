@@ -11,7 +11,7 @@ class LitersMovementController extends Controller
 {
     public function staff(LitersMovementTrackingService $tracking): View
     {
-        $state = $tracking->state((int) auth()->id(), 20, 'tracking_page');
+        $state = $tracking->state(null, 20, 'tracking_page');
 
         return view('pages.staff.literstracking', [
             'title' => 'Liters Tracking',

@@ -11,6 +11,8 @@
             'percent' => 0,
             'progress_width' => 0,
             'transaction_count' => 0,
+            'submission_count' => 0,
+            'pump_entry_count' => 0,
             'fuel_breakdown' => [],
             'tank_breakdown' => [],
             'staff_breakdown' => [],
@@ -108,14 +110,14 @@
             ];
         };
 
-        $paymentStyle = function ($type) {
-            $type = strtolower(trim((string) $type));
+        $readingStatusStyle = function ($status) {
+            $status = strtolower(trim((string) $status));
 
-            if ($type === 'credit') {
-                return ['label' => 'Credit Sale', 'class' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'];
+            if (str_contains($status, 'verified') || str_contains($status, 'approved')) {
+                return ['label' => 'Verified', 'class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'];
             }
 
-            return ['label' => 'Cash / Walk-In', 'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300'];
+            return ['label' => 'Pending', 'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400'];
         };
     @endphp
 
@@ -169,6 +171,7 @@
             <div class="rounded-xl border border-error-200 bg-error-50 p-4 text-theme-sm text-error-800 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
                 <span class="font-semibold">Tank limit reached:</span>
                 {{ $reachedLimits->map(fn ($tank) => ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank') . ' (' . number_format((float) ($tank['liters'] ?? 0), 2) . ' L / ' . number_format((float) ($tank['limit'] ?? 0), 2) . ' L)')->implode(', ') }}.
+                Staff can continue submitting shift readings; the limit is an alert and does not block submission.
             </div>
         @endif
 
@@ -178,7 +181,7 @@
                     <p class="{{ $labelClass }}">Admin Module</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Liters Movement</h1>
                     <p class="mt-2 {{ $captionClass }}">
-                        Period {{ $period->period_code ?? 'Pending Migration' }} started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}.
+                        Shared period {{ $period->period_code ?? 'Pending Migration' }} started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}. Totals come from submitted staff shift readings.
                     </p>
                 </div>
 
@@ -227,7 +230,7 @@
             <article class="{{ $cardClass }}">
                 <p class="{{ $labelClass }}">Total Liters</p>
                 <p class="{{ $valueClass }}">{{ number_format((float) $summary['total_liters'], 2) }} L</p>
-                <p class="mt-1 {{ $captionClass }}">&#8369;{{ number_format((float) $summary['total_amount'], 2) }}</p>
+                <p class="mt-1 {{ $captionClass }}">&#8369;{{ number_format((float) $summary['total_amount'], 2) }} meter sales</p>
             </article>
             <article class="{{ $cardClass }}">
                 <p class="{{ $labelClass }}">Configured Limits</p>
@@ -242,7 +245,7 @@
             <article class="{{ $cardClass }} {{ $summary['status']['border_class'] }}">
                 <p class="{{ $labelClass }}">Reached Tanks</p>
                 <p class="{{ $valueClass }}">{{ number_format($reachedLimits->count()) }}</p>
-                <p class="mt-1 {{ $captionClass }}">{{ number_format((int) $summary['transaction_count']) }} active transaction{{ (int) $summary['transaction_count'] === 1 ? '' : 's' }}</p>
+                <p class="mt-1 {{ $captionClass }}">{{ number_format((int) $summary['submission_count']) }} included shift submission{{ (int) $summary['submission_count'] === 1 ? '' : 's' }}</p>
             </article>
         </section>
 
@@ -281,7 +284,7 @@
         <section class="space-y-4">
             <div>
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
-                <p class="mt-1 {{ $captionClass }}">Quantity, price, and totals separated by tank for the active period.</p>
+                <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank.</p>
             </div>
 
             <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -303,16 +306,18 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-3 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
-                            <div class="px-4 py-2">Qty (L)</div>
+                        <div class="grid grid-cols-4 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+                            <div class="px-4 py-2">Pump</div>
+                            <div class="px-4 py-2 text-right">Qty (L)</div>
                             <div class="px-4 py-2 text-right">Price</div>
                             <div class="px-4 py-2 text-right">Total</div>
                         </div>
 
                         <div class="max-h-[360px] overflow-y-auto">
                             @forelse ($entries as $entry)
-                                <div class="grid grid-cols-3 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
-                                    <div class="px-4 py-2.5 tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
+                                <div class="grid grid-cols-4 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
+                                    <div class="px-4 py-2.5 font-medium text-gray-800 dark:text-white/90">P{{ (int) ($entry['pump_id'] ?? 0) }}</div>
+                                    <div class="px-4 py-2.5 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
                                     <div class="px-4 py-2.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($entry['price_per_liter'] ?? 0), 2) }}</div>
                                     <div class="px-4 py-2.5 text-right tabular-nums font-medium text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['amount'] ?? 0), 2) }}</div>
                                 </div>
@@ -323,8 +328,9 @@
                             @endforelse
                         </div>
 
-                        <div class="grid grid-cols-3 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
-                            <div class="px-4 py-3 tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
+                        <div class="grid grid-cols-4 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
+                            <div class="px-4 py-3 text-gray-800 dark:text-white/90">Total</div>
+                            <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
                             <div class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($tank['price_per_liter'] ?? 0), 2) }}</div>
                             <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['amount'] ?? 0), 2) }}</div>
                         </div>
@@ -352,7 +358,7 @@
                                     <th class="{{ $thClass }}">Staff</th>
                                     <th class="{{ $thNumberClass }}">Liters</th>
                                     <th class="{{ $thNumberClass }}">Amount</th>
-                                    <th class="{{ $thNumberClass }}">Rows</th>
+                                    <th class="{{ $thNumberClass }}">Submissions</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -361,12 +367,12 @@
                                         <td class="{{ $tdPrimaryClass }}">{{ $staff['staff_name'] }}</td>
                                         <td class="{{ $tdNumberClass }}">{{ number_format((float) $staff['liters'], 2) }} L</td>
                                         <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $staff['amount'], 2) }}</td>
-                                        <td class="{{ $tdNumberClass }}">{{ number_format((int) $staff['transaction_count']) }}</td>
+                                        <td class="{{ $tdNumberClass }}">{{ number_format((int) ($staff['submission_count'] ?? $staff['transaction_count'] ?? 0)) }}</td>
                                     </tr>
                                 @empty
                                     <tr>
                                         <td colspan="4" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">
-                                            No staff transactions included yet.
+                                            No pending or verified shift submissions included yet.
                                         </td>
                                     </tr>
                                 @endforelse
@@ -379,46 +385,42 @@
         <section class="{{ $cardClass }}">
             <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Active Pump Transactions</h2>
-                    <p class="mt-1 {{ $captionClass }}">All staff fuel transactions in the active tracking period.</p>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h2>
+                    <p class="mt-1 {{ $captionClass }}">Pending and verified submissions share the same global tank limits.</p>
                 </div>
                 <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
-                    {{ number_format((int) $summary['transaction_count']) }} rows
+                    {{ number_format((int) $summary['submission_count']) }} submissions
                 </span>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[1160px] w-full table-fixed">
+                    <table class="min-w-[1120px] w-full table-fixed">
                         <colgroup>
-                            <col class="w-[13%]">
-                            <col class="w-[14%]">
+                            <col class="w-[15%]">
+                            <col class="w-[15%]">
                             <col class="w-[16%]">
-                            <col class="w-[20%]">
-                            <col class="w-[14%]">
+                            <col class="w-[24%]">
                             <col class="w-[10%]">
-                            <col class="w-[10%]">
+                            <col class="w-[12%]">
                             <col class="w-[8%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
-                                <th class="{{ $thClass }}">Date / Time</th>
+                                <th class="{{ $thClass }}">Submitted</th>
                                 <th class="{{ $thClass }}">Staff</th>
-                                <th class="{{ $thClass }}">Receipt</th>
-                                <th class="{{ $thClass }}">Customer</th>
-                                <th class="{{ $thClass }}">Pump / Fuel</th>
+                                <th class="{{ $thClass }}">Reading Period</th>
+                                <th class="{{ $thClass }}">Pump Meter Deltas</th>
                                 <th class="{{ $thNumberClass }}">Liters</th>
-                                <th class="{{ $thNumberClass }}">Amount</th>
-                                <th class="{{ $thClass }}">Pay</th>
+                                <th class="{{ $thNumberClass }}">Meter Sales</th>
+                                <th class="{{ $thClass }}">Status</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             @forelse ($transactionItems as $transaction)
                                 @php
-                                    $fuel = $fuelStyle($transaction->fuel_type ?? '');
-                                    $payment = $paymentStyle($transaction->payment_type ?? '');
-                                    $receipt = trim((string) ($transaction->or_number ?? ''));
-                                    $reference = trim((string) ($transaction->reference_no ?? ''));
+                                    $pumpEntries = collect($transaction->pump_entries ?? []);
+                                    $readingStatus = $readingStatusStyle($transaction->status ?? 'Pending');
                                 @endphp
                                 <tr>
                                     <td class="{{ $tdClass }}">
@@ -427,30 +429,33 @@
                                     </td>
                                     <td class="{{ $tdPrimaryClass }}">{{ $transaction->staff_name ?? 'Staff' }}</td>
                                     <td class="{{ $tdClass }}">
-                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $receipt !== '' ? $receipt : 'No Receipt' }}</div>
-                                        <div class="mt-1 truncate text-theme-xs text-gray-500 dark:text-gray-400" title="{{ $reference }}">{{ $reference !== '' ? $reference : 'No reference' }}</div>
-                                    </td>
-                                    <td class="{{ $tdPrimaryClass }}">
-                                        <div class="truncate" title="{{ $transaction->customer_display_name ?? 'Walk-In Customer' }}">{{ $transaction->customer_display_name ?? 'Walk-In Customer' }}</div>
-                                        <div class="mt-1 truncate text-theme-xs font-normal text-gray-500 dark:text-gray-400" title="{{ $transaction->plate_no ?? '' }}">{{ $transaction->plate_no ?: 'No plate' }}</div>
+                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $dateLabel($transaction->period_from ?? null, 'M d, Y') }}</div>
+                                        <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">to {{ $dateLabel($transaction->period_to ?? null, 'M d, Y') }}</div>
                                     </td>
                                     <td class="{{ $tdClass }}">
-                                        <div class="font-medium text-gray-800 dark:text-white/90">Pump {{ (int) ($transaction->pump_id ?? 0) }}</div>
-                                        <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $fuel['badge'] }}">
-                                            <span class="h-1.5 w-1.5 rounded-full {{ $fuel['dot'] }}"></span>
-                                            {{ $transaction->fuel_type ?? 'Fuel' }}
-                                        </span>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            @forelse ($pumpEntries as $entry)
+                                                @php
+                                                    $fuel = $fuelStyle($entry['fuel_type'] ?? '');
+                                                @endphp
+                                                <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $fuel['badge'] }}">
+                                                    P{{ (int) ($entry['pump_id'] ?? 0) }}: {{ number_format((float) ($entry['liters'] ?? 0), 2) }} L
+                                                </span>
+                                            @empty
+                                                <span class="text-theme-xs text-gray-500 dark:text-gray-400">No positive meter movement</span>
+                                            @endforelse
+                                        </div>
                                     </td>
-                                    <td class="{{ $tdNumberClass }}">{{ number_format((float) ($transaction->liters ?? 0), 2) }} L</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) ($transaction->amount ?? 0), 2) }}</td>
+                                    <td class="{{ $tdNumberClass }}">{{ number_format((float) ($transaction->total_liters ?? 0), 2) }} L</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) ($transaction->total_amount ?? 0), 2) }}</td>
                                     <td class="{{ $tdClass }}">
-                                        <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $payment['class'] }}">{{ $payment['label'] }}</span>
+                                        <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $readingStatus['class'] }}">{{ $readingStatus['label'] }}</span>
                                     </td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="8" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
-                                        No active-period pump transactions yet.
+                                    <td colspan="7" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                        No pending or verified shift-reading submissions in this period yet.
                                     </td>
                                 </tr>
                             @endforelse
@@ -491,7 +496,7 @@
                                 <th class="{{ $thClass }}">Ended</th>
                                 <th class="{{ $thNumberClass }}">Limit</th>
                                 <th class="{{ $thNumberClass }}">Liters</th>
-                                <th class="{{ $thNumberClass }}">Amount</th>
+                                <th class="{{ $thNumberClass }}">Meter Sales</th>
                                 <th class="{{ $thClass }}">Generated By</th>
                             </tr>
                         </thead>
@@ -506,7 +511,7 @@
                                 <tr>
                                     <td class="{{ $tdPrimaryClass }}">
                                         <div class="truncate" title="{{ $record->period_code }}">{{ $record->period_code }}</div>
-                                        <div class="mt-1 text-theme-xs font-normal text-gray-500 dark:text-gray-400">{{ number_format((int) ($snapshot['transaction_count'] ?? 0)) }} txn</div>
+                                        <div class="mt-1 text-theme-xs font-normal text-gray-500 dark:text-gray-400">{{ number_format((int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0)) }} submissions</div>
                                     </td>
                                     <td class="{{ $tdClass }}">{{ $dateLabel($record->started_at ?? null) }}</td>
                                     <td class="{{ $tdClass }}">{{ $dateLabel($record->ended_at ?? null) }}</td>
@@ -552,8 +557,8 @@
                             <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) $summary['total_liters'], 2) }} L</span>
                         </div>
                         <div class="mt-2 flex justify-between gap-4">
-                            <span class="text-gray-500 dark:text-gray-400">Transactions</span>
-                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((int) $summary['transaction_count']) }}</span>
+                            <span class="text-gray-500 dark:text-gray-400">Shift submissions</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((int) $summary['submission_count']) }}</span>
                         </div>
                         <div class="mt-2 flex justify-between gap-4">
                             <span class="text-gray-500 dark:text-gray-400">Limit</span>

@@ -20,6 +20,14 @@ class LitersMovementTrackingService
         'premium' => 4347.0,
         'diesel' => null,
     ];
+    private const PUMP_FUEL_TYPES = [
+        1 => 'Premium',
+        2 => 'Unleaded',
+        3 => 'Premium',
+        4 => 'Unleaded',
+        5 => 'Diesel',
+        6 => 'Diesel',
+    ];
 
     private array $tablePresence = [];
     private array $columnPresence = [];
@@ -37,7 +45,7 @@ class LitersMovementTrackingService
         }
 
         $period = $this->ensureActivePeriod();
-        $this->attachUntrackedFuelSalesToPeriod($period);
+        $this->attachUntrackedShiftReadingsToPeriod($period);
 
         return [
             'period' => $period,
@@ -73,7 +81,7 @@ class LitersMovementTrackingService
             ->first();
     }
 
-    public function activePeriodIdForNewFuelSale(): ?int
+    public function activePeriodIdForNewShiftReading(): ?int
     {
         if (! $this->isReady()) {
             return null;
@@ -147,14 +155,15 @@ class LitersMovementTrackingService
                     ->first();
             }
 
-            $this->attachUntrackedFuelSalesToPeriod($period);
+            $this->attachUntrackedShiftReadingsToPeriod($period);
 
-            $transactions = $this->summaryRowsForPeriod($period, null, true);
+            $readings = $this->summaryRowsForPeriod($period, null, true);
             $endedAt = now();
-            $summary = $this->summaryFromRows($period, $transactions);
-            $transactionIds = $transactions->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+            $summary = $this->summaryFromRows($period, $readings);
+            $readingIds = $readings->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
             $tankLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
             $snapshot = [
+                'source' => 'shift_readings',
                 'period_code' => $period->period_code,
                 'started_at' => $period->started_at,
                 'ended_at' => $endedAt->toDateTimeString(),
@@ -163,18 +172,20 @@ class LitersMovementTrackingService
                 'total_liters' => $summary['total_liters'],
                 'total_amount' => $summary['total_amount'],
                 'transaction_count' => $summary['transaction_count'],
+                'submission_count' => $summary['submission_count'],
+                'pump_entry_count' => $summary['pump_entry_count'],
                 'fuel_breakdown' => $summary['fuel_breakdown'],
                 'tank_breakdown' => $summary['tank_breakdown'],
                 'staff_breakdown' => $summary['staff_breakdown'],
                 'reached_limits' => $summary['reached_limits'],
-                'transaction_ids' => $transactionIds,
+                'shift_reading_ids' => $readingIds,
                 'generated_by' => $generatedBy,
                 'generated_at' => $endedAt->toDateTimeString(),
             ];
 
-            if ($transactionIds !== []) {
-                DB::table('sales')
-                    ->whereIn('id', $transactionIds)
+            if ($readingIds !== []) {
+                DB::table('shift_readings')
+                    ->whereIn('id', $readingIds)
                     ->update(['liters_tracking_period_id' => $period->id]);
             }
 
@@ -276,7 +287,7 @@ class LitersMovementTrackingService
                     'actorName' => 'Liters Movement',
                     'summary' => 'reached the limit for',
                     'context' => $tank['name'] ?? $tank['fuel_type'] ?? 'Tank',
-                    'body' => number_format($liters, 2) . ' L recorded against ' . number_format($limit, 2) . ' L. Review and generate the record when ready.',
+                    'body' => number_format($liters, 2) . ' L from submitted shift readings against ' . number_format($limit, 2) . ' L. This alert does not block new submissions.',
                     'badge' => $tank['fuel_type'] ?? 'Fuel',
                     'time' => 'Active now',
                     'url' => $url,
@@ -315,20 +326,18 @@ class LitersMovementTrackingService
         return $code;
     }
 
-    private function attachUntrackedFuelSalesToPeriod(object $period): void
+    private function attachUntrackedShiftReadingsToPeriod(object $period): void
     {
         if (! $this->isReady() || empty($period->id)) {
             return;
         }
 
-        $query = DB::table('sales')
+        $query = DB::table('shift_readings')
             ->whereNull('liters_tracking_period_id');
 
-        if ($this->hasColumn('sales', 'created_at') && ! empty($period->started_at)) {
+        if ($this->hasColumn('shift_readings', 'created_at') && ! empty($period->started_at)) {
             $query->where('created_at', '>=', $period->started_at);
         }
-
-        $this->scopeToFuelSales($query);
 
         $query->update(['liters_tracking_period_id' => $period->id]);
     }
@@ -340,10 +349,10 @@ class LitersMovementTrackingService
 
     private function summaryRowsForPeriod(object $period, ?int $staffId, bool $lock = false): Collection
     {
-        $query = $this->fuelSalesQuery($period, $staffId);
+        $query = $this->shiftReadingsQuery($period, $staffId);
 
         if ($this->hasTable('users') && $this->hasColumn('users', 'id')) {
-            $query->leftJoin('users', 'sales.user_id', '=', 'users.id');
+            $query->leftJoin('users', 'shift_readings.user_id', '=', 'users.id');
         }
 
         $staffExpression = $this->hasTable('users') && $this->hasColumn('users', 'name')
@@ -356,20 +365,11 @@ class LitersMovementTrackingService
 
         return $query
             ->select(
-                'sales.id',
-                'sales.user_id',
-                'sales.pump_id',
-                'sales.fuel_type',
-                'sales.liters',
-                'sales.price_applied',
-                'sales.amount',
-                'sales.or_number',
-                'sales.reference_no',
-                'sales.created_at',
+                'shift_readings.*',
                 DB::raw("{$staffExpression} as staff_name")
             )
-            ->orderBy('sales.created_at')
-            ->orderBy('sales.id')
+            ->orderBy('shift_readings.created_at')
+            ->orderBy('shift_readings.id')
             ->get();
     }
 
@@ -383,81 +383,92 @@ class LitersMovementTrackingService
         $staffBreakdown = [];
         $totalLiters = 0.0;
         $totalAmount = 0.0;
+        $pumpEntryCount = 0;
 
-        foreach ($rows as $row) {
-            $liters = $this->liters($row->liters ?? 0);
-            $amount = $this->money($row->amount ?? 0);
-
-            if ($liters <= 0) {
-                continue;
-            }
-
-            $fuel = $this->normalizeFuelType($row->fuel_type ?? '');
-            $fuelKey = $this->normalizeFuelKey($fuel);
-
-            if (! isset($fuelBreakdown[$fuel])) {
-                $fuelBreakdown[$fuel] = [
-                    'fuel_type' => $fuel,
-                    'liters' => 0.0,
-                    'amount' => 0.0,
-                    'transaction_count' => 0,
-                ];
-            }
-
-            $fuelBreakdown[$fuel]['liters'] = $this->liters($fuelBreakdown[$fuel]['liters'] + $liters);
-            $fuelBreakdown[$fuel]['amount'] = $this->money($fuelBreakdown[$fuel]['amount'] + $amount);
-            $fuelBreakdown[$fuel]['transaction_count']++;
-
-            $staffKey = (int) ($row->user_id ?? 0);
+        foreach ($rows as $reading) {
+            $staffKey = (int) ($reading->user_id ?? 0);
             $staffIndex = $staffKey > 0 ? (string) $staffKey : 'unknown';
 
             if (! isset($staffBreakdown[$staffIndex])) {
                 $staffBreakdown[$staffIndex] = [
                     'staff_id' => $staffKey ?: null,
-                    'staff_name' => trim((string) ($row->staff_name ?? 'Staff')) ?: 'Staff',
+                    'staff_name' => trim((string) ($reading->staff_name ?? 'Staff')) ?: 'Staff',
                     'liters' => 0.0,
                     'amount' => 0.0,
                     'transaction_count' => 0,
+                    'submission_count' => 0,
                 ];
             }
 
-            $staffBreakdown[$staffIndex]['liters'] = $this->liters($staffBreakdown[$staffIndex]['liters'] + $liters);
-            $staffBreakdown[$staffIndex]['amount'] = $this->money($staffBreakdown[$staffIndex]['amount'] + $amount);
-            $staffBreakdown[$staffIndex]['transaction_count']++;
+            $readingLiters = 0.0;
+            $readingAmount = 0.0;
 
-            $tankId = $pumpToTank[(int) ($row->pump_id ?? 0)] ?? ($fuelToTank[$fuelKey] ?? null);
+            foreach ($this->pumpEntriesForReading($reading) as $entry) {
+                $liters = $entry['liters'];
+                $amount = $entry['amount'];
+                $fuel = $entry['fuel_type'];
+                $fuelKey = $this->normalizeFuelKey($fuel);
 
-            if (! $tankId || ! isset($tankBreakdown[$tankId])) {
-                $tankId = 'unassigned';
-                $this->ensureUnassignedTankBreakdown($tankBreakdown, [
-                    'fuel_type' => $fuel,
-                    'connected_pumps_display' => (int) ($row->pump_id ?? 0) > 0 ? 'P' . (int) $row->pump_id : 'No tank match',
-                ]);
+                if (! isset($fuelBreakdown[$fuel])) {
+                    $fuelBreakdown[$fuel] = [
+                        'fuel_type' => $fuel,
+                        'liters' => 0.0,
+                        'amount' => 0.0,
+                        'transaction_count' => 0,
+                    ];
+                }
+
+                $fuelBreakdown[$fuel]['liters'] = $this->liters($fuelBreakdown[$fuel]['liters'] + $liters);
+                $fuelBreakdown[$fuel]['amount'] = $this->money($fuelBreakdown[$fuel]['amount'] + $amount);
+                $fuelBreakdown[$fuel]['transaction_count']++;
+
+                $tankId = $pumpToTank[$entry['pump_id']] ?? ($fuelToTank[$fuelKey] ?? null);
+
+                if (! $tankId || ! isset($tankBreakdown[$tankId])) {
+                    $tankId = 'unassigned';
+                    $this->ensureUnassignedTankBreakdown($tankBreakdown, [
+                        'fuel_type' => $fuel,
+                        'connected_pumps_display' => 'P' . $entry['pump_id'],
+                    ]);
+                }
+
+                $tankBreakdown[$tankId]['liters'] = $this->liters($tankBreakdown[$tankId]['liters'] + $liters);
+                $tankBreakdown[$tankId]['amount'] = $this->money($tankBreakdown[$tankId]['amount'] + $amount);
+                $tankBreakdown[$tankId]['transaction_count']++;
+                $tankBreakdown[$tankId]['entries'][] = [
+                    'id' => (int) ($reading->id ?? 0),
+                    'created_at' => $reading->created_at ?? null,
+                    'period_from' => $reading->period_from ?? null,
+                    'period_to' => $reading->period_to ?? null,
+                    'pump_id' => $entry['pump_id'],
+                    'staff_name' => trim((string) ($reading->staff_name ?? 'Staff')) ?: 'Staff',
+                    'status' => trim((string) ($reading->status ?? 'Pending')) ?: 'Pending',
+                    'liters' => $liters,
+                    'price_per_liter' => $entry['price_per_liter'],
+                    'amount' => $amount,
+                ];
+
+                $readingLiters = $this->liters($readingLiters + $liters);
+                $readingAmount = $this->money($readingAmount + $amount);
+                $pumpEntryCount++;
             }
 
-            $price = $this->transactionPrice($row, $fuel, $liters, $amount);
-            $tankBreakdown[$tankId]['liters'] = $this->liters($tankBreakdown[$tankId]['liters'] + $liters);
-            $tankBreakdown[$tankId]['amount'] = $this->money($tankBreakdown[$tankId]['amount'] + $amount);
-            $tankBreakdown[$tankId]['transaction_count']++;
-            $tankBreakdown[$tankId]['entries'][] = [
-                'id' => (int) ($row->id ?? 0),
-                'created_at' => $row->created_at ?? null,
-                'pump_id' => (int) ($row->pump_id ?? 0),
-                'staff_name' => trim((string) ($row->staff_name ?? 'Staff')) ?: 'Staff',
-                'receipt' => trim((string) ($row->or_number ?? '')),
-                'reference' => trim((string) ($row->reference_no ?? '')),
-                'liters' => $liters,
-                'price_per_liter' => $price,
-                'amount' => $amount,
-            ];
-
-            $totalLiters = $this->liters($totalLiters + $liters);
-            $totalAmount = $this->money($totalAmount + $amount);
+            $staffBreakdown[$staffIndex]['liters'] = $this->liters($staffBreakdown[$staffIndex]['liters'] + $readingLiters);
+            $staffBreakdown[$staffIndex]['amount'] = $this->money($staffBreakdown[$staffIndex]['amount'] + $readingAmount);
+            $staffBreakdown[$staffIndex]['transaction_count']++;
+            $staffBreakdown[$staffIndex]['submission_count']++;
+            $totalLiters = $this->liters($totalLiters + $readingLiters);
+            $totalAmount = $this->money($totalAmount + $readingAmount);
         }
 
         $tankRows = $this->formatTankBreakdown($tankBreakdown);
         $configuredLimit = $this->liters(collect($tankRows)->sum(fn ($tank) => (float) ($tank['limit'] ?? 0)));
-        $percent = $configuredLimit > 0 ? round(($totalLiters / $configuredLimit) * 100, 2) : 0.0;
+        $limitedLiters = $this->liters(collect($tankRows)->sum(
+            fn ($tank) => ($tank['has_limit'] ?? false) ? (float) ($tank['liters'] ?? 0) : 0
+        ));
+        $remainingLiters = $this->liters(collect($tankRows)->sum(fn ($tank) => (float) ($tank['remaining_liters'] ?? 0)));
+        $overLiters = $this->liters(collect($tankRows)->sum(fn ($tank) => (float) ($tank['over_liters'] ?? 0)));
+        $percent = $configuredLimit > 0 ? round(($limitedLiters / $configuredLimit) * 100, 2) : 0.0;
         $reachedLimits = collect($tankRows)
             ->filter(fn ($tank) => ($tank['status']['key'] ?? null) === 'limit_reached')
             ->values()
@@ -474,11 +485,13 @@ class LitersMovementTrackingService
             'total_amount' => $totalAmount,
             'limit' => $configuredLimit,
             'configured_limit_count' => collect($tankRows)->filter(fn ($tank) => (bool) ($tank['has_limit'] ?? false))->count(),
-            'remaining_liters' => $configuredLimit > 0 ? $this->liters(max(0, $configuredLimit - $totalLiters)) : 0.0,
-            'over_liters' => $configuredLimit > 0 ? $this->liters(max(0, $totalLiters - $configuredLimit)) : 0.0,
+            'remaining_liters' => $remainingLiters,
+            'over_liters' => $overLiters,
             'percent' => $percent,
             'progress_width' => min(100, max(0, $percent)),
             'transaction_count' => $rows->count(),
+            'submission_count' => $rows->count(),
+            'pump_entry_count' => $pumpEntryCount,
             'fuel_breakdown' => array_values($fuelBreakdown),
             'tank_breakdown' => $tankRows,
             'staff_breakdown' => collect($staffBreakdown)->sortByDesc('liters')->values()->all(),
@@ -489,100 +502,91 @@ class LitersMovementTrackingService
 
     private function transactionsForPeriod(object $period, ?int $staffId, int $perPage, string $pageName): LengthAwarePaginator
     {
-        $query = $this->fuelSalesQuery($period, $staffId);
-        $this->joinTransactionContext($query);
+        $query = $this->shiftReadingsQuery($period, $staffId);
 
-        return $query
-            ->select($this->transactionSelects())
-            ->orderByDesc('sales.created_at')
-            ->orderByDesc('sales.id')
+        if ($this->hasTable('users') && $this->hasColumn('users', 'id')) {
+            $query->leftJoin('users', 'shift_readings.user_id', '=', 'users.id');
+        }
+
+        $staffExpression = $this->hasTable('users') && $this->hasColumn('users', 'name')
+            ? "COALESCE(users.name, 'Staff')"
+            : "'Staff'";
+
+        $paginator = $query
+            ->select('shift_readings.*', DB::raw("{$staffExpression} as staff_name"))
+            ->orderByDesc('shift_readings.created_at')
+            ->orderByDesc('shift_readings.id')
             ->paginate($perPage, ['*'], $pageName)
             ->withQueryString();
+
+        $paginator->getCollection()->transform(function ($reading) {
+            $entries = $this->pumpEntriesForReading($reading);
+            $reading->pump_entries = $entries;
+            $reading->total_liters = $this->liters(collect($entries)->sum('liters'));
+            $reading->total_amount = $this->money(collect($entries)->sum('amount'));
+            $reading->status = trim((string) ($reading->status ?? 'Pending')) ?: 'Pending';
+
+            return $reading;
+        });
+
+        return $paginator;
     }
 
-    private function fuelSalesQuery(object $period, ?int $staffId)
+    private function shiftReadingsQuery(object $period, ?int $staffId)
     {
-        $query = DB::table('sales')
-            ->where('sales.liters_tracking_period_id', (int) $period->id);
+        $query = DB::table('shift_readings')
+            ->where('shift_readings.liters_tracking_period_id', (int) $period->id);
 
-        $this->scopeToFuelSales($query);
+        $this->scopeToIncludedShiftReadings($query);
 
-        if ($staffId !== null && $this->hasColumn('sales', 'user_id')) {
-            $query->where('sales.user_id', $staffId);
+        if ($staffId !== null && $this->hasColumn('shift_readings', 'user_id')) {
+            $query->where('shift_readings.user_id', $staffId);
         }
 
         return $query;
     }
 
-    private function scopeToFuelSales($query): void
+    private function scopeToIncludedShiftReadings($query): void
     {
-        if ($this->hasColumn('sales', 'payment_type')) {
+        if ($this->hasColumn('shift_readings', 'status')) {
             $query->where(function ($query) {
-                $query->whereNull('sales.payment_type')
-                    ->orWhereRaw('LOWER(sales.payment_type) != ?', ['collection']);
+                $query->whereNull('shift_readings.status')
+                    ->orWhereRaw("TRIM(LOWER(shift_readings.status)) = ''")
+                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%pending%'")
+                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%verified%'")
+                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%approved%'");
             });
         }
-
-        if ($this->hasColumn('sales', 'liters')) {
-            $query->where('sales.liters', '>', 0);
-        }
     }
 
-    private function joinTransactionContext($query): void
+    private function pumpEntriesForReading(object $reading): array
     {
-        if ($this->hasTable('users') && $this->hasColumn('users', 'id')) {
-            $query->leftJoin('users', 'sales.user_id', '=', 'users.id');
-        }
+        $entries = [];
 
-        if ($this->hasTable('customers') && $this->hasColumn('sales', 'customer_id')) {
-            $query->leftJoin('customers', 'sales.customer_id', '=', 'customers.id');
-        }
+        foreach (self::PUMP_FUEL_TYPES as $pumpId => $fuelType) {
+            $litersStart = (float) ($reading->{"pump{$pumpId}_liters_start"} ?? 0);
+            $litersEnd = (float) ($reading->{"pump{$pumpId}_liters_end"} ?? $litersStart);
+            $liters = $this->liters(max(0, $litersEnd - $litersStart));
 
-        if ($this->hasTable('customers') && $this->hasColumn('sales', 'posted_customer_id')) {
-            $query->leftJoin('customers as posted_customers', 'sales.posted_customer_id', '=', 'posted_customers.id');
-        }
-    }
-
-    private function transactionSelects(): array
-    {
-        $customerParts = [];
-
-        if ($this->hasTable('customers') && $this->hasColumn('sales', 'customer_id')) {
-            if ($this->hasColumn('customers', 'business_name')) {
-                $customerParts[] = 'customers.business_name';
+            if ($liters <= 0) {
+                continue;
             }
 
-            if ($this->hasColumn('customers', 'owner_name')) {
-                $customerParts[] = 'customers.owner_name';
-            }
+            $salesStart = (float) ($reading->{"pump{$pumpId}_sales_start"} ?? 0);
+            $salesEnd = (float) ($reading->{"pump{$pumpId}_sales_end"} ?? $salesStart);
+            $amount = $this->money(max(0, $salesEnd - $salesStart));
+            $price = $amount > 0 ? $amount / $liters : $this->priceForFuel($fuelType);
+
+            $entries[] = [
+                'pump_id' => $pumpId,
+                'fuel_type' => $fuelType,
+                'liters' => $liters,
+                'price_per_liter' => $this->money($price),
+                'amount' => $amount,
+            ];
         }
 
-        if ($this->hasTable('customers') && $this->hasColumn('sales', 'posted_customer_id')) {
-            if ($this->hasColumn('customers', 'business_name')) {
-                $customerParts[] = 'posted_customers.business_name';
-            }
-
-            if ($this->hasColumn('customers', 'owner_name')) {
-                $customerParts[] = 'posted_customers.owner_name';
-            }
-        }
-
-        if ($this->hasColumn('sales', 'customer_name')) {
-            $customerParts[] = 'sales.customer_name';
-        }
-
-        $customerExpression = $customerParts
-            ? 'COALESCE(' . implode(', ', $customerParts) . ", 'Walk-In Customer')"
-            : "'Walk-In Customer'";
-        $staffExpression = $this->hasTable('users') && $this->hasColumn('users', 'name')
-            ? "COALESCE(users.name, 'Staff')"
-            : "'Staff'";
-
-        return [
-            'sales.*',
-            DB::raw("{$staffExpression} as staff_name"),
-            DB::raw("{$customerExpression} as customer_display_name"),
-        ];
+        return $entries;
     }
 
     private function emptySummary(?object $period): array
@@ -601,6 +605,8 @@ class LitersMovementTrackingService
             'percent' => 0.0,
             'progress_width' => 0.0,
             'transaction_count' => 0,
+            'submission_count' => 0,
+            'pump_entry_count' => 0,
             'fuel_breakdown' => array_values($this->defaultFuelBreakdown($tanks)),
             'tank_breakdown' => $tankBreakdown,
             'staff_breakdown' => [],
@@ -934,7 +940,11 @@ class LitersMovementTrackingService
             return $this->fuelPrices;
         }
 
-        if (! $this->hasTable('fuel_prices')) {
+        if (
+            ! $this->hasTable('fuel_prices')
+            || ! $this->hasColumn('fuel_prices', 'fuel_type')
+            || ! $this->hasColumn('fuel_prices', 'price_per_liter')
+        ) {
             return $this->fuelPrices = [];
         }
 
@@ -944,21 +954,6 @@ class LitersMovementTrackingService
                 $this->normalizeFuelKey($row->fuel_type ?? '') => $this->money($row->price_per_liter ?? 0),
             ])
             ->all();
-    }
-
-    private function transactionPrice($row, string $fuelType, float $liters, float $amount): float
-    {
-        $price = (float) ($row->price_applied ?? 0);
-
-        if ($price <= 0 && $liters > 0 && $amount > 0) {
-            $price = $amount / $liters;
-        }
-
-        if ($price <= 0) {
-            $price = $this->priceForFuel($fuelType);
-        }
-
-        return $this->money($price);
     }
 
     private function statusFor(float $totalLiters, float $limit): array
@@ -1053,41 +1048,60 @@ class LitersMovementTrackingService
 
     private function isReady(): bool
     {
-        return $this->hasTable('liters_tracking_periods')
-            && $this->hasTable('sales')
-            && $this->hasTable('tanks')
-            && $this->hasTable('fuel_prices')
-            && $this->hasColumn('sales', 'liters_tracking_period_id')
-            && $this->hasColumn('sales', 'user_id')
-            && $this->hasColumn('sales', 'pump_id')
-            && $this->hasColumn('sales', 'liters')
-            && $this->hasColumn('sales', 'fuel_type')
-            && $this->hasColumn('sales', 'amount')
-            && $this->hasColumn('sales', 'created_at')
-            && $this->hasColumn('tanks', 'id')
-            && $this->hasColumn('tanks', 'fuel_type')
-            && $this->hasColumn('tanks', 'connected_pumps')
-            && $this->hasColumn('fuel_prices', 'fuel_type')
-            && $this->hasColumn('fuel_prices', 'price_per_liter');
+        if (
+            ! $this->hasTable('liters_tracking_periods')
+            || ! $this->hasTable('shift_readings')
+            || ! $this->hasTable('tanks')
+            || ! $this->hasColumn('shift_readings', 'liters_tracking_period_id')
+            || ! $this->hasColumn('shift_readings', 'id')
+            || ! $this->hasColumn('shift_readings', 'user_id')
+            || ! $this->hasColumn('shift_readings', 'created_at')
+            || ! $this->hasColumn('tanks', 'id')
+            || ! $this->hasColumn('tanks', 'fuel_type')
+            || ! $this->hasColumn('tanks', 'connected_pumps')
+        ) {
+            return false;
+        }
+
+        foreach (array_keys(self::PUMP_FUEL_TYPES) as $pumpId) {
+            if (
+                ! $this->hasColumn('shift_readings', "pump{$pumpId}_liters_start")
+                || ! $this->hasColumn('shift_readings', "pump{$pumpId}_liters_end")
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function missingRequirements(): array
     {
         $missing = [];
 
-        foreach (['liters_tracking_periods', 'sales', 'tanks', 'fuel_prices'] as $table) {
+        foreach (['liters_tracking_periods', 'shift_readings', 'tanks'] as $table) {
             if (! $this->hasTable($table)) {
                 $missing[] = $table;
             }
         }
 
-        if (! $this->hasTable('sales')) {
+        if (! $this->hasTable('shift_readings')) {
             return $missing;
         }
 
-        foreach (['liters_tracking_period_id', 'user_id', 'pump_id', 'liters', 'fuel_type', 'amount', 'created_at'] as $column) {
-            if (! $this->hasColumn('sales', $column)) {
-                $missing[] = "sales.{$column}";
+        foreach (['liters_tracking_period_id', 'id', 'user_id', 'created_at'] as $column) {
+            if (! $this->hasColumn('shift_readings', $column)) {
+                $missing[] = "shift_readings.{$column}";
+            }
+        }
+
+        foreach (array_keys(self::PUMP_FUEL_TYPES) as $pumpId) {
+            foreach (['liters_start', 'liters_end'] as $suffix) {
+                $column = "pump{$pumpId}_{$suffix}";
+
+                if (! $this->hasColumn('shift_readings', $column)) {
+                    $missing[] = "shift_readings.{$column}";
+                }
             }
         }
 
@@ -1095,14 +1109,6 @@ class LitersMovementTrackingService
             foreach (['id', 'fuel_type', 'connected_pumps'] as $column) {
                 if (! $this->hasColumn('tanks', $column)) {
                     $missing[] = "tanks.{$column}";
-                }
-            }
-        }
-
-        if ($this->hasTable('fuel_prices')) {
-            foreach (['fuel_type', 'price_per_liter'] as $column) {
-                if (! $this->hasColumn('fuel_prices', $column)) {
-                    $missing[] = "fuel_prices.{$column}";
                 }
             }
         }
