@@ -13,6 +13,8 @@
             'date_from' => '',
             'date_to' => '',
             'staff_id' => null,
+            'status' => '',
+            'variance' => '',
         ], $filters ?? []);
         $staffOptions = collect($staffOptions ?? []);
         $perPageOptions = $perPageOptions ?? [10, 20, 50, 100];
@@ -21,7 +23,20 @@
         $filterDateFrom = (string) ($filters['date_from'] ?? '');
         $filterDateTo = (string) ($filters['date_to'] ?? '');
         $filterStaffId = (string) ($filters['staff_id'] ?? '');
-        $hasReconciliationFilters = $filterDateFrom !== '' || $filterDateTo !== '' || $filterStaffId !== '';
+        $filterStatus = (string) ($filters['status'] ?? '');
+        $filterVariance = (string) ($filters['variance'] ?? '');
+        $hasReconciliationFilters = $filterDateFrom !== '' || $filterDateTo !== '' || $filterStaffId !== '' || $filterStatus !== '' || $filterVariance !== '';
+        $statusFilterOptions = [
+            'pending' => 'Pending Verification',
+            'verified' => 'Verified',
+            'rejected' => 'Rejected',
+            'voided' => 'Voided',
+        ];
+        $varianceFilterOptions = [
+            'balanced' => 'Balanced',
+            'shortage' => 'Shortage',
+            'overage' => 'Overage',
+        ];
         $readingTotal = method_exists($readings, 'total') ? $readings->total() : collect($readings ?? [])->count();
         $readingFirstItem = method_exists($readings, 'firstItem') ? $readings->firstItem() : ($readingTotal > 0 ? 1 : null);
         $readingLastItem = method_exists($readings, 'lastItem') ? $readings->lastItem() : $readingTotal;
@@ -253,33 +268,50 @@
 
             <form method="GET" action="{{ route('admin.reconcile.index') }}" class="border-b border-gray-100 px-5 py-4 dark:border-gray-800" data-shift-reconciliation-filters>
                 <input type="hidden" name="per_page" value="{{ $perPage }}">
-                <div class="flex flex-col gap-3 lg:flex-row lg:flex-nowrap lg:items-center">
+                <div class="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
                     <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
                         <span class="shrink-0">Date From</span>
                         <span class="relative block custom-datepicker lg:w-44 xl:w-52">
-                            <input type="text" name="date_from" value="{{ $filterDateFrom }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker>
+                            <input type="text" name="date_from" value="{{ $filterDateFrom }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker onchange="this.form.submit()">
                             {!! $dateIcon !!}
                         </span>
                     </label>
                     <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
                         <span class="shrink-0">Date To</span>
                         <span class="relative block custom-datepicker lg:w-44 xl:w-52">
-                            <input type="text" name="date_to" value="{{ $filterDateTo }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker>
+                            <input type="text" name="date_to" value="{{ $filterDateTo }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-reconciliation-datepicker onchange="this.form.submit()">
                             {!! $dateIcon !!}
                         </span>
                     </label>
                     <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
                         <span class="shrink-0">Staff</span>
-                        <select name="staff_id" class="{{ $selectClass }} lg:w-52 xl:w-64">
+                        <select name="staff_id" class="{{ $selectClass }} lg:w-52 xl:w-64" onchange="this.form.submit()">
                             <option value="">All Staff</option>
                             @foreach ($staffOptions as $staff)
                                 <option value="{{ $staff->id }}" {{ $filterStaffId === (string) $staff->id ? 'selected' : '' }}>{{ $staff->name }}</option>
                             @endforeach
                         </select>
                     </label>
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
+                        <span class="shrink-0">Status</span>
+                        <select name="status" class="{{ $selectClass }} lg:w-48" onchange="this.form.submit()">
+                            <option value="">All Status</option>
+                            @foreach ($statusFilterOptions as $value => $label)
+                                <option value="{{ $value }}" {{ $filterStatus === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 lg:flex-row lg:items-center lg:gap-2">
+                        <span class="shrink-0">Cash Variance</span>
+                        <select name="variance" class="{{ $selectClass }} lg:w-44" onchange="this.form.submit()">
+                            <option value="">All Variance</option>
+                            @foreach ($varianceFilterOptions as $value => $label)
+                                <option value="{{ $value }}" {{ $filterVariance === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
                     <div class="flex flex-col gap-2 sm:flex-row lg:shrink-0">
-                        <button type="submit" class="{{ $primaryButtonClass }} h-11 w-full px-4 text-theme-sm lg:w-auto">Filter</button>
-                        <a href="{{ route('admin.reconcile.index') }}" class="{{ $secondaryButtonClass }} h-11 w-full px-4 text-theme-sm lg:w-auto">Reset</a>
+                        <a href="{{ route('admin.reconcile.index') }}" class="{{ $secondaryButtonClass }} h-11 w-full px-4 text-theme-sm lg:w-auto">Clear Filters</a>
                     </div>
                 </div>
             </form>
@@ -383,7 +415,7 @@
                                 <td colspan="7" class="px-5 py-12 text-center">
                                     <div class="mx-auto max-w-md">
                                         <p class="text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $hasReconciliationFilters ? 'No shift readings match the selected filters.' : 'No shift readings found.' }}</p>
-                                        <p class="mt-1 {{ $captionClass }}">{{ $hasReconciliationFilters ? 'Adjust the date range or staff filter and try again.' : 'Submitted staff readings will appear here for reconciliation.' }}</p>
+                                        <p class="mt-1 {{ $captionClass }}">{{ $hasReconciliationFilters ? 'Adjust or clear the selected filters and try again.' : 'Submitted staff readings will appear here for reconciliation.' }}</p>
                                     </div>
                                 </td>
                             </tr>
@@ -410,6 +442,12 @@
                         @endif
                         @if ($filterStaffId !== '')
                             <input type="hidden" name="staff_id" value="{{ $filterStaffId }}">
+                        @endif
+                        @if ($filterStatus !== '')
+                            <input type="hidden" name="status" value="{{ $filterStatus }}">
+                        @endif
+                        @if ($filterVariance !== '')
+                            <input type="hidden" name="variance" value="{{ $filterVariance }}">
                         @endif
                         <label for="reconciliation-per-page" class="text-theme-sm text-gray-500 dark:text-gray-400">Rows</label>
                         <select id="reconciliation-per-page" name="per_page" class="h-9 w-20 rounded-lg border border-gray-300 bg-transparent px-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800" onchange="this.form.submit()">
@@ -833,7 +871,8 @@
                 input._reconciliationDatePicker = window.flatpickr(input, {
                     dateFormat: 'Y-m-d',
                     allowInput: true,
-                    disableMobile: true
+                    disableMobile: true,
+                    onChange: () => input.form?.submit()
                 });
             });
         }

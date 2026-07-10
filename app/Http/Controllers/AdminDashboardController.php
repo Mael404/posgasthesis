@@ -208,8 +208,10 @@ class AdminDashboardController extends Controller
     {
         $hasSales = $this->hasTable('sales');
         $fuelSales = $hasSales ? $this->fuelSalesQuery($start, $end) : null;
-        $shiftReadingNetSales = $this->shiftReadingNetSales($start, $end);
-        $shiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end);
+        $pendingShiftReadingNetSales = $this->shiftReadingNetSales($start, $end, 'pending');
+        $verifiedShiftReadingNetSales = $this->shiftReadingNetSales($start, $end, 'verified');
+        $pendingShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'pending');
+        $verifiedShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'verified');
         $shiftReadingLitersMovement = $this->shiftReadingLitersMovement($start, $end);
 
         $paymentRows = $this->creditPaymentRows($start, $end);
@@ -225,11 +227,21 @@ class AdminDashboardController extends Controller
             'sales_table_net_sales_by_tank_without_credit' => $hasSales
                 ? $this->salesTableNetSalesByTank($start, $end, true)
                 : $this->emptyNetSalesTankRows(),
-            'shift_reading_net_sales_with_credit' => $shiftReadingNetSales['with_credit'],
-            'shift_reading_net_sales_without_credit' => $shiftReadingNetSales['without_credit'],
-            'shift_reading_net_sales_by_tank_with_credit' => $shiftReadingNetSalesByTank['with_credit'],
-            'shift_reading_net_sales_by_tank_without_credit' => $shiftReadingNetSalesByTank['without_credit'],
-            'shift_reading_count' => $shiftReadingNetSales['reading_count'],
+            'shift_reading_pending_net_sales_with_credit' => $pendingShiftReadingNetSales['with_credit'],
+            'shift_reading_pending_net_sales_without_credit' => $pendingShiftReadingNetSales['without_credit'],
+            'shift_reading_pending_net_sales_by_tank_with_credit' => $pendingShiftReadingNetSalesByTank['with_credit'],
+            'shift_reading_pending_net_sales_by_tank_without_credit' => $pendingShiftReadingNetSalesByTank['without_credit'],
+            'shift_reading_pending_count' => $pendingShiftReadingNetSales['reading_count'],
+            'shift_reading_verified_net_sales_with_credit' => $verifiedShiftReadingNetSales['with_credit'],
+            'shift_reading_verified_net_sales_without_credit' => $verifiedShiftReadingNetSales['without_credit'],
+            'shift_reading_verified_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
+            'shift_reading_verified_net_sales_by_tank_without_credit' => $verifiedShiftReadingNetSalesByTank['without_credit'],
+            'shift_reading_verified_count' => $verifiedShiftReadingNetSales['reading_count'],
+            'shift_reading_net_sales_with_credit' => $verifiedShiftReadingNetSales['with_credit'],
+            'shift_reading_net_sales_without_credit' => $verifiedShiftReadingNetSales['without_credit'],
+            'shift_reading_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
+            'shift_reading_net_sales_by_tank_without_credit' => $verifiedShiftReadingNetSalesByTank['without_credit'],
+            'shift_reading_count' => $verifiedShiftReadingNetSales['reading_count'],
             'expected_credit_sales' => $this->expectedCreditSales($start, $end),
             'expected_credit_receivables' => $creditSnapshot['receivables'],
             'credit_payments_received' => $this->money($paymentRows->sum('credit')),
@@ -606,7 +618,7 @@ class AdminDashboardController extends Controller
         return $this->addSalesRowsToTankRows($rows, $salesRows, $tanks);
     }
 
-    private function shiftReadingNetSalesByTank(Carbon $start, Carbon $end): array
+    private function shiftReadingNetSalesByTank(Carbon $start, Carbon $end, string $status): array
     {
         $tanks = $this->preparedTanks();
         $withCreditRows = $this->emptyNetSalesTankRows($tanks);
@@ -620,8 +632,9 @@ class AdminDashboardController extends Controller
             ];
         }
 
+        $this->applyShiftReadingStatusFilter($query, $status);
+
         $readings = $query
-            ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', 'Verified'))
             ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
             ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
             ->get();
@@ -914,7 +927,7 @@ class AdminDashboardController extends Controller
             ->all();
     }
 
-    private function shiftReadingNetSales(Carbon $start, Carbon $end): array
+    private function shiftReadingNetSales(Carbon $start, Carbon $end, string $status): array
     {
         $query = $this->shiftReadingsForRange($start, $end);
 
@@ -926,8 +939,9 @@ class AdminDashboardController extends Controller
             ];
         }
 
+        $this->applyShiftReadingStatusFilter($query, $status);
+
         $readings = $query
-            ->when($this->hasColumn('shift_readings', 'status'), fn ($query) => $query->where('status', 'Verified'))
             ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderBy('created_at'))
             ->when($this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderBy('id'))
             ->get();
@@ -1043,6 +1057,29 @@ class AdminDashboardController extends Controller
         }
 
         return $query->whereDate('period_from', '>=', $start->toDateString());
+    }
+
+    private function applyShiftReadingStatusFilter($query, string $status): void
+    {
+        if (! $this->hasColumn('shift_readings', 'status')) {
+            return;
+        }
+
+        $status = strtolower($status);
+
+        if ($status === 'pending') {
+            $query->where(function ($query) {
+                $query->whereNull('status')
+                    ->orWhereRaw('LOWER(status) LIKE ?', ['%pending%']);
+            });
+
+            return;
+        }
+
+        $query->where(function ($query) {
+            $query->whereRaw('LOWER(status) LIKE ?', ['%verified%'])
+                ->orWhereRaw('LOWER(status) LIKE ?', ['%approved%']);
+        });
     }
 
     private function readingPumpSales($reading, $lastVerified = null): float

@@ -32,8 +32,16 @@ class StaffReadingController extends Controller
     ) {
     }
 
-    public function index(): View
+    public function index(Request $request): View
     {
+        $validated = $request->validate([
+            'status' => ['nullable', 'string', 'in:pending,verified,rejected,voided'],
+            'variance' => ['nullable', 'string', 'in:balanced,shortage,overage'],
+        ]);
+        $filters = [
+            'status' => $validated['status'] ?? null,
+            'variance' => $validated['variance'] ?? null,
+        ];
         $dataWarning = null;
         $latestReading = null;
         $unreadAdminRemarks = collect();
@@ -43,19 +51,26 @@ class StaffReadingController extends Controller
         if (! $this->hasTable('shift_readings')) {
             $dataWarning = 'Shift reading records are not available yet.';
         } else {
-            $readings = $this->readingQuery()
+            $query = $this->applyReadingFilters($this->readingQuery(), $filters)
                 ->when($this->hasColumn('shift_readings', 'created_at'), fn ($query) => $query->orderByDesc('shift_readings.created_at'))
-                ->when(! $this->hasColumn('shift_readings', 'created_at') && $this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderByDesc('shift_readings.id'))
-                ->paginate(10, ['*'], 'readings_page')
-                ->withQueryString();
+                ->when(! $this->hasColumn('shift_readings', 'created_at') && $this->hasColumn('shift_readings', 'id'), fn ($query) => $query->orderByDesc('shift_readings.id'));
 
-            $readings->setCollection(
-                $readings->getCollection()->map(function ($reading) {
-                    $this->calculateReadingData($reading);
+            if ($this->hasVarianceFilter($filters)) {
+                $readings = $this->paginateComputedVarianceReadings($query, 10, 'readings_page', $filters)
+                    ->withQueryString();
+            } else {
+                $readings = $query
+                    ->paginate(10, ['*'], 'readings_page')
+                    ->withQueryString();
 
-                    return $reading;
-                })
-            );
+                $readings->setCollection(
+                    $readings->getCollection()->map(function ($reading) {
+                        $this->calculateReadingData($reading);
+
+                        return $reading;
+                    })
+                );
+            }
 
             $latestReading = $this->latestSubmittedReading();
             $unreadAdminRemarks = $this->unreadAdminRemarks();
@@ -72,6 +87,7 @@ class StaffReadingController extends Controller
             'dataWarning' => $dataWarning,
             'unreadAdminRemarks' => $unreadAdminRemarks,
             'unreadAdminRemarksCount' => $unreadAdminRemarksCount,
+            'filters' => $filters,
         ]);
     }
 
@@ -319,6 +335,105 @@ class StaffReadingController extends Controller
         }
 
         return $query->select($selects);
+    }
+
+    private function applyReadingFilters($query, array $filters)
+    {
+        $this->applyStatusFilter($query, $filters['status'] ?? null);
+
+        return $query;
+    }
+
+    private function applyStatusFilter($query, ?string $status): void
+    {
+        if ($status === null || $status === '' || ! $this->hasColumn('shift_readings', 'status')) {
+            return;
+        }
+
+        $query->where(function ($query) use ($status) {
+            if ($status === 'verified') {
+                $query->whereRaw('LOWER(shift_readings.status) LIKE ?', ['%verified%'])
+                    ->orWhereRaw('LOWER(shift_readings.status) LIKE ?', ['%approved%']);
+
+                return;
+            }
+
+            if ($status === 'rejected') {
+                $query->whereRaw('LOWER(shift_readings.status) LIKE ?', ['%reject%']);
+
+                return;
+            }
+
+            if ($status === 'voided') {
+                $query->whereRaw('LOWER(shift_readings.status) LIKE ?', ['%void%']);
+
+                return;
+            }
+
+            $query->whereNull('shift_readings.status')
+                ->orWhereRaw('LOWER(shift_readings.status) LIKE ?', ['%pending%']);
+        });
+    }
+
+    private function hasVarianceFilter(array $filters): bool
+    {
+        return in_array((string) ($filters['variance'] ?? ''), ['balanced', 'shortage', 'overage'], true);
+    }
+
+    private function paginateComputedVarianceReadings($query, int $perPage, string $pageName, array $filters): LengthAwarePaginator
+    {
+        $page = LengthAwarePaginator::resolveCurrentPage($pageName);
+        $readings = $query->get()
+            ->map(function ($reading) {
+                $this->calculateReadingData($reading);
+
+                return $reading;
+            })
+            ->filter(fn ($reading) => $this->readingMatchesVarianceFilter($reading, $filters['variance'] ?? null))
+            ->values();
+
+        return new LengthAwarePaginator(
+            $readings->forPage($page, $perPage)->values(),
+            $readings->count(),
+            $perPage,
+            $page,
+            [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => $pageName,
+            ]
+        );
+    }
+
+    private function readingMatchesVarianceFilter(object $reading, ?string $variance): bool
+    {
+        $amount = $this->filterableCashVariance($reading);
+
+        if ($amount === null) {
+            return false;
+        }
+
+        if ($variance === 'balanced') {
+            return abs($amount) < 0.01;
+        }
+
+        if ($variance === 'shortage') {
+            return $amount < -0.009;
+        }
+
+        if ($variance === 'overage') {
+            return $amount > 0.009;
+        }
+
+        return true;
+    }
+
+    private function filterableCashVariance(object $reading): ?float
+    {
+        if ((bool) ($reading->is_voided_settlement ?? false)) {
+            return $this->storedSettlementNumber($reading, 'cash_variance_snapshot');
+        }
+
+        return $this->number($reading->cash_variance ?? 0);
     }
 
     private function unreadAdminRemarks(int $limit = 10)

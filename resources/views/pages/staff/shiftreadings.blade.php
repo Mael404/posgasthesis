@@ -55,6 +55,7 @@
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $inputClass = 'h-10 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $selectClass = 'h-10 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
         $textareaClass = 'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $fileClass = 'block w-full rounded-lg border border-gray-300 bg-transparent text-theme-sm text-gray-800 shadow-theme-xs file:mr-3 file:border-0 file:bg-gray-100 file:px-3 file:py-2.5 file:text-theme-xs file:font-medium file:text-gray-700 hover:file:bg-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:file:bg-white/[0.06] dark:file:text-gray-300';
         $primaryButtonClass = 'inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
@@ -68,6 +69,24 @@
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
         $tdPrimaryClass = 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90';
         $tdNumberClass = 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
+        $filters = array_merge([
+            'status' => '',
+            'variance' => '',
+        ], $filters ?? []);
+        $filterStatus = (string) ($filters['status'] ?? '');
+        $filterVariance = (string) ($filters['variance'] ?? '');
+        $hasReadingFilters = $filterStatus !== '' || $filterVariance !== '';
+        $statusFilterOptions = [
+            'pending' => 'Pending Verification',
+            'verified' => 'Verified',
+            'rejected' => 'Rejected',
+            'voided' => 'Voided',
+        ];
+        $varianceFilterOptions = [
+            'balanced' => 'Balanced',
+            'shortage' => 'Shortage',
+            'overage' => 'Overage',
+        ];
 
         $periodLabel = function ($reading) {
             try {
@@ -391,9 +410,33 @@
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement History</h2>
-                    <p class="mt-1 {{ $captionClass }}">Newest submitted readings appear first.</p>
+                    <p class="mt-1 {{ $captionClass }}">{{ $hasReadingFilters ? 'Filtered readings appear first.' : 'Newest submitted readings appear first.' }}</p>
                 </div>
             </div>
+
+            <form method="GET" action="{{ route('staff.readings.index') }}" class="border-b border-gray-100 px-5 py-4 dark:border-gray-800" data-staff-shift-filters>
+                <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:gap-2">
+                        <span class="shrink-0">Status</span>
+                        <select name="status" class="{{ $selectClass }} sm:w-52" onchange="this.form.submit()">
+                            <option value="">All Status</option>
+                            @foreach ($statusFilterOptions as $value => $label)
+                                <option value="{{ $value }}" {{ $filterStatus === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <label class="flex min-w-0 flex-col gap-1.5 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:gap-2">
+                        <span class="shrink-0">Cash Variance</span>
+                        <select name="variance" class="{{ $selectClass }} sm:w-48" onchange="this.form.submit()">
+                            <option value="">All Variance</option>
+                            @foreach ($varianceFilterOptions as $value => $label)
+                                <option value="{{ $value }}" {{ $filterVariance === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <a href="{{ route('staff.readings.index') }}" class="{{ $secondaryButtonClass }} h-10 w-full px-4 text-theme-sm sm:w-auto">Clear Filters</a>
+                </div>
+            </form>
 
             <div class="max-w-full overflow-x-auto">
                 <table class="min-w-[1080px] w-full table-fixed">
@@ -492,8 +535,8 @@
                         @empty
                             <tr>
                                 <td colspan="7" class="px-5 py-10 text-center">
-                                    <p class="text-theme-sm font-medium text-gray-800 dark:text-white/90">No shift readings found.</p>
-                                    <p class="mt-1 {{ $captionClass }}">Submitted settlement readings will appear here.</p>
+                                    <p class="text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $hasReadingFilters ? 'No shift readings match the selected filters.' : 'No shift readings found.' }}</p>
+                                    <p class="mt-1 {{ $captionClass }}">{{ $hasReadingFilters ? 'Adjust or clear the selected filters and try again.' : 'Submitted settlement readings will appear here.' }}</p>
                                 </td>
                             </tr>
                         @endforelse
@@ -1249,6 +1292,10 @@
                 },
                 async refreshLiveSections(options = {}) {
                     if (this.liveRefreshInFlight) {
+                        return;
+                    }
+
+                    if (!options.force && document.activeElement?.closest('[data-staff-shift-filters]')) {
                         return;
                     }
 

@@ -87,9 +87,9 @@
                         <h2 class="{{ $cardTitleClass }}">Net Sales</h2>
                     </div>
                     <div class="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:items-end">
-                        <div class="{{ $segmentGroupClass }}" aria-label="Net sales source">
-                            <button type="button" class="{{ $segmentButtonClass }}" data-net-source="sales_table">Sales Table</button>
-                            <button type="button" class="{{ $segmentButtonClass }}" data-net-source="shift_reading">Shift Readings</button>
+                        <div class="{{ $segmentGroupClass }}" aria-label="Net sales shift reading status">
+                            <button type="button" class="{{ $segmentButtonClass }}" data-net-reading-status="pending">Pending</button>
+                            <button type="button" class="{{ $segmentButtonClass }}" data-net-reading-status="verified">Verified</button>
                         </div>
                         <div class="{{ $segmentGroupClass }}" aria-label="Net sales credit filter">
                             <button type="button" class="{{ $segmentButtonClass }}" data-net-credit-mode="with_credit">Include Credits</button>
@@ -125,11 +125,11 @@
                             </div>
                         </form>
                         <div class="{{ $metricValueClass }}" id="netSalesValue">
-                            &#8369;{{ number_format($netSalesStats['sales_table_net_sales_with_credit'] ?? 0, 2) }}
+                            &#8369;{{ number_format($netSalesStats['shift_reading_verified_net_sales_with_credit'] ?? 0, 2) }}
                         </div>
-                        <p class="{{ $captionClass }}" id="netSalesCaption">Sales table: sales less discounts, including credits</p>
+                        <p class="{{ $captionClass }}" id="netSalesCaption">Verified shift readings: pump totals less discounts, including credits</p>
                         <div class="{{ $metaClass }}" id="netSalesMeta">
-                            Period: {{ $metricPeriodLabel('net-sales') }}
+                            Period: {{ $metricPeriodLabel('net-sales') }} | Verified readings: {{ number_format($netSalesStats['shift_reading_verified_count'] ?? 0) }}
                         </div>
                     </article>
 
@@ -137,6 +137,10 @@
                         <div class="{{ $cardHeaderClass }}">
                             <h2 class="{{ $cardTitleClass }}">Net Sales Per Tank</h2>
                             <div class="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:items-end">
+                                <div class="{{ $segmentGroupClass }}" aria-label="Net sales per tank shift reading status">
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-net-tank-reading-status="pending">Pending</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-net-tank-reading-status="verified">Verified</button>
+                                </div>
                                 <div class="{{ $segmentGroupClass }}" aria-label="Net sales per tank period">
                                     <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="today">Today</button>
                                     <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="weekly">Week</button>
@@ -144,7 +148,7 @@
                                     <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="custom">Custom</button>
                                 </div>
                                 <div class="{{ $metaClass }} mt-0 border-t-0 pt-0 text-left sm:text-right" id="netSalesTankMeta">
-                                    Sales table | Include credits | Period: {{ $metricPeriodLabel('net-sales-tank') }}
+                                    Verified shift readings | Include credits | Period: {{ $metricPeriodLabel('net-sales-tank') }}
                                 </div>
                             </div>
                         </div>
@@ -501,9 +505,10 @@
         const automaticBackupDownloadUrl = @json(session('admin_auto_backup_download_url'));
 
         const dashboardState = {
-            netSalesSource: 'sales_table',
+            netSalesReadingStatus: 'verified',
             netSalesCreditMode: 'with_credit',
             netSalesPeriod: cardDefaultPeriods['net-sales'] || 'today',
+            netSalesTankReadingStatus: 'verified',
             netSalesTankPeriod: cardDefaultPeriods['net-sales-tank'] || 'today',
             expectedCreditPeriod: cardDefaultPeriods['expected-credit'] || 'today',
             creditPaymentsPeriod: cardDefaultPeriods['credit-payments'] || 'today',
@@ -559,6 +564,10 @@
         const emptyCellClass = 'px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400 sm:px-6';
         const positiveAmountClass = 'text-success-600 dark:text-success-500';
         const negativeAmountClass = 'text-error-600 dark:text-error-500';
+
+        function shiftReadingStatusLabel(status) {
+            return status === 'pending' ? 'Pending' : 'Verified';
+        }
 
         function initDashboardDatePickers() {
             if (!window.flatpickr) {
@@ -694,10 +703,10 @@
         function updateMetricCards() {
             const netPeriod = dashboardState.netSalesPeriod;
             const netStats = currentStats('net-sales', netPeriod);
-            const netKey = dashboardState.netSalesSource + '_net_sales_' + dashboardState.netSalesCreditMode;
-            const netSourceLabel = dashboardState.netSalesSource === 'shift_reading'
-                ? 'Verified shift readings: pump totals less discounts'
-                : 'Sales table: sales less discounts';
+            const netStatus = dashboardState.netSalesReadingStatus;
+            const netStatusLabel = shiftReadingStatusLabel(netStatus);
+            const netKey = 'shift_reading_' + netStatus + '_net_sales_' + dashboardState.netSalesCreditMode;
+            const netSourceLabel = netStatusLabel + ' shift readings: pump totals less discounts';
             const netCreditLabel = dashboardState.netSalesCreditMode === 'with_credit'
                 ? 'including credits'
                 : 'walk-in/cash only';
@@ -706,11 +715,8 @@
             setText('netSalesCaption', netSourceLabel + ', ' + netCreditLabel);
 
             const netMeta = 'Period: ' + periodLabel('net-sales', netPeriod);
-            const readingCount = Number(netStats.shift_reading_count) || 0;
-            setText('netSalesMeta', dashboardState.netSalesSource === 'shift_reading'
-                ? netMeta + ' | Verified readings: ' + integerFormatter.format(readingCount)
-                : netMeta
-            );
+            const readingCount = Number(netStats['shift_reading_' + netStatus + '_count']) || 0;
+            setText('netSalesMeta', netMeta + ' | ' + netStatusLabel + ' readings: ' + integerFormatter.format(readingCount));
             const netTankStats = currentStats('net-sales-tank', dashboardState.netSalesTankPeriod);
             renderNetSalesByTank(netTankStats);
 
@@ -757,9 +763,10 @@
         }
 
         function renderNetSalesByTank(stats) {
-            const rows = stats[dashboardState.netSalesSource + '_net_sales_by_tank_' + dashboardState.netSalesCreditMode] || [];
+            const netTankStatus = dashboardState.netSalesTankReadingStatus;
+            const rows = stats['shift_reading_' + netTankStatus + '_net_sales_by_tank_' + dashboardState.netSalesCreditMode] || [];
             const tbody = document.getElementById('netSalesTankRows');
-            const sourceLabel = dashboardState.netSalesSource === 'shift_reading' ? 'Shift readings' : 'Sales table';
+            const sourceLabel = shiftReadingStatusLabel(netTankStatus) + ' shift readings';
             const creditLabel = dashboardState.netSalesCreditMode === 'with_credit' ? 'Include credits' : 'Walk-in only';
 
             setText(
@@ -811,8 +818,12 @@
                 });
             });
 
-            document.querySelectorAll('[data-net-source]').forEach(function(button) {
-                setSegmentButtonState(button, button.dataset.netSource === dashboardState.netSalesSource);
+            document.querySelectorAll('[data-net-reading-status]').forEach(function(button) {
+                setSegmentButtonState(button, button.dataset.netReadingStatus === dashboardState.netSalesReadingStatus);
+            });
+
+            document.querySelectorAll('[data-net-tank-reading-status]').forEach(function(button) {
+                setSegmentButtonState(button, button.dataset.netTankReadingStatus === dashboardState.netSalesTankReadingStatus);
             });
 
             document.querySelectorAll('[data-net-credit-mode]').forEach(function(button) {
@@ -977,9 +988,16 @@
             });
         });
 
-        document.querySelectorAll('[data-net-source]').forEach(function(button) {
+        document.querySelectorAll('[data-net-reading-status]').forEach(function(button) {
             button.addEventListener('click', function() {
-                dashboardState.netSalesSource = button.dataset.netSource;
+                dashboardState.netSalesReadingStatus = button.dataset.netReadingStatus;
+                updateAll();
+            });
+        });
+
+        document.querySelectorAll('[data-net-tank-reading-status]').forEach(function(button) {
+            button.addEventListener('click', function() {
+                dashboardState.netSalesTankReadingStatus = button.dataset.netTankReadingStatus;
                 updateAll();
             });
         });
