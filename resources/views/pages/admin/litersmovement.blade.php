@@ -151,6 +151,22 @@
                     $periodLabel = $periodFrom || $periodTo
                         ? $dateLabel($periodFrom, 'M d, Y') . ' to ' . $dateLabel($periodTo, 'M d, Y')
                         : 'N/A';
+                    $adjustments = collect($entry['adjustments'] ?? [])->map(function ($adjustment) use ($dateLabel) {
+                        return [
+                            'id' => (int) ($adjustment['id'] ?? 0),
+                            'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
+                            'liters' => (float) ($adjustment['liters'] ?? 0),
+                            'reason' => (string) ($adjustment['reason'] ?? ''),
+                            'status' => (string) ($adjustment['status'] ?? 'active'),
+                            'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
+                            'created_by' => (string) ($adjustment['created_by'] ?? 'Staff'),
+                            'authorized_by' => (string) ($adjustment['authorized_by'] ?? 'Semi Admin'),
+                            'voided_at_label' => ! empty($adjustment['voided_at']) ? $dateLabel($adjustment['voided_at']) : null,
+                            'voided_by' => (string) ($adjustment['voided_by'] ?? ''),
+                            'void_authorized_by' => (string) ($adjustment['void_authorized_by'] ?? ''),
+                            'void_reason' => (string) ($adjustment['void_reason'] ?? ''),
+                        ];
+                    })->values()->all();
 
                     return [
                         'id' => (int) ($entry['id'] ?? 0),
@@ -162,6 +178,9 @@
                         'tank_name' => $tankName,
                         'fuel_type' => $fuelType,
                         'liters' => (float) ($entry['liters'] ?? 0),
+                        'raw_liters' => (float) ($entry['raw_liters'] ?? $entry['liters'] ?? 0),
+                        'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
+                        'adjustments' => $adjustments,
                     ];
                 })->values()->all();
 
@@ -196,6 +215,52 @@
                 'tanks' => $tanks,
             ]];
         })->all();
+
+        $activeSubmissionsPayload = $transactionItems->mapWithKeys(function ($transaction) use ($dateLabel, $readingStatusStyle) {
+            $transactionId = (int) ($transaction->id ?? 0);
+            $readingStatus = $readingStatusStyle($transaction->status ?? 'Pending');
+            $pumpEntries = collect($transaction->pump_entries ?? [])->map(function ($entry) {
+                return [
+                    'pump_id' => (int) ($entry['pump_id'] ?? 0),
+                    'fuel_type' => (string) ($entry['fuel_type'] ?? 'Fuel'),
+                    'liters' => (float) ($entry['liters'] ?? 0),
+                    'raw_liters' => (float) ($entry['raw_liters'] ?? $entry['liters'] ?? 0),
+                    'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
+                    'price_per_liter' => (float) ($entry['price_per_liter'] ?? 0),
+                    'amount' => (float) ($entry['amount'] ?? 0),
+                ];
+            })->values()->all();
+            $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel) {
+                return [
+                    'id' => (int) ($adjustment['id'] ?? 0),
+                    'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
+                    'liters' => (float) ($adjustment['liters'] ?? 0),
+                    'reason' => (string) ($adjustment['reason'] ?? ''),
+                    'status' => (string) ($adjustment['status'] ?? 'active'),
+                    'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
+                    'created_by' => (string) ($adjustment['created_by'] ?? 'Staff'),
+                    'authorized_by' => (string) ($adjustment['authorized_by'] ?? 'Semi Admin'),
+                    'voided_at_label' => ! empty($adjustment['voided_at']) ? $dateLabel($adjustment['voided_at']) : null,
+                    'voided_by' => (string) ($adjustment['voided_by'] ?? ''),
+                    'void_authorized_by' => (string) ($adjustment['void_authorized_by'] ?? ''),
+                    'void_reason' => (string) ($adjustment['void_reason'] ?? ''),
+                ];
+            })->values()->all();
+
+            return [$transactionId => [
+                'id' => $transactionId,
+                'staff_name' => (string) ($transaction->staff_name ?? 'Staff'),
+                'status' => (string) ($transaction->status ?? 'Pending'),
+                'status_label' => $readingStatus['label'],
+                'submitted_at_label' => $dateLabel($transaction->created_at ?? null),
+                'period_label' => $dateLabel($transaction->period_from ?? null, 'M d, Y') . ' to ' . $dateLabel($transaction->period_to ?? null, 'M d, Y'),
+                'total_liters' => (float) ($transaction->total_liters ?? 0),
+                'total_amount' => (float) ($transaction->total_amount ?? 0),
+                'pump_entries' => $pumpEntries,
+                'adjustments' => $adjustments,
+                'active_adjustments_count' => collect($adjustments)->where('status', 'active')->count(),
+            ]];
+        })->all();
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Liters Movement" />
@@ -205,9 +270,10 @@
             sessionMessage: @js(session('success') ?: session('status')),
             sessionError: @js(session('error') ?: $errors->first()),
             historyRecords: @js($historyDetailsPayload),
+            activeSubmissions: @js($activeSubmissionsPayload),
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || historyDetails.open || voidConfirmation.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
         class="space-y-6">
         <style>[x-cloak] { display: none !important; }</style>
@@ -473,15 +539,16 @@
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[1120px] w-full table-fixed">
+                    <table class="min-w-[1260px] w-full table-fixed">
                         <colgroup>
+                            <col class="w-[13%]">
+                            <col class="w-[14%]">
                             <col class="w-[15%]">
-                            <col class="w-[15%]">
-                            <col class="w-[16%]">
-                            <col class="w-[24%]">
+                            <col class="w-[23%]">
+                            <col class="w-[9%]">
                             <col class="w-[10%]">
-                            <col class="w-[12%]">
-                            <col class="w-[8%]">
+                            <col class="w-[7%]">
+                            <col class="w-[9%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
@@ -492,12 +559,15 @@
                                 <th class="{{ $thNumberClass }}">Liters</th>
                                 <th class="{{ $thNumberClass }}">Meter Sales</th>
                                 <th class="{{ $thClass }}">Status</th>
+                                <th class="{{ $thClass }}">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             @forelse ($transactionItems as $transaction)
                                 @php
+                                    $transactionId = (int) ($transaction->id ?? 0);
                                     $pumpEntries = collect($transaction->pump_entries ?? []);
+                                    $activeAdjustmentCount = collect($transaction->liter_adjustments ?? [])->where('status', 'active')->count();
                                     $readingStatus = $readingStatusStyle($transaction->status ?? 'Pending');
                                 @endphp
                                 <tr>
@@ -516,8 +586,11 @@
                                                 @php
                                                     $fuel = $fuelStyle($entry['fuel_type'] ?? '');
                                                 @endphp
-                                                <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $fuel['badge'] }}">
+                                                <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $fuel['badge'] }}" title="{{ (float) ($entry['deducted_liters'] ?? 0) > 0 ? 'Original: ' . number_format((float) ($entry['raw_liters'] ?? 0), 2) . ' L; deducted: ' . number_format((float) ($entry['deducted_liters'] ?? 0), 2) . ' L' : '' }}">
                                                     P{{ (int) ($entry['pump_id'] ?? 0) }}: {{ number_format((float) ($entry['liters'] ?? 0), 2) }} L
+                                                    @if ((float) ($entry['deducted_liters'] ?? 0) > 0)
+                                                        <span class="font-semibold opacity-80">-{{ number_format((float) ($entry['deducted_liters'] ?? 0), 2) }}</span>
+                                                    @endif
                                                 </span>
                                             @empty
                                                 <span class="text-theme-xs text-gray-500 dark:text-gray-400">No positive meter movement</span>
@@ -529,10 +602,21 @@
                                     <td class="{{ $tdClass }}">
                                         <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $readingStatus['class'] }}">{{ $readingStatus['label'] }}</span>
                                     </td>
+                                    <td class="{{ $tdClass }}">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <button type="button" x-on:click="openActiveDetails({{ $transactionId }})" class="{{ $smallSecondaryButtonClass }}" title="View shift-reading movement and deductions">
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 12s3.5-6.25 9.25-6.25S21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
+                                                View
+                                            </button>
+                                            @if ($activeAdjustmentCount > 0)
+                                                <span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-error-50 px-2 text-theme-xs font-semibold text-error-700 dark:bg-error-500/15 dark:text-error-400" title="Active deductions">{{ $activeAdjustmentCount }}</span>
+                                            @endif
+                                        </div>
+                                    </td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="7" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                    <td colspan="8" class="px-5 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
                                         No pending or verified shift-reading submissions in this period yet.
                                     </td>
                                 </tr>
@@ -650,6 +734,119 @@
             @endif
         </section>
 
+        <div x-show="activeDetails.open" x-cloak class="fixed inset-0 z-[100035] flex items-center justify-center overflow-y-auto p-4">
+            <div x-show="activeDetails.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+            <div
+                x-show="activeDetails.open"
+                x-transition
+                x-on:click.outside="closeActiveDetails()"
+                class="relative z-10 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+                <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Shift Reading #<span x-text="activeDetails.row?.id"></span></h3>
+                            <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="submissionStatusClass(activeDetails.row?.status)" x-text="activeDetails.row?.status_label || 'Pending'"></span>
+                        </div>
+                        <p class="mt-1 {{ $captionClass }}"><span x-text="activeDetails.row?.staff_name || 'Staff'"></span> | <span x-text="activeDetails.row?.period_label || 'N/A'"></span></p>
+                    </div>
+                    <button type="button" x-on:click="closeActiveDetails()" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close shift reading details">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-5">
+                    <div class="grid gap-3 sm:grid-cols-3">
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Submitted</p>
+                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="activeDetails.row?.submitted_at_label || 'N/A'"></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Current Liters</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(activeDetails.row?.total_liters)"></span> L</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Meter Sales</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_amount)"></span></p>
+                        </div>
+                    </div>
+
+                    <div class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Pump Movement</h4>
+                        <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                            <div class="max-w-full overflow-x-auto">
+                                <table class="min-w-[760px] w-full table-fixed">
+                                    <colgroup>
+                                        <col class="w-[12%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[16%]">
+                                    </colgroup>
+                                    <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                                        <tr>
+                                            <th class="{{ $thClass }}">Pump</th>
+                                            <th class="{{ $thClass }}">Fuel</th>
+                                            <th class="{{ $thNumberClass }}">Original</th>
+                                            <th class="{{ $thNumberClass }}">Deducted</th>
+                                            <th class="{{ $thNumberClass }}">Current</th>
+                                            <th class="{{ $thNumberClass }}">Meter Sales</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        <template x-for="pump in activePumps()" :key="pump.pump_id">
+                                            <tr>
+                                                <td class="{{ $tdPrimaryClass }}">P<span x-text="pump.pump_id"></span></td>
+                                                <td class="{{ $tdClass }}" x-text="pump.fuel_type"></td>
+                                                <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(pump.raw_liters)"></span> L</td>
+                                                <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400"><span x-text="formatHistoryNumber(pump.deducted_liters)"></span> L</td>
+                                                <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
+                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.amount)"></span></td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="activePumps().length === 0">
+                                            <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No pump movement found for this submission.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Deduction History</h4>
+                        <div class="mt-3 space-y-3">
+                            <template x-for="adjustment in activeAdjustments()" :key="adjustment.id">
+                                <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L</p>
+                                                <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="adjustment.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'" x-text="adjustment.status === 'voided' ? 'Voided' : 'Active'"></span>
+                                            </div>
+                                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Added <span x-text="adjustment.created_at_label"></span> by <span x-text="adjustment.created_by"></span>; authorized by <span x-text="adjustment.authorized_by"></span></p>
+                                            <p x-show="adjustment.reason" class="mt-1 text-theme-sm text-gray-600 dark:text-gray-300" x-text="adjustment.reason"></p>
+                                            <p x-show="adjustment.status === 'voided'" class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
+                                                Voided <span x-text="adjustment.voided_at_label || 'N/A'"></span><span x-show="adjustment.voided_by"> by <span x-text="adjustment.voided_by"></span></span><span x-show="adjustment.void_authorized_by">; authorized by <span x-text="adjustment.void_authorized_by"></span></span>
+                                            </p>
+                                            <p x-show="adjustment.void_reason" class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="adjustment.void_reason"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div x-show="activeAdjustments().length === 0" class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                No liters deductions have been added for this submission.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <button type="button" x-on:click="closeActiveDetails()" class="{{ $secondaryButtonClass }}">Close</button>
+                </div>
+            </div>
+        </div>
+
         <div x-show="historyDetails.open" x-cloak class="fixed inset-0 z-[100040] flex items-center justify-center overflow-y-auto p-4">
             <div x-show="historyDetails.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
             <div
@@ -761,17 +958,19 @@
                                     <div class="mt-4 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-800">
                                         <table class="w-full table-fixed">
                                             <colgroup>
-                                                <col class="w-[18%]">
-                                                <col class="w-[34%]">
+                                                <col class="w-[14%]">
                                                 <col class="w-[28%]">
-                                                <col class="w-[20%]">
+                                                <col class="w-[22%]">
+                                                <col class="w-[18%]">
+                                                <col class="w-[18%]">
                                             </colgroup>
                                             <thead class="bg-gray-50 dark:bg-white/[0.02]">
                                                 <tr>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Pump</th>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Tank</th>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Fuel</th>
-                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Liters</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Deducted</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Current</th>
                                                 </tr>
                                             </thead>
                                             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -780,11 +979,28 @@
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300">P<span x-text="pump.pump_id"></span></td>
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.tank_name"></td>
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.fuel_type"></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-error-600 dark:text-error-400"><span x-text="formatHistoryNumber(pump.deducted_liters)"></span> L</td>
                                                         <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
                                                     </tr>
                                                 </template>
                                             </tbody>
                                         </table>
+                                    </div>
+
+                                    <div x-show="submission.adjustments.length > 0" class="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                                        <p class="{{ $labelClass }}">Deduction History</p>
+                                        <div class="mt-2 space-y-2">
+                                            <template x-for="adjustment in submission.adjustments" :key="`${submission.key}-adjustment-${adjustment.id}`">
+                                                <div class="flex flex-col gap-1 text-theme-sm text-gray-700 dark:text-gray-300 sm:flex-row sm:items-center sm:justify-between">
+                                                    <div class="min-w-0">
+                                                        <span class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L</span>
+                                                        <span class="ml-2 inline-flex rounded-full px-2 py-0.5 text-theme-xs font-medium" :class="adjustment.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'" x-text="adjustment.status === 'voided' ? 'Voided' : 'Active'"></span>
+                                                        <p x-show="adjustment.reason" class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="adjustment.reason"></p>
+                                                    </div>
+                                                    <p class="shrink-0 text-theme-xs text-gray-500 dark:text-gray-400">Authorized by <span x-text="adjustment.authorized_by"></span></p>
+                                                </div>
+                                            </template>
+                                        </div>
                                     </div>
                                 </div>
                             </template>
@@ -896,6 +1112,8 @@
                 toast: { open: false, message: '', timer: null },
                 confirmation: { open: false },
                 messageDialog: { open: false, title: '', message: '' },
+                activeSubmissions: config.activeSubmissions || {},
+                activeDetails: { open: false, row: null },
                 historyRecords: config.historyRecords || {},
                 historyDetails: { open: false, record: null },
                 voidConfirmation: { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 },
@@ -941,6 +1159,28 @@
                         this.$refs.generateForm.submit();
                     }
                 },
+                openActiveDetails(recordId) {
+                    const row = this.activeSubmissions[String(recordId)] || this.activeSubmissions[recordId] || null;
+
+                    if (! row) {
+                        this.showMessage('Details Unavailable', 'This shift-reading submission is not available on the current page.');
+                        return;
+                    }
+
+                    this.activeDetails = {
+                        open: true,
+                        row: JSON.parse(JSON.stringify(row)),
+                    };
+                },
+                closeActiveDetails() {
+                    this.activeDetails = { open: false, row: null };
+                },
+                activePumps() {
+                    return this.activeDetails.row?.pump_entries || [];
+                },
+                activeAdjustments() {
+                    return this.activeDetails.row?.adjustments || [];
+                },
                 openHistoryDetails(recordId) {
                     const record = this.historyRecords[String(recordId)] || this.historyRecords[recordId] || null;
 
@@ -978,6 +1218,7 @@
                                     period_label: entry.period_label || 'N/A',
                                     total_liters: 0,
                                     pumps: [],
+                                    adjustments: [],
                                 });
                             }
 
@@ -990,6 +1231,17 @@
                                 tank_name: entry.tank_name || tank.name || 'Tank',
                                 fuel_type: entry.fuel_type || tank.fuel_type || 'Fuel',
                                 liters,
+                                raw_liters: Number(entry.raw_liters || liters),
+                                deducted_liters: Number(entry.deducted_liters || 0),
+                            });
+
+                            (entry.adjustments || []).forEach((adjustment) => {
+                                const adjustmentId = Number(adjustment.id || 0);
+                                const exists = submission.adjustments.some((item) => Number(item.id || 0) === adjustmentId && adjustmentId > 0);
+
+                                if (! exists) {
+                                    submission.adjustments.push(adjustment);
+                                }
                             });
                         });
                     });
@@ -1057,6 +1309,11 @@
 
                     if (this.voidConfirmation.open) {
                         this.resolveVoid(false);
+                        return;
+                    }
+
+                    if (this.activeDetails.open) {
+                        this.closeActiveDetails();
                         return;
                     }
 

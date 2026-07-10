@@ -730,6 +730,7 @@ class LitersMovementTrackingService
                     'deducted_liters' => $entry['deducted_liters'] ?? 0,
                     'price_per_liter' => $entry['price_per_liter'],
                     'amount' => $amount,
+                    'adjustments' => $entry['adjustments'] ?? [],
                 ];
 
                 $readingLiters = $this->liters($readingLiters + $liters);
