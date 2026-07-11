@@ -211,7 +211,7 @@ trait HandlesVoidedSettlementDisplay
         }
     }
 
-    private function settlementSnapshotBreakdowns(object $reading): ?array
+    protected function settlementSnapshotBreakdowns(object $reading): ?array
     {
         $snapshot = $this->decodedSettlementSnapshot($reading);
 
@@ -382,6 +382,8 @@ trait HandlesVoidedSettlementDisplay
             'created_at',
             'total_pump_sales',
             'total_pump_liters',
+            'total_net_sales',
+            'pump_net_sales',
             'surcharge',
             'payments_collected',
             'gross_credit_sales',
@@ -408,6 +410,9 @@ trait HandlesVoidedSettlementDisplay
             foreach (['sales_start', 'sales_end', 'liters_start', 'liters_end', 'dispensed_sales', 'dispensed_liters'] as $suffix) {
                 $fields[] = "pump{$pump}_{$suffix}";
             }
+
+            $fields[] = "pump{$pump}_sales_discount";
+            $fields[] = "pump{$pump}_net_sales";
         }
 
         return $fields;

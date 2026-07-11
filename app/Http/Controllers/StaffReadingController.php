@@ -196,7 +196,7 @@ class StaffReadingController extends Controller
             return $this->jsonError('Shift reading not found.', 404);
         }
 
-        $this->calculateReadingData($reading);
+        $this->calculateReadingData($reading, true);
         $this->markAdminRemarksSeen((int) $reading->id, $reading);
 
         return response()->json([
@@ -287,7 +287,7 @@ class StaffReadingController extends Controller
                     throw new \RuntimeException('Only pending or rejected settlements can be voided here.');
                 }
 
-                $this->calculateReadingData($settlement);
+                $this->calculateReadingData($settlement, true);
                 $snapshot = $this->settlementSnapshotPayload($settlement);
 
                 $this->shiftReadingInventory->restore($settlement);
@@ -778,7 +778,7 @@ class StaffReadingController extends Controller
         ]);
     }
 
-    private function calculateReadingData(object $reading): void
+    private function calculateReadingData(object $reading, bool $withPumpNetSales = false): void
     {
         $storedExpectedCollection = $this->storedSettlementNumber($reading, 'expected_collection_snapshot')
             ?? $this->storedSettlementNumber($reading, 'expected_collection');
@@ -842,9 +842,232 @@ class StaffReadingController extends Controller
         $reading->gcash_entries = $this->decodeJsonDetails($reading->gcash_entries ?? null);
         $reading->cheque_entries = $this->decodeJsonDetails($reading->cheque_entries ?? null);
         $this->applyVoidedSettlementDisplayState($reading, $storedExpectedCollection, $storedCashVariance);
+        if ($withPumpNetSales) {
+            $this->applyPumpNetSales($reading, $periodStart, $periodEnd);
+        }
         $reading->dipstick_premium = $this->liters($this->firstReadingNumber($reading, ['dipstick_premium', 'premium_dipstick', 'premium_dipstick_reading']));
         $reading->dipstick_regular = $this->liters($this->firstReadingNumber($reading, ['dipstick_regular', 'dipstick_unleaded', 'regular_dipstick', 'unleaded_dipstick', 'regular_dipstick_reading', 'unleaded_dipstick_reading']));
         $reading->dipstick_diesel = $this->liters($this->firstReadingNumber($reading, ['dipstick_diesel', 'diesel_dipstick', 'diesel_dipstick_reading']));
+    }
+
+    private function applyPumpNetSales(object $reading, Carbon $periodStart, Carbon $periodEnd): void
+    {
+        $snapshotRows = $this->normalizedPumpNetSalesSnapshot($reading);
+
+        if ($this->settlementIsVoided($reading) && $snapshotRows !== null) {
+            $this->assignPumpNetSalesRows($reading, $snapshotRows);
+
+            return;
+        }
+
+        $includeVoidedHistorical = $this->settlementIsVoided($reading);
+        $discountsByPump = $this->readingDiscountsByPump($reading, $periodStart, $periodEnd, $includeVoidedHistorical);
+
+        if ($includeVoidedHistorical && ! $this->hasPumpDiscounts($discountsByPump)) {
+            $snapshotBreakdowns = $this->settlementSnapshotBreakdowns($reading);
+
+            if ($snapshotBreakdowns !== null) {
+                $discountsByPump = $this->breakdownDiscountsByPump($snapshotBreakdowns);
+            }
+        }
+
+        $rows = [];
+
+        for ($pump = 1; $pump <= self::PUMP_COUNT; $pump++) {
+            $grossSales = $this->money($reading->{"pump{$pump}_dispensed_sales"} ?? 0);
+            $discounts = $this->money($discountsByPump[$pump] ?? 0);
+            $netSales = $this->money($grossSales - $discounts);
+
+            $rows[] = [
+                'pump_id' => $pump,
+                'pump_label' => "Pump {$pump}",
+                'fuel_type' => $this->pumpFuelLabel($pump),
+                'gross_sales' => $grossSales,
+                'discounts' => $discounts,
+                'net_sales' => $netSales,
+            ];
+        }
+
+        $this->assignPumpNetSalesRows($reading, $rows);
+    }
+
+    private function assignPumpNetSalesRows(object $reading, array $rows): void
+    {
+        $normalizedRows = [];
+        $total = 0.0;
+
+        foreach ($rows as $row) {
+            $pump = (int) ($row['pump_id'] ?? 0);
+
+            if ($pump < 1 || $pump > self::PUMP_COUNT) {
+                continue;
+            }
+
+            $grossSales = $this->money($row['gross_sales'] ?? ($reading->{"pump{$pump}_dispensed_sales"} ?? 0));
+            $discounts = $this->money($row['discounts'] ?? 0);
+            $netSales = $this->money($row['net_sales'] ?? ($grossSales - $discounts));
+
+            $reading->{"pump{$pump}_sales_discount"} = $discounts;
+            $reading->{"pump{$pump}_net_sales"} = $netSales;
+
+            $normalizedRows[] = [
+                'pump_id' => $pump,
+                'pump_label' => $row['pump_label'] ?? "Pump {$pump}",
+                'fuel_type' => $row['fuel_type'] ?? $this->pumpFuelLabel($pump),
+                'gross_sales' => $grossSales,
+                'discounts' => $discounts,
+                'net_sales' => $netSales,
+            ];
+            $total += $netSales;
+        }
+
+        $reading->pump_net_sales = $normalizedRows;
+        $reading->total_net_sales = $this->money($total);
+    }
+
+    private function readingDiscountsByPump(object $reading, Carbon $periodStart, Carbon $periodEnd, bool $includeVoidedHistorical = false): array
+    {
+        $discounts = array_fill(1, self::PUMP_COUNT, 0.0);
+
+        if (! $this->hasTable('sales')) {
+            return $discounts;
+        }
+
+        $autoDiscountExpression = $this->hasColumn('sales', 'discount')
+            ? 'COALESCE(SUM(sales.discount), 0)'
+            : '0';
+        $manualDiscountExpression = $this->hasColumn('sales', 'manual_discount')
+            ? 'COALESCE(SUM(sales.manual_discount), 0)'
+            : '0';
+        $pumpExpression = $this->hasColumn('sales', 'pump_id')
+            ? 'COALESCE(sales.pump_id, 0)'
+            : '0';
+
+        $query = $this->scopeSalesToReading(DB::table('sales'), $reading, $periodStart, $periodEnd, $includeVoidedHistorical)
+            ->selectRaw("
+                {$pumpExpression} as pump_id,
+                {$autoDiscountExpression} + {$manualDiscountExpression} as discounts
+            ");
+
+        if ($this->hasColumn('sales', 'pump_id')) {
+            $query->groupByRaw($pumpExpression);
+        }
+
+        foreach ($query->get() as $row) {
+            $pump = (int) ($row->pump_id ?? 0);
+
+            if ($pump >= 1 && $pump <= self::PUMP_COUNT) {
+                $discounts[$pump] = $this->money($row->discounts ?? 0);
+            }
+        }
+
+        return $discounts;
+    }
+
+    private function breakdownDiscountsByPump(array $breakdowns): array
+    {
+        $discounts = array_fill(1, self::PUMP_COUNT, 0.0);
+
+        foreach ([['system_discounts', 'discount'], ['manual_discounts', 'manual_discount']] as [$key, $field]) {
+            foreach (($breakdowns[$key] ?? []) as $row) {
+                $pump = $this->pumpIdFromBreakdownRow($row);
+
+                if ($pump >= 1 && $pump <= self::PUMP_COUNT) {
+                    $discounts[$pump] += $this->number($this->breakdownRowValue($row, $field));
+                }
+            }
+        }
+
+        return array_map(fn ($value) => $this->money($value), $discounts);
+    }
+
+    private function normalizedPumpNetSalesSnapshot(object $reading): ?array
+    {
+        if (! property_exists($reading, 'pump_net_sales')) {
+            return null;
+        }
+
+        $rows = $reading->pump_net_sales;
+
+        if (is_string($rows)) {
+            $rows = json_decode($rows, true);
+        } elseif (is_object($rows)) {
+            $rows = (array) $rows;
+        }
+
+        if (! is_array($rows) || $rows === []) {
+            return null;
+        }
+
+        $normalized = [];
+
+        foreach ($rows as $key => $row) {
+            if (is_object($row)) {
+                $row = (array) $row;
+            }
+
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $pump = (int) ($row['pump_id'] ?? (is_numeric($key) ? $key : 0));
+
+            if ($pump >= 1 && $pump <= self::PUMP_COUNT) {
+                $row['pump_id'] = $pump;
+                $normalized[] = $row;
+            }
+        }
+
+        return $normalized === [] ? null : $normalized;
+    }
+
+    private function hasPumpDiscounts(array $discountsByPump): bool
+    {
+        foreach ($discountsByPump as $discount) {
+            if (abs((float) $discount) >= 0.01) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function pumpIdFromBreakdownRow($row): int
+    {
+        $pump = (int) ($this->breakdownRowValue($row, 'pump_id') ?? 0);
+
+        if ($pump > 0) {
+            return $pump;
+        }
+
+        $pumpLabel = (string) ($this->breakdownRowValue($row, 'pump_label') ?? '');
+
+        return preg_match('/pump\s*(\d+)/i', $pumpLabel, $matches) ? (int) $matches[1] : 0;
+    }
+
+    private function breakdownRowValue($row, string $field)
+    {
+        if (is_array($row)) {
+            return $row[$field] ?? null;
+        }
+
+        if (is_object($row)) {
+            return $row->$field ?? null;
+        }
+
+        return null;
+    }
+
+    private function pumpFuelLabel(int $pump): string
+    {
+        return [
+            1 => 'Premium',
+            2 => 'Unleaded',
+            3 => 'Premium',
+            4 => 'Unleaded',
+            5 => 'Diesel',
+            6 => 'Diesel',
+        ][$pump] ?? 'Fuel';
     }
 
     private function getReadingPeriodContext(object $reading): array

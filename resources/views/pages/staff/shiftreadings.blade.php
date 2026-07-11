@@ -942,7 +942,7 @@
 
                     <template x-if="details.reading && !details.loading && !details.error">
                         <div class="space-y-5">
-                            <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
                                 <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                     <p class="{{ $labelClass }}">Total Remitted</p>
                                     <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="money(details.reading.total_remitted)"></p>
@@ -950,6 +950,10 @@
                                 <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                     <p class="{{ $labelClass }}">Expected</p>
                                     <p class="mt-2 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90" x-text="expectedCollectionDisplay(details.reading)"></p>
+                                </article>
+                                <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                    <p class="{{ $labelClass }}">Net Sales</p>
+                                    <p class="mt-2 text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-400" x-text="money(details.reading.total_net_sales)"></p>
                                 </article>
                                 <article class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                     <p class="{{ $labelClass }}">Pump Liters</p>
@@ -2127,6 +2131,7 @@
                         { label: 'Open Sales', value: this.money(this.readingField('pump' + id + '_sales_start')) },
                         { label: 'Close Sales', value: this.money(this.readingField('pump' + id + '_sales_end')) },
                         { label: 'Total Sales', value: this.money(this.readingPumpValue(id, 'dispensed_sales')), highlight: true },
+                        { label: 'Net Sales', value: this.money(this.readingPumpValue(id, 'net_sales')), highlight: true },
                         { label: 'Open Liters', value: this.formatLiters(this.readingField('pump' + id + '_liters_start')) },
                         { label: 'Close Liters', value: this.formatLiters(this.readingField('pump' + id + '_liters_end')) },
                         { label: 'Total Liters', value: this.formatLiters(this.readingPumpValue(id, 'dispensed_liters')), highlight: true }

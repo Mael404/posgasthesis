@@ -537,7 +537,7 @@
                             <p>This settlement has been voided. The details below are shown for historical reference only.</p>
                         </div>
 
-                        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
                             <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <p class="{{ $labelClass }}">Staff</p>
                                 <p id="viewStaff" class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90"></p>
@@ -549,6 +549,10 @@
                             <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                                 <p class="{{ $labelClass }}">Total Remitted</p>
                                 <p id="viewTotalRemitted" class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90"></p>
+                            </div>
+                            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <p class="{{ $labelClass }}">Net Sales</p>
+                                <p id="viewTotalNetSales" class="mt-1 text-theme-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400"></p>
                             </div>
                             <div id="viewVarianceBox" class="rounded-xl border p-4"></div>
                         </div>
@@ -1181,6 +1185,7 @@
             const salesStart = Number(reading[`pump${pump}_sales_start`]) || 0;
             const salesEnd = Number(reading[`pump${pump}_sales_end`]) || 0;
             const salesDiff = Number(reading[`pump${pump}_dispensed_sales`]) || 0;
+            const netSales = Number(reading[`pump${pump}_net_sales`]) || 0;
             const litersStart = Number(reading[`pump${pump}_liters_start`]) || 0;
             const litersEnd = Number(reading[`pump${pump}_liters_end`]) || 0;
             const litersDiff = Number(reading[`pump${pump}_dispensed_liters`]) || 0;
@@ -1203,6 +1208,10 @@
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Sales</p>
                             <p class="mt-1 text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">${peso(salesDiff)}</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 dark:text-gray-400">Net Sales</p>
+                            <p class="mt-1 text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">${peso(netSales)}</p>
                         </div>
                         <div>
                             <p class="text-gray-500 dark:text-gray-400">Open L</p>
@@ -1458,6 +1467,7 @@
             document.getElementById('viewStaff').textContent = row.staff || reading.staff_name || 'Staff';
             document.getElementById('viewDate').textContent = dateLabel(reading);
             document.getElementById('viewTotalRemitted').innerHTML = peso(reading.total_remitted);
+            document.getElementById('viewTotalNetSales').innerHTML = peso(reading.total_net_sales);
             document.getElementById('viewTotalSales').innerHTML = `Total Sales: ${peso(reading.total_pump_sales)}`;
             document.getElementById('viewTotalLiters').textContent = `${fnum(reading.total_pump_liters)} L total dispensed`;
             voidedNotice.classList.toggle('hidden', !isVoidedReading(reading));
