@@ -5,6 +5,9 @@
         $summary = array_merge([
             'total_liters' => 0,
             'total_amount' => 0,
+            'total_sales' => 0,
+            'total_discounts' => 0,
+            'total_net_sales' => 0,
             'limit' => 4000,
             'remaining_liters' => 4000,
             'over_liters' => 0,
@@ -13,6 +16,7 @@
             'transaction_count' => 0,
             'submission_count' => 0,
             'pump_entry_count' => 0,
+            'pump_net_sales' => [],
             'fuel_breakdown' => [],
             'tank_breakdown' => [],
             'staff_breakdown' => [],
@@ -35,6 +39,7 @@
             ? collect($history->items())
             : collect($history);
         $tankBreakdown = collect($summary['tank_breakdown'] ?? []);
+        $pumpNetSales = collect($summary['pump_net_sales'] ?? []);
         $reachedLimits = collect($summary['reached_limits'] ?? []);
         $missingRequirements = $missingRequirements ?? [];
 
@@ -228,6 +233,10 @@
                     'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
                     'price_per_liter' => (float) ($entry['price_per_liter'] ?? 0),
                     'amount' => (float) ($entry['amount'] ?? 0),
+                    'total_sales' => (float) ($entry['total_sales'] ?? 0),
+                    'discounts' => (float) ($entry['discounts'] ?? 0),
+                    'net_sales' => (float) ($entry['net_sales'] ?? 0),
+                    'sales_transaction_count' => (int) ($entry['sales_transaction_count'] ?? 0),
                 ];
             })->values()->all();
             $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel) {
@@ -256,6 +265,9 @@
                 'period_label' => $dateLabel($transaction->period_from ?? null, 'M d, Y') . ' to ' . $dateLabel($transaction->period_to ?? null, 'M d, Y'),
                 'total_liters' => (float) ($transaction->total_liters ?? 0),
                 'total_amount' => (float) ($transaction->total_amount ?? 0),
+                'total_sales' => (float) ($transaction->total_sales ?? 0),
+                'total_discounts' => (float) ($transaction->total_discounts ?? 0),
+                'total_net_sales' => (float) ($transaction->total_net_sales ?? 0),
                 'pump_entries' => $pumpEntries,
                 'adjustments' => $adjustments,
                 'active_adjustments_count' => collect($adjustments)->where('status', 'active')->count(),
@@ -391,6 +403,70 @@
                 <p class="{{ $valueClass }}">{{ number_format($reachedLimits->count()) }}</p>
                 <p class="mt-1 {{ $captionClass }}">{{ number_format((int) $summary['submission_count']) }} included shift submission{{ (int) $summary['submission_count'] === 1 ? '' : 's' }}</p>
             </article>
+        </section>
+
+        <section class="{{ $cardClass }}">
+            <div class="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Net Sales Per Pump</h2>
+                    <p class="mt-1 {{ $captionClass }}">Transaction sales less automatic and manual discounts, using the same net-sales formula as the admin dashboard.</p>
+                </div>
+                <div class="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-left dark:border-brand-500/25 dark:bg-brand-500/10 sm:text-right">
+                    <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Overall Net Sales</p>
+                    <p class="mt-1 text-title-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</p>
+                </div>
+            </div>
+
+            <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                <div class="max-w-full overflow-x-auto">
+                    <table class="min-w-[760px] w-full table-fixed">
+                        <colgroup>
+                            <col class="w-[18%]">
+                            <col class="w-[20%]">
+                            <col class="w-[14%]">
+                            <col class="w-[16%]">
+                            <col class="w-[16%]">
+                            <col class="w-[16%]">
+                        </colgroup>
+                        <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                            <tr>
+                                <th class="{{ $thClass }}">Pump</th>
+                                <th class="{{ $thClass }}">Fuel</th>
+                                <th class="{{ $thNumberClass }}">Transactions</th>
+                                <th class="{{ $thNumberClass }}">Total Sales</th>
+                                <th class="{{ $thNumberClass }}">Discounts</th>
+                                <th class="{{ $thNumberClass }}">Net Sales</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                            @foreach ($pumpNetSales as $pump)
+                                @php
+                                    $style = $fuelStyle($pump['fuel_type'] ?? '');
+                                @endphp
+                                <tr>
+                                    <td class="{{ $tdPrimaryClass }}">{{ $pump['pump_label'] ?? 'Pump ' . (int) ($pump['pump_id'] ?? 0) }}</td>
+                                    <td class="{{ $tdClass }}">
+                                        <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">{{ $pump['fuel_type'] ?? 'N/A' }}</span>
+                                    </td>
+                                    <td class="{{ $tdNumberClass }}">{{ number_format((int) ($pump['transaction_count'] ?? 0)) }}</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) ($pump['total_sales'] ?? 0), 2) }}</td>
+                                    <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">-&#8369;{{ number_format((float) ($pump['discounts'] ?? 0), 2) }}</td>
+                                    <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($pump['net_sales'] ?? 0), 2) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot class="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
+                            <tr>
+                                <td colspan="2" class="{{ $tdPrimaryClass }}">Overall</td>
+                                <td class="{{ $tdNumberClass }}">{{ number_format($pumpNetSales->sum(fn ($pump) => (int) ($pump['transaction_count'] ?? 0))) }}</td>
+                                <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $summary['total_sales'], 2) }}</td>
+                                <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">-&#8369;{{ number_format((float) $summary['total_discounts'], 2) }}</td>
+                                <td class="{{ $tdNumberClass }} font-bold text-brand-600 dark:text-brand-400">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
         </section>
 
         <section class="{{ $cardClass }}">
@@ -755,7 +831,7 @@
                 </div>
 
                 <div class="flex-1 overflow-y-auto p-5">
-                    <div class="grid gap-3 sm:grid-cols-3">
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                             <p class="{{ $labelClass }}">Submitted</p>
                             <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="activeDetails.row?.submitted_at_label || 'N/A'"></p>
@@ -768,20 +844,27 @@
                             <p class="{{ $labelClass }}">Meter Sales</p>
                             <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_amount)"></span></p>
                         </div>
+                        <div class="rounded-xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-500/25 dark:bg-brand-500/10">
+                            <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_net_sales)"></span></p>
+                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_discounts)"></span> discounts</p>
+                        </div>
                     </div>
 
                     <div class="mt-6">
                         <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Pump Movement</h4>
                         <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                             <div class="max-w-full overflow-x-auto">
-                                <table class="min-w-[760px] w-full table-fixed">
+                                <table class="min-w-[1040px] w-full table-fixed">
                                     <colgroup>
-                                        <col class="w-[12%]">
-                                        <col class="w-[18%]">
-                                        <col class="w-[18%]">
-                                        <col class="w-[18%]">
-                                        <col class="w-[18%]">
-                                        <col class="w-[16%]">
+                                        <col class="w-[9%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
+                                        <col class="w-[13%]">
                                     </colgroup>
                                     <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                                         <tr>
@@ -790,7 +873,9 @@
                                             <th class="{{ $thNumberClass }}">Original</th>
                                             <th class="{{ $thNumberClass }}">Deducted</th>
                                             <th class="{{ $thNumberClass }}">Current</th>
-                                            <th class="{{ $thNumberClass }}">Meter Sales</th>
+                                            <th class="{{ $thNumberClass }}">Total Sales</th>
+                                            <th class="{{ $thNumberClass }}">Discounts</th>
+                                            <th class="{{ $thNumberClass }}">Net Sales</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -801,11 +886,13 @@
                                                 <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(pump.raw_liters)"></span> L</td>
                                                 <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400"><span x-text="formatHistoryNumber(pump.deducted_liters)"></span> L</td>
                                                 <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
-                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.amount)"></span></td>
+                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.total_sales)"></span></td>
+                                                <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">-&#8369;<span x-text="formatHistoryNumber(pump.discounts)"></span></td>
+                                                <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(pump.net_sales)"></span></td>
                                             </tr>
                                         </template>
                                         <tr x-show="activePumps().length === 0">
-                                            <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No pump movement found for this submission.</td>
+                                            <td colspan="8" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No pump movement found for this submission.</td>
                                         </tr>
                                     </tbody>
                                 </table>

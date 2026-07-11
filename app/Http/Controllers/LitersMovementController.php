@@ -27,7 +27,7 @@ class LitersMovementController extends Controller
 
     public function admin(LitersMovementTrackingService $tracking): View
     {
-        $state = $tracking->state(null, 25, 'tracking_page');
+        $state = $tracking->state(null, 25, 'tracking_page', true);
 
         return view('pages.admin.litersmovement', [
             'title' => 'Liters Movement',
