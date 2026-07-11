@@ -524,65 +524,118 @@
             </div>
         </section>
 
-        <section class="space-y-4">
-            <div>
-                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
-                <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank.</p>
+        <section class="space-y-5">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Movement Tables</h2>
+                    <p class="mt-1 {{ $captionClass }}">Review active tank ledgers, staff totals, included submissions, and generated records.</p>
+                </div>
+
+                <div class="max-w-full overflow-x-auto">
+                    <div class="inline-flex min-w-full gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] sm:min-w-0" role="tablist" aria-label="Liters movement tables">
+                        <button
+                            type="button"
+                            role="tab"
+                            x-on:click="setTableTab('tank-ledgers')"
+                            :aria-selected="tableTab === 'tank-ledgers'"
+                            class="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-theme-sm font-medium transition"
+                            :class="tableTab === 'tank-ledgers' ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                            Tank Ledgers
+                            <span class="rounded-full bg-white/80 px-2 py-0.5 text-theme-xs tabular-nums text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">{{ number_format($tankBreakdown->count()) }}</span>
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            x-on:click="setTableTab('staff-breakdown')"
+                            :aria-selected="tableTab === 'staff-breakdown'"
+                            class="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-theme-sm font-medium transition"
+                            :class="tableTab === 'staff-breakdown' ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                            Staff Breakdown
+                            <span class="rounded-full bg-white/80 px-2 py-0.5 text-theme-xs tabular-nums text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">{{ number_format(count($summary['staff_breakdown'] ?? [])) }}</span>
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            x-on:click="setTableTab('shift-submissions')"
+                            :aria-selected="tableTab === 'shift-submissions'"
+                            class="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-theme-sm font-medium transition"
+                            :class="tableTab === 'shift-submissions' ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                            Shift Submissions
+                            <span class="rounded-full bg-white/80 px-2 py-0.5 text-theme-xs tabular-nums text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">{{ number_format((int) $summary['submission_count']) }}</span>
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            x-on:click="setTableTab('generated-history')"
+                            :aria-selected="tableTab === 'generated-history'"
+                            class="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-theme-sm font-medium transition"
+                            :class="tableTab === 'generated-history' ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                            Generated History
+                            <span class="rounded-full bg-white/80 px-2 py-0.5 text-theme-xs tabular-nums text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">{{ number_format($historyItems->count()) }}</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                @foreach ($tankBreakdown as $tank)
-                    @php
-                        $style = $fuelStyle($tank['fuel_type'] ?? '');
-                        $entries = collect($tank['entries'] ?? []);
-                    @endphp
-                    <article class="{{ $cardClass }} overflow-hidden p-0">
-                        <div class="px-5 py-4 {{ $style['header'] }}">
-                            <div class="flex items-start justify-between gap-4">
-                                <div class="min-w-0">
-                                    <p class="truncate text-base font-semibold">{{ $tank['fuel_type'] ?? 'Fuel' }}</p>
-                                    <p class="mt-1 truncate text-theme-xs opacity-90">{{ $tank['name'] ?? 'Tank' }} | {{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
+            <div x-show="tableTab === 'tank-ledgers'" x-cloak role="tabpanel" class="space-y-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
+                    <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank.</p>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                    @foreach ($tankBreakdown as $tank)
+                        @php
+                            $style = $fuelStyle($tank['fuel_type'] ?? '');
+                            $entries = collect($tank['entries'] ?? []);
+                        @endphp
+                        <article class="{{ $cardClass }} overflow-hidden p-0">
+                            <div class="px-5 py-4 {{ $style['header'] }}">
+                                <div class="flex items-start justify-between gap-4">
+                                    <div class="min-w-0">
+                                        <p class="truncate text-base font-semibold">{{ $tank['fuel_type'] ?? 'Fuel' }}</p>
+                                        <p class="mt-1 truncate text-theme-xs opacity-90">{{ $tank['name'] ?? 'Tank' }} | {{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
+                                    </div>
+                                    <span class="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-theme-xs font-semibold">
+                                        {{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L' : 'No limit' }}
+                                    </span>
                                 </div>
-                                <span class="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-theme-xs font-semibold">
-                                    {{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L' : 'No limit' }}
-                                </span>
                             </div>
-                        </div>
 
-                        <div class="grid grid-cols-4 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
-                            <div class="px-4 py-2">Pump</div>
-                            <div class="px-4 py-2 text-right">Qty (L)</div>
-                            <div class="px-4 py-2 text-right">Price</div>
-                            <div class="px-4 py-2 text-right">Total</div>
-                        </div>
+                            <div class="grid grid-cols-4 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+                                <div class="px-4 py-2">Pump</div>
+                                <div class="px-4 py-2 text-right">Qty (L)</div>
+                                <div class="px-4 py-2 text-right">Price</div>
+                                <div class="px-4 py-2 text-right">Total</div>
+                            </div>
 
-                        <div class="max-h-[360px] overflow-y-auto">
-                            @forelse ($entries as $entry)
-                                <div class="grid grid-cols-4 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
-                                    <div class="px-4 py-2.5 font-medium text-gray-800 dark:text-white/90">P{{ (int) ($entry['pump_id'] ?? 0) }}</div>
-                                    <div class="px-4 py-2.5 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
-                                    <div class="px-4 py-2.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($entry['price_per_liter'] ?? 0), 2) }}</div>
-                                    <div class="px-4 py-2.5 text-right tabular-nums font-medium text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['amount'] ?? 0), 2) }}</div>
-                                </div>
-                            @empty
-                                <div class="px-4 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
-                                    No active-period records.
-                                </div>
-                            @endforelse
-                        </div>
+                            <div class="max-h-[360px] overflow-y-auto">
+                                @forelse ($entries as $entry)
+                                    <div class="grid grid-cols-4 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
+                                        <div class="px-4 py-2.5 font-medium text-gray-800 dark:text-white/90">P{{ (int) ($entry['pump_id'] ?? 0) }}</div>
+                                        <div class="px-4 py-2.5 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
+                                        <div class="px-4 py-2.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($entry['price_per_liter'] ?? 0), 2) }}</div>
+                                        <div class="px-4 py-2.5 text-right tabular-nums font-medium text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['amount'] ?? 0), 2) }}</div>
+                                    </div>
+                                @empty
+                                    <div class="px-4 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                        No active-period records.
+                                    </div>
+                                @endforelse
+                            </div>
 
-                        <div class="grid grid-cols-4 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
-                            <div class="px-4 py-3 text-gray-800 dark:text-white/90">Total</div>
-                            <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
-                            <div class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($tank['price_per_liter'] ?? 0), 2) }}</div>
-                            <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['amount'] ?? 0), 2) }}</div>
-                        </div>
-                    </article>
-                @endforeach
+                            <div class="grid grid-cols-4 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
+                                <div class="px-4 py-3 text-gray-800 dark:text-white/90">Total</div>
+                                <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
+                                <div class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($tank['price_per_liter'] ?? 0), 2) }}</div>
+                                <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['amount'] ?? 0), 2) }}</div>
+                            </div>
+                        </article>
+                    @endforeach
+                </div>
             </div>
-        </section>
 
-        <section class="{{ $cardClass }}">
+            <div x-show="tableTab === 'staff-breakdown'" x-cloak role="tabpanel" class="{{ $cardClass }}">
                 <div class="mb-5">
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Staff Breakdown</h2>
                     <p class="mt-1 {{ $captionClass }}">Active tracking totals grouped by staff.</p>
@@ -623,9 +676,9 @@
                         </table>
                     </div>
                 </div>
-        </section>
+            </div>
 
-        <section class="{{ $cardClass }}">
+            <div x-show="tableTab === 'shift-submissions'" x-cloak role="tabpanel" class="{{ $cardClass }}">
             <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h2>
@@ -730,9 +783,9 @@
                     {{ $transactions->links() }}
                 </div>
             @endif
-        </section>
+            </div>
 
-        <section class="{{ $cardClass }}">
+            <div x-show="tableTab === 'generated-history'" x-cloak role="tabpanel" class="{{ $cardClass }}">
             <div class="mb-5">
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Generated History</h2>
                 <p class="mt-1 {{ $captionClass }}">Saved records from previous tracking periods.</p>
@@ -831,6 +884,7 @@
                     {{ $history->links() }}
                 </div>
             @endif
+            </div>
         </section>
 
         <div x-show="activeDetails.open" x-cloak class="fixed inset-0 z-[100035] flex items-center justify-center overflow-y-auto p-4">
@@ -1303,18 +1357,37 @@
                 toast: { open: false, message: '', timer: null },
                 confirmation: { open: false },
                 messageDialog: { open: false, title: '', message: '' },
+                tableTab: 'tank-ledgers',
+                tableTabs: ['tank-ledgers', 'staff-breakdown', 'shift-submissions', 'generated-history'],
                 activeSubmissions: config.activeSubmissions || {},
                 activeDetails: { open: false, row: null },
                 historyRecords: config.historyRecords || {},
                 historyDetails: { open: false, record: null },
                 voidConfirmation: { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 },
                 init() {
+                    const hashTab = String(window.location.hash || '').replace('#', '');
+
+                    if (this.tableTabs.includes(hashTab)) {
+                        this.tableTab = hashTab;
+                    }
+
                     if (config.sessionMessage) {
                         this.showToast(config.sessionMessage);
                     }
 
                     if (config.sessionError) {
                         this.showMessage('Unable to Continue', config.sessionError);
+                    }
+                },
+                setTableTab(tab) {
+                    if (! this.tableTabs.includes(tab)) {
+                        return;
+                    }
+
+                    this.tableTab = tab;
+
+                    if (window.history && typeof window.history.replaceState === 'function') {
+                        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${tab}`);
                     }
                 },
                 async confirmGenerate() {
