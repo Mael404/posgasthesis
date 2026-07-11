@@ -145,6 +145,21 @@
             $recordLiters = (float) ($snapshot['total_liters'] ?? 0);
             $recordSubmissions = (int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0);
             $voidedAt = $record->voided_at ?? ($snapshot['voided_at'] ?? null);
+            $recordPumpNetSales = collect($snapshot['pump_net_sales'] ?? [])->map(function ($pump, $key) {
+                $pumpId = (int) ($pump['pump_id'] ?? (is_numeric($key) ? $key : 0));
+
+                return [
+                    'pump_id' => $pumpId,
+                    'fuel_type' => (string) ($pump['fuel_type'] ?? 'Fuel'),
+                    'transaction_count' => (int) ($pump['transaction_count'] ?? 0),
+                    'total_sales' => (float) ($pump['total_sales'] ?? 0),
+                    'discounts' => (float) ($pump['discounts'] ?? 0),
+                    'net_sales' => (float) ($pump['net_sales'] ?? 0),
+                ];
+            })->filter(fn ($pump) => (int) ($pump['pump_id'] ?? 0) > 0)->sortBy('pump_id')->values()->all();
+            $recordTotalSales = (float) ($snapshot['total_sales'] ?? collect($recordPumpNetSales)->sum('total_sales'));
+            $recordTotalDiscounts = (float) ($snapshot['total_discounts'] ?? collect($recordPumpNetSales)->sum('discounts'));
+            $recordTotalNetSales = (float) ($snapshot['total_net_sales'] ?? collect($recordPumpNetSales)->sum('net_sales'));
 
             $tanks = collect($snapshot['tank_breakdown'] ?? [])->map(function ($tank) use ($dateLabel) {
                 $tankName = (string) ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank');
@@ -185,6 +200,10 @@
                         'liters' => (float) ($entry['liters'] ?? 0),
                         'raw_liters' => (float) ($entry['raw_liters'] ?? $entry['liters'] ?? 0),
                         'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
+                        'total_sales' => (float) ($entry['total_sales'] ?? 0),
+                        'discounts' => (float) ($entry['discounts'] ?? 0),
+                        'net_sales' => (float) ($entry['net_sales'] ?? 0),
+                        'sales_transaction_count' => (int) ($entry['sales_transaction_count'] ?? 0),
                         'adjustments' => $adjustments,
                     ];
                 })->values()->all();
@@ -215,8 +234,12 @@
                 'voided_by' => (string) ($record->voided_by_name ?? ''),
                 'limit' => $recordLimit,
                 'total_liters' => $recordLiters,
+                'total_sales' => $recordTotalSales,
+                'total_discounts' => $recordTotalDiscounts,
+                'total_net_sales' => $recordTotalNetSales,
                 'submission_count' => $recordSubmissions,
                 'pump_entry_count' => (int) ($snapshot['pump_entry_count'] ?? 0),
+                'pump_net_sales' => $recordPumpNetSales,
                 'tanks' => $tanks,
             ]];
         })->all();
@@ -967,6 +990,18 @@
                             <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90" x-text="formatHistoryNumber(historyDetails.record?.submission_count, 0)"></p>
                         </div>
                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Total Sales</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(historyDetails.record?.total_sales)"></span></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }}">Discounts</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-error-600 dark:text-error-400">&#8369;<span x-text="formatHistoryNumber(historyDetails.record?.total_discounts)"></span></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                            <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
+                            <p class="mt-2 text-title-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;<span x-text="formatHistoryNumber(historyDetails.record?.total_net_sales)"></span></p>
+                        </div>
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                             <p class="{{ $labelClass }}">Generated</p>
                             <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="historyDetails.record?.generated_at_label || 'N/A'"></p>
                             <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="historyDetails.record?.generated_by || 'Admin'"></p>
@@ -980,6 +1015,49 @@
 
                     <div x-show="historyDetails.record?.status === 'voided'" class="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
                         Voided<span x-show="historyDetails.record?.voided_by"> by <span x-text="historyDetails.record?.voided_by"></span></span><span x-show="historyDetails.record?.voided_at_label"> on <span x-text="historyDetails.record?.voided_at_label"></span></span>. The included submissions were restored to the active liters movement period.
+                    </div>
+
+                    <div class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Saved Sales Per Pump</h4>
+                        <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                            <div class="max-w-full overflow-x-auto">
+                                <table class="min-w-[820px] w-full table-fixed">
+                                    <colgroup>
+                                        <col class="w-[12%]">
+                                        <col class="w-[20%]">
+                                        <col class="w-[16%]">
+                                        <col class="w-[18%]">
+                                        <col class="w-[16%]">
+                                        <col class="w-[18%]">
+                                    </colgroup>
+                                    <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                                        <tr>
+                                            <th class="{{ $thClass }}">Pump</th>
+                                            <th class="{{ $thClass }}">Fuel</th>
+                                            <th class="{{ $thNumberClass }}">Transactions</th>
+                                            <th class="{{ $thNumberClass }}">Total Sales</th>
+                                            <th class="{{ $thNumberClass }}">Discounts</th>
+                                            <th class="{{ $thNumberClass }}">Net Sales</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        <template x-for="pump in historyPumpSales()" :key="`history-sales-${pump.pump_id}`">
+                                            <tr>
+                                                <td class="{{ $tdPrimaryClass }}">P<span x-text="pump.pump_id"></span></td>
+                                                <td class="{{ $tdClass }}" x-text="pump.fuel_type"></td>
+                                                <td class="{{ $tdNumberClass }}" x-text="formatHistoryNumber(pump.transaction_count, 0)"></td>
+                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.total_sales)"></span></td>
+                                                <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">&#8369;<span x-text="formatHistoryNumber(pump.discounts)"></span></td>
+                                                <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(pump.net_sales)"></span></td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="historyPumpSales().length === 0">
+                                            <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No saved sales breakdown was found in this record.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="mt-6">
@@ -1036,26 +1114,48 @@
                                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Submitted <span x-text="submission.created_at_label"></span> by <span class="font-medium text-gray-700 dark:text-gray-300" x-text="submission.staff_name"></span></p>
                                             <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="submission.period_label"></p>
                                         </div>
-                                        <div class="text-left sm:text-right">
-                                            <p class="{{ $labelClass }}">Total Liters</p>
-                                            <p class="mt-1 font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(submission.total_liters)"></span> L</p>
+                                        <div class="grid grid-cols-2 gap-3 text-left sm:grid-cols-4 sm:text-right">
+                                            <div>
+                                                <p class="{{ $labelClass }}">Total Liters</p>
+                                                <p class="mt-1 font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(submission.total_liters)"></span> L</p>
+                                            </div>
+                                            <div>
+                                                <p class="{{ $labelClass }}">Total Sales</p>
+                                                <p class="mt-1 font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(submission.total_sales)"></span></p>
+                                            </div>
+                                            <div>
+                                                <p class="{{ $labelClass }}">Discounts</p>
+                                                <p class="mt-1 font-semibold tabular-nums text-error-600 dark:text-error-400">&#8369;<span x-text="formatHistoryNumber(submission.total_discounts)"></span></p>
+                                            </div>
+                                            <div>
+                                                <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
+                                                <p class="mt-1 font-semibold tabular-nums text-brand-700 dark:text-brand-300">&#8369;<span x-text="formatHistoryNumber(submission.total_net_sales)"></span></p>
+                                            </div>
                                         </div>
                                     </div>
 
-                                    <div class="mt-4 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-800">
-                                        <table class="w-full table-fixed">
+                                    <div class="mt-4 overflow-x-auto rounded-lg border border-gray-100 dark:border-gray-800">
+                                        <table class="min-w-[980px] w-full table-fixed">
                                             <colgroup>
-                                                <col class="w-[14%]">
-                                                <col class="w-[28%]">
-                                                <col class="w-[22%]">
-                                                <col class="w-[18%]">
-                                                <col class="w-[18%]">
+                                                <col class="w-[9%]">
+                                                <col class="w-[17%]">
+                                                <col class="w-[12%]">
+                                                <col class="w-[11%]">
+                                                <col class="w-[13%]">
+                                                <col class="w-[11%]">
+                                                <col class="w-[13%]">
+                                                <col class="w-[7%]">
+                                                <col class="w-[7%]">
                                             </colgroup>
                                             <thead class="bg-gray-50 dark:bg-white/[0.02]">
                                                 <tr>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Pump</th>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Tank</th>
                                                     <th class="px-3 py-2 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Fuel</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Txns</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Total Sales</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Discounts</th>
+                                                    <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Net Sales</th>
                                                     <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Deducted</th>
                                                     <th class="px-3 py-2 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Current</th>
                                                 </tr>
@@ -1066,6 +1166,10 @@
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300">P<span x-text="pump.pump_id"></span></td>
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.tank_name"></td>
                                                         <td class="px-3 py-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="pump.fuel_type"></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300" x-text="formatHistoryNumber(pump.sales_transaction_count, 0)"></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300">&#8369;<span x-text="formatHistoryNumber(pump.total_sales)"></span></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-error-600 dark:text-error-400">&#8369;<span x-text="formatHistoryNumber(pump.discounts)"></span></td>
+                                                        <td class="px-3 py-2 text-right text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(pump.net_sales)"></span></td>
                                                         <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-error-600 dark:text-error-400"><span x-text="formatHistoryNumber(pump.deducted_liters)"></span> L</td>
                                                         <td class="px-3 py-2 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
                                                     </tr>
@@ -1287,6 +1391,9 @@
                 historyTanks() {
                     return this.historyDetails.record?.tanks || [];
                 },
+                historyPumpSales() {
+                    return this.historyDetails.record?.pump_net_sales || [];
+                },
                 historySubmissions() {
                     const grouped = new Map();
 
@@ -1304,6 +1411,10 @@
                                     created_at_label: entry.created_at_label || 'N/A',
                                     period_label: entry.period_label || 'N/A',
                                     total_liters: 0,
+                                    total_sales: 0,
+                                    total_discounts: 0,
+                                    total_net_sales: 0,
+                                    sales_transaction_count: 0,
                                     pumps: [],
                                     adjustments: [],
                                 });
@@ -1311,8 +1422,16 @@
 
                             const submission = grouped.get(key);
                             const liters = Number(entry.liters || 0);
+                            const totalSales = Number(entry.total_sales || 0);
+                            const discounts = Number(entry.discounts || 0);
+                            const netSales = Number(entry.net_sales || 0);
+                            const salesTransactionCount = Number(entry.sales_transaction_count || 0);
 
                             submission.total_liters = Math.round((submission.total_liters + liters) * 100) / 100;
+                            submission.total_sales = Math.round((submission.total_sales + totalSales) * 100) / 100;
+                            submission.total_discounts = Math.round((submission.total_discounts + discounts) * 100) / 100;
+                            submission.total_net_sales = Math.round((submission.total_net_sales + netSales) * 100) / 100;
+                            submission.sales_transaction_count += salesTransactionCount;
                             submission.pumps.push({
                                 pump_id: entry.pump_id || 0,
                                 tank_name: entry.tank_name || tank.name || 'Tank',
@@ -1320,6 +1439,10 @@
                                 liters,
                                 raw_liters: Number(entry.raw_liters || liters),
                                 deducted_liters: Number(entry.deducted_liters || 0),
+                                total_sales: totalSales,
+                                discounts,
+                                net_sales: netSales,
+                                sales_transaction_count: salesTransactionCount,
                             });
 
                             (entry.adjustments || []).forEach((adjustment) => {

@@ -46,7 +46,6 @@
         $dateLabelClass = 'flex flex-col gap-1.5 text-theme-xs font-medium text-gray-500 dark:text-gray-400';
         $dateInputClass = 'h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent py-2.5 pl-4 pr-11 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $dateActionClass = 'flex min-w-0 flex-col gap-2 sm:col-span-2 sm:flex-row sm:justify-end 2xl:col-span-1';
-        $primaryButtonClass = 'inline-flex h-10 items-center justify-center rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs hover:bg-brand-600';
         $secondaryButtonClass = 'inline-flex h-10 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" class="size-6"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 2C8.41421 2 8.75 2.33579 8.75 2.75V3.75H15.25V2.75C15.25 2.33579 15.5858 2 16 2C16.4142 2 16.75 2.33579 16.75 2.75V3.75H18.5C19.7426 3.75 20.75 4.75736 20.75 6V9V19C20.75 20.2426 19.7426 21.25 18.5 21.25H5.5C4.25736 21.25 3.25 20.2426 3.25 19V9V6C3.25 4.75736 4.25736 3.75 5.5 3.75H7.25V2.75C7.25 2.33579 7.58579 2 8 2ZM8 5.25H5.5C5.08579 5.25 4.75 5.58579 4.75 6V8.25H19.25V6C19.25 5.58579 18.9142 5.25 18.5 5.25H16H8ZM19.25 9.75H4.75V19C4.75 19.4142 5.08579 19.75 5.5 19.75H18.5C18.9142 19.75 19.25 19.4142 19.25 19V9.75Z" fill="currentColor"></path></svg></span>';
         $metricValueClass = 'mt-5 break-words text-title-sm font-bold text-gray-800 dark:text-white/90';
@@ -90,6 +89,7 @@
                         <div class="{{ $segmentGroupClass }}" aria-label="Net sales shift reading status">
                             <button type="button" class="{{ $segmentButtonClass }}" data-net-reading-status="pending">Pending</button>
                             <button type="button" class="{{ $segmentButtonClass }}" data-net-reading-status="verified">Verified</button>
+                            <button type="button" class="{{ $segmentButtonClass }}" data-net-reading-status="all">Pending &amp; Verified</button>
                         </div>
                         <div class="{{ $segmentGroupClass }}" aria-label="Net sales credit filter">
                             <button type="button" class="{{ $segmentButtonClass }}" data-net-credit-mode="with_credit">Include Credits</button>
@@ -104,7 +104,7 @@
                     </div>
                 </div>
                         @php($netSalesFilter = $metricFilter('net-sales'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="net-sales" data-date-filter-prefix="{{ $netSalesFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -120,7 +120,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }}">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $netSalesFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -140,6 +139,7 @@
                                 <div class="{{ $segmentGroupClass }}" aria-label="Net sales per tank shift reading status">
                                     <button type="button" class="{{ $segmentButtonClass }}" data-net-tank-reading-status="pending">Pending</button>
                                     <button type="button" class="{{ $segmentButtonClass }}" data-net-tank-reading-status="verified">Verified</button>
+                                    <button type="button" class="{{ $segmentButtonClass }}" data-net-tank-reading-status="all">Pending &amp; Verified</button>
                                 </div>
                                 <div class="{{ $segmentGroupClass }}" aria-label="Net sales per tank period">
                                     <button type="button" class="{{ $segmentButtonClass }}" data-period-target="net-sales-tank" data-period="today">Today</button>
@@ -153,7 +153,7 @@
                             </div>
                         </div>
                         @php($netSalesTankFilter = $metricFilter('net-sales-tank'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="net-sales-tank" data-date-filter-prefix="{{ $netSalesTankFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -169,7 +169,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }}">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $netSalesTankFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -200,7 +199,7 @@
                             </div>
                         </div>
                         @php($expectedCreditFilter = $metricFilter('expected-credit'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="expected-credit" data-date-filter-prefix="{{ $expectedCreditFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -216,7 +215,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }}">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $expectedCreditFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -241,7 +239,7 @@
                             </div>
                         </div>
                         @php($creditPaymentsFilter = $metricFilter('credit-payments'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="credit-payments" data-date-filter-prefix="{{ $creditPaymentsFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -257,7 +255,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }} 2xl:col-span-1">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $creditPaymentsFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -281,7 +278,7 @@
                             </div>
                         </div>
                         @php($advanceReceivablesFilter = $metricFilter('advance-receivables'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="advance-receivables" data-date-filter-prefix="{{ $advanceReceivablesFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -297,7 +294,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }} 2xl:col-span-1">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $advanceReceivablesFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -322,7 +318,7 @@
                             </div>
                         </div>
                         @php($totalExcessFilter = $metricFilter('total-excess'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="total-excess" data-date-filter-prefix="{{ $totalExcessFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -338,7 +334,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }} 2xl:col-span-1">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $totalExcessFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -369,7 +364,7 @@
                             </div>
                         </div>
                         @php($litersMovementFilter = $metricFilter('liters-movement'))
-                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form>
+                        <form method="GET" action="{{ url()->current() }}" class="{{ $dateFormClass }}" data-date-filter-form data-date-filter-target="liters-movement" data-date-filter-prefix="{{ $litersMovementFilter['prefix'] }}">
                             <label class="{{ $dateLabelClass }}">
                                 <span>From</span>
                                 <span class="relative block custom-datepicker">
@@ -385,7 +380,6 @@
                                 </span>
                             </label>
                             <div class="{{ $dateActionClass }} 2xl:col-span-1">
-                                <button type="submit" class="{{ $primaryButtonClass }}">Apply</button>
                                 <button type="button" class="{{ $secondaryButtonClass }}" data-date-reset="{{ $litersMovementFilter['prefix'] }}">Clear</button>
                             </div>
                         </form>
@@ -532,6 +526,11 @@
             'pump-sales': 'pumpSalesPeriod'
         };
 
+        const metricTargetByPrefix = Object.entries(metricDateFilterNames).reduce(function(targets, entry) {
+            targets[entry[1]] = entry[0];
+            return targets;
+        }, {});
+
         let periodLabels = @json($dashboardPeriodLabels);
 
         let dashboardData = {
@@ -564,9 +563,15 @@
         const emptyCellClass = 'px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400 sm:px-6';
         const positiveAmountClass = 'text-success-600 dark:text-success-500';
         const negativeAmountClass = 'text-error-600 dark:text-error-500';
+        let dashboardRequestSerial = 0;
+        let dateFilterTimer = null;
 
         function shiftReadingStatusLabel(status) {
-            return status === 'pending' ? 'Pending' : 'Verified';
+            if (status === 'pending') {
+                return 'Pending';
+            }
+
+            return status === 'verified' ? 'Verified' : 'Pending & Verified';
         }
 
         function initDashboardDatePickers() {
@@ -585,7 +590,10 @@
                     dateFormat: 'Y-m-d',
                     defaultDate: input.value || null,
                     allowInput: false,
-                    disableMobile: true
+                    disableMobile: true,
+                    onChange: function() {
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
                 });
             });
         }
@@ -975,6 +983,145 @@
             renderPumpSales();
         }
 
+        function applyDashboardPayload(data) {
+            dashboardData = {
+                stats: data.stats ?? dashboardData.stats,
+                tankMovements: data.tankMovements ?? dashboardData.tankMovements,
+                pumpSales: data.pumpSales ?? dashboardData.pumpSales,
+                chartLabels: data.chartLabels ?? dashboardData.chartLabels,
+                chartData: data.chartData ?? dashboardData.chartData,
+                periodLabels: data.periodLabels ?? dashboardData.periodLabels,
+                customMetricStats: data.customMetricStats ?? dashboardData.customMetricStats,
+                customPeriodLabels: data.customPeriodLabels ?? dashboardData.customPeriodLabels,
+                lastVerifiedAt: Object.prototype.hasOwnProperty.call(data, 'lastVerifiedAt')
+                    ? data.lastVerifiedAt
+                    : dashboardData.lastVerifiedAt,
+                lastUpdatedAt: data.lastUpdatedAt ?? dashboardData.lastUpdatedAt
+            };
+            periodLabels = dashboardData.periodLabels;
+            customMetricStats = dashboardData.customMetricStats;
+            customPeriodLabels = dashboardData.customPeriodLabels;
+
+            setText('last-updated', 'Live as of ' + formatDateTime(dashboardData.lastUpdatedAt));
+
+            if (salesTrendChart) {
+                salesTrendChart.updateOptions({
+                    xaxis: {
+                        categories: dashboardData.chartLabels
+                    }
+                }, false, false);
+                salesTrendChart.updateSeries([{
+                    name: 'Net Sales',
+                    data: dashboardData.chartData.map((value) => Number(value) || 0)
+                }]);
+            }
+
+            updateAll();
+        }
+
+        function dashboardPathWithParams(params) {
+            const query = params.toString();
+            return window.location.pathname + (query ? '?' + query : '') + window.location.hash;
+        }
+
+        function syncBrowserQuery(params) {
+            params.delete('t');
+
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, '', dashboardPathWithParams(params));
+            }
+        }
+
+        function requestDashboardData(params) {
+            const requestId = ++dashboardRequestSerial;
+            const refreshParams = new URLSearchParams(params || window.location.search);
+            refreshParams.set('t', Date.now());
+
+            return fetch("{{ url('/api/dashboard-data') }}?" + refreshParams.toString(), {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Dashboard refresh failed: ' + response.status);
+                    }
+
+                    return response.json();
+                })
+                .then(function(data) {
+                    if (requestId !== dashboardRequestSerial) {
+                        return;
+                    }
+
+                    applyDashboardPayload(data);
+                })
+                .catch(function(error) {
+                    console.error(error);
+                });
+        }
+
+        function dateFilterTarget(form) {
+            if (form.dataset.dateFilterTarget) {
+                return form.dataset.dateFilterTarget;
+            }
+
+            const prefix = dateFilterPrefix(form);
+
+            return metricTargetByPrefix[prefix] || null;
+        }
+
+        function dateFilterPrefix(form) {
+            if (form.dataset.dateFilterPrefix) {
+                return form.dataset.dateFilterPrefix;
+            }
+
+            const input = form.querySelector('[name$="_from"], [name$="_to"]');
+
+            return input ? input.name.replace(/_(from|to)$/, '') : null;
+        }
+
+        function dateFilterHasValue(form) {
+            return Array.from(form.elements).some(function(element) {
+                return element.name && element.value;
+            });
+        }
+
+        function applyDateFilter(form) {
+            const target = dateFilterTarget(form);
+            const params = new URLSearchParams(window.location.search);
+
+            Array.from(form.elements).forEach(function(element) {
+                if (!element.name) {
+                    return;
+                }
+
+                if (element.value) {
+                    params.set(element.name, element.value);
+                } else {
+                    params.delete(element.name);
+                }
+            });
+
+            params.delete('t');
+
+            const stateKey = target ? periodStateKeys[target] : null;
+
+            if (stateKey) {
+                dashboardState[stateKey] = dateFilterHasValue(form) ? 'custom' : 'today';
+            }
+
+            syncBrowserQuery(params);
+            requestDashboardData(params);
+        }
+
+        function queueDateFilter(form) {
+            window.clearTimeout(dateFilterTimer);
+            dateFilterTimer = window.setTimeout(function() {
+                applyDateFilter(form);
+            }, 250);
+        }
+
         document.querySelectorAll('[data-period-target]').forEach(function(button) {
             button.addEventListener('click', function() {
                 const stateKey = periodStateKeys[button.dataset.periodTarget];
@@ -1017,40 +1164,54 @@
         });
 
         document.querySelectorAll('[data-date-filter-form]').forEach(function(form) {
-            form.addEventListener('submit', function() {
-                const params = new URLSearchParams(window.location.search);
-                const formNames = new Set(Array.from(form.elements)
-                    .filter((element) => element.name)
-                    .map((element) => element.name));
+            form.addEventListener('submit', function(event) {
+                event.preventDefault();
+                applyDateFilter(form);
+            });
 
-                form.querySelectorAll('[data-preserved-param]').forEach((input) => input.remove());
+            form.addEventListener('change', function(event) {
+                if (!event.target.matches('[data-dashboard-datepicker]')) {
+                    return;
+                }
 
-                params.forEach(function(value, key) {
-                    if (key === 't' || formNames.has(key)) {
-                        return;
-                    }
-
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = key;
-                    input.value = value;
-                    input.dataset.preservedParam = 'true';
-                    form.appendChild(input);
-                });
+                queueDateFilter(form);
             });
         });
 
         document.querySelectorAll('[data-date-reset]').forEach(function(button) {
             button.addEventListener('click', function() {
-                const prefix = button.dataset.dateReset;
+                const form = button.closest('[data-date-filter-form]');
+                const prefix = button.dataset.dateReset || (form ? dateFilterPrefix(form) : null);
+                const target = form ? dateFilterTarget(form) : metricTargetByPrefix[prefix];
                 const params = new URLSearchParams(window.location.search);
+
+                if (!prefix) {
+                    return;
+                }
+
+                if (form) {
+                    form.querySelectorAll('[data-dashboard-datepicker]').forEach(function(input) {
+                        if (input._dashboardDatePicker) {
+                            input._dashboardDatePicker.clear(false);
+                        }
+
+                        input.value = '';
+                    });
+                }
 
                 params.delete(prefix + '_from');
                 params.delete(prefix + '_to');
                 params.delete('t');
 
-                const query = params.toString();
-                window.location.href = window.location.pathname + (query ? '?' + query : '');
+                if (target && periodStateKeys[target]) {
+                    dashboardState[periodStateKeys[target]] = 'today';
+                    delete dashboardData.customMetricStats[target];
+                    delete dashboardData.customPeriodLabels[target];
+                }
+
+                syncBrowserQuery(params);
+                updateAll();
+                requestDashboardData(params);
             });
         });
 
@@ -1116,54 +1277,7 @@
 
         function refreshDashboard() {
             const refreshParams = new URLSearchParams(window.location.search);
-            refreshParams.set('t', Date.now());
-
-            fetch("{{ url('/api/dashboard-data') }}?" + refreshParams.toString(), {
-                headers: {
-                    'Accept': 'application/json'
-                }
-            })
-                .then(function(response) {
-                    return response.json();
-                })
-                .then(function(data) {
-                    dashboardData = {
-                        stats: data.stats ?? dashboardData.stats,
-                        tankMovements: data.tankMovements ?? dashboardData.tankMovements,
-                        pumpSales: data.pumpSales ?? dashboardData.pumpSales,
-                        chartLabels: data.chartLabels ?? dashboardData.chartLabels,
-                        chartData: data.chartData ?? dashboardData.chartData,
-                        periodLabels: data.periodLabels ?? dashboardData.periodLabels,
-                        customMetricStats: data.customMetricStats ?? dashboardData.customMetricStats,
-                        customPeriodLabels: data.customPeriodLabels ?? dashboardData.customPeriodLabels,
-                        lastVerifiedAt: Object.prototype.hasOwnProperty.call(data, 'lastVerifiedAt')
-                            ? data.lastVerifiedAt
-                            : dashboardData.lastVerifiedAt,
-                        lastUpdatedAt: data.lastUpdatedAt ?? dashboardData.lastUpdatedAt
-                    };
-                    periodLabels = dashboardData.periodLabels;
-                    customMetricStats = dashboardData.customMetricStats;
-                    customPeriodLabels = dashboardData.customPeriodLabels;
-
-                    setText('last-updated', 'Live as of ' + formatDateTime(dashboardData.lastUpdatedAt));
-
-                    if (salesTrendChart) {
-                        salesTrendChart.updateOptions({
-                            xaxis: {
-                                categories: dashboardData.chartLabels
-                            }
-                        }, false, false);
-                        salesTrendChart.updateSeries([{
-                            name: 'Net Sales',
-                            data: dashboardData.chartData.map((value) => Number(value) || 0)
-                        }]);
-                    }
-
-                    updateAll();
-                })
-                .catch(function(error) {
-                    console.error(error);
-                });
+            requestDashboardData(refreshParams);
         }
 
         initDashboardDatePickers();

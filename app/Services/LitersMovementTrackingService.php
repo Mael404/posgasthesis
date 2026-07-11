@@ -522,7 +522,7 @@ class LitersMovementTrackingService
             ->withQueryString();
 
         $paginator->getCollection()->transform(function ($period) {
-            $period->snapshot = $this->decodeSnapshot($period->totals_snapshot ?? null);
+            $period->snapshot = $this->snapshotWithSalesFallback($period, $this->decodeSnapshot($period->totals_snapshot ?? null));
 
             return $period;
         });
@@ -753,6 +753,10 @@ class LitersMovementTrackingService
                     'deducted_liters' => $entry['deducted_liters'] ?? 0,
                     'price_per_liter' => $entry['price_per_liter'],
                     'amount' => $amount,
+                    'total_sales' => $entry['total_sales'] ?? 0,
+                    'discounts' => $entry['discounts'] ?? 0,
+                    'net_sales' => $entry['net_sales'] ?? 0,
+                    'sales_transaction_count' => $entry['sales_transaction_count'] ?? 0,
                     'adjustments' => $entry['adjustments'] ?? [],
                 ];
 
@@ -1617,6 +1621,151 @@ class LitersMovementTrackingService
         $decoded = json_decode((string) $snapshot, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function snapshotWithSalesFallback(object $period, array $snapshot): array
+    {
+        if (! $this->snapshotNeedsSalesFallback($snapshot)) {
+            return $snapshot;
+        }
+
+        $rows = $this->snapshotSalesRows($period, $snapshot);
+
+        if ($rows->isEmpty()) {
+            return $snapshot;
+        }
+
+        $summary = $this->summaryFromRows($period, $rows, true);
+        $snapshot['total_sales'] = $snapshot['total_sales'] ?? ($summary['total_sales'] ?? 0);
+        $snapshot['total_discounts'] = $snapshot['total_discounts'] ?? ($summary['total_discounts'] ?? 0);
+        $snapshot['total_net_sales'] = $snapshot['total_net_sales'] ?? ($summary['total_net_sales'] ?? 0);
+
+        if (empty($snapshot['pump_net_sales']) && ! empty($summary['pump_net_sales'])) {
+            $snapshot['pump_net_sales'] = $summary['pump_net_sales'];
+        }
+
+        if (empty($snapshot['tank_breakdown']) || ! is_array($snapshot['tank_breakdown'])) {
+            return $snapshot;
+        }
+
+        $salesByReadingPump = [];
+
+        foreach (($summary['tank_breakdown'] ?? []) as $tank) {
+            foreach (($tank['entries'] ?? []) as $entry) {
+                $readingId = (int) ($entry['id'] ?? 0);
+                $pumpId = (int) ($entry['pump_id'] ?? 0);
+
+                if ($readingId <= 0 || $pumpId <= 0) {
+                    continue;
+                }
+
+                $salesByReadingPump["{$readingId}:{$pumpId}"] = [
+                    'total_sales' => $entry['total_sales'] ?? 0,
+                    'discounts' => $entry['discounts'] ?? 0,
+                    'net_sales' => $entry['net_sales'] ?? 0,
+                    'sales_transaction_count' => $entry['sales_transaction_count'] ?? 0,
+                ];
+            }
+        }
+
+        $snapshot['tank_breakdown'] = collect($snapshot['tank_breakdown'])
+            ->map(function ($tank) use ($salesByReadingPump) {
+                if (empty($tank['entries']) || ! is_array($tank['entries'])) {
+                    return $tank;
+                }
+
+                $tank['entries'] = collect($tank['entries'])
+                    ->map(function ($entry) use ($salesByReadingPump) {
+                        $key = ((int) ($entry['id'] ?? 0)) . ':' . ((int) ($entry['pump_id'] ?? 0));
+                        $sales = $salesByReadingPump[$key] ?? null;
+
+                        if (! $sales) {
+                            return $entry;
+                        }
+
+                        foreach ($sales as $field => $value) {
+                            if (! array_key_exists($field, $entry)) {
+                                $entry[$field] = $value;
+                            }
+                        }
+
+                        return $entry;
+                    })
+                    ->values()
+                    ->all();
+
+                return $tank;
+            })
+            ->values()
+            ->all();
+
+        return $snapshot;
+    }
+
+    private function snapshotNeedsSalesFallback(array $snapshot): bool
+    {
+        if (
+            ! array_key_exists('total_sales', $snapshot)
+            || ! array_key_exists('total_discounts', $snapshot)
+            || ! array_key_exists('total_net_sales', $snapshot)
+            || empty($snapshot['pump_net_sales'])
+        ) {
+            return true;
+        }
+
+        foreach (($snapshot['tank_breakdown'] ?? []) as $tank) {
+            foreach (($tank['entries'] ?? []) as $entry) {
+                if (
+                    ! array_key_exists('total_sales', $entry)
+                    || ! array_key_exists('discounts', $entry)
+                    || ! array_key_exists('net_sales', $entry)
+                    || ! array_key_exists('sales_transaction_count', $entry)
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function snapshotSalesRows(object $period, array $snapshot): Collection
+    {
+        if (! $this->hasTable('shift_readings')) {
+            return collect();
+        }
+
+        $readingIds = collect($snapshot['shift_reading_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->values()
+            ->all();
+
+        $query = DB::table('shift_readings');
+
+        if ($readingIds !== []) {
+            $query->whereIn('shift_readings.id', $readingIds);
+        } elseif ($this->hasColumn('shift_readings', 'liters_tracking_period_id') && (int) ($period->id ?? 0) > 0) {
+            $query->where('shift_readings.liters_tracking_period_id', (int) $period->id);
+        } else {
+            return collect();
+        }
+
+        $this->scopeToIncludedShiftReadings($query);
+
+        if ($this->hasTable('users') && $this->hasColumn('users', 'id')) {
+            $query->leftJoin('users', 'shift_readings.user_id', '=', 'users.id');
+        }
+
+        $staffExpression = $this->hasTable('users') && $this->hasColumn('users', 'name')
+            ? "COALESCE(users.name, 'Staff')"
+            : "'Staff'";
+
+        return $query
+            ->select('shift_readings.*', DB::raw("{$staffExpression} as staff_name"))
+            ->orderBy('shift_readings.created_at')
+            ->orderBy('shift_readings.id')
+            ->get();
     }
 
     private function assertAdjustmentReady(): void

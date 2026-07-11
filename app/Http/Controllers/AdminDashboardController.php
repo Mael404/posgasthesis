@@ -21,6 +21,7 @@ class AdminDashboardController extends Controller
         'credit-payments' => 'credit_payments',
         'advance-receivables' => 'advance_receivables',
         'total-excess' => 'total_excess',
+        'liters-movement' => 'liters_movement',
     ];
 
     private $lockedSalesPresence = [];
@@ -212,6 +213,10 @@ class AdminDashboardController extends Controller
         $verifiedShiftReadingNetSales = $this->shiftReadingNetSales($start, $end, 'verified');
         $pendingShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'pending');
         $verifiedShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'verified');
+        $allShiftReadingNetSalesByTank = $this->combineNetSalesByTank(
+            $pendingShiftReadingNetSalesByTank,
+            $verifiedShiftReadingNetSalesByTank
+        );
         $shiftReadingLitersMovement = $this->shiftReadingLitersMovement($start, $end);
 
         $paymentRows = $this->creditPaymentRows($start, $end);
@@ -237,6 +242,15 @@ class AdminDashboardController extends Controller
             'shift_reading_verified_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
             'shift_reading_verified_net_sales_by_tank_without_credit' => $verifiedShiftReadingNetSalesByTank['without_credit'],
             'shift_reading_verified_count' => $verifiedShiftReadingNetSales['reading_count'],
+            'shift_reading_all_net_sales_with_credit' => $this->money(
+                $pendingShiftReadingNetSales['with_credit'] + $verifiedShiftReadingNetSales['with_credit']
+            ),
+            'shift_reading_all_net_sales_without_credit' => $this->money(
+                $pendingShiftReadingNetSales['without_credit'] + $verifiedShiftReadingNetSales['without_credit']
+            ),
+            'shift_reading_all_net_sales_by_tank_with_credit' => $allShiftReadingNetSalesByTank['with_credit'],
+            'shift_reading_all_net_sales_by_tank_without_credit' => $allShiftReadingNetSalesByTank['without_credit'],
+            'shift_reading_all_count' => $pendingShiftReadingNetSales['reading_count'] + $verifiedShiftReadingNetSales['reading_count'],
             'shift_reading_net_sales_with_credit' => $verifiedShiftReadingNetSales['with_credit'],
             'shift_reading_net_sales_without_credit' => $verifiedShiftReadingNetSales['without_credit'],
             'shift_reading_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
@@ -924,6 +938,35 @@ class AdminDashboardController extends Controller
                 return $row;
             })
             ->values()
+            ->all();
+    }
+
+    private function combineNetSalesByTank(array ...$groups): array
+    {
+        return collect(['with_credit', 'without_credit'])
+            ->mapWithKeys(function ($creditMode) use ($groups) {
+                $combinedRows = [];
+
+                foreach ($groups as $group) {
+                    foreach ($group[$creditMode] ?? [] as $row) {
+                        $rowKey = (string) ($row['id'] ?? $row['name'] ?? count($combinedRows));
+
+                        if (! isset($combinedRows[$rowKey])) {
+                            $combinedRows[$rowKey] = array_merge($row, [
+                                'liters' => 0,
+                                'net_sales' => 0,
+                                'transactions' => 0,
+                            ]);
+                        }
+
+                        $combinedRows[$rowKey]['liters'] += (float) ($row['liters'] ?? 0);
+                        $combinedRows[$rowKey]['net_sales'] += (float) ($row['net_sales'] ?? 0);
+                        $combinedRows[$rowKey]['transactions'] += (int) ($row['transactions'] ?? 0);
+                    }
+                }
+
+                return [$creditMode => $this->formatNetSalesTankRows($combinedRows)];
+            })
             ->all();
     }
 
