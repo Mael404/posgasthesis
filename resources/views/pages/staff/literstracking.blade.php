@@ -103,6 +103,8 @@
                     'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
                     'price_per_liter' => (float) ($entry['price_per_liter'] ?? 0),
                     'amount' => (float) ($entry['amount'] ?? 0),
+                    'raw_amount' => (float) ($entry['raw_amount'] ?? $entry['amount'] ?? 0),
+                    'deducted_amount' => (float) ($entry['deducted_amount'] ?? 0),
                 ];
             })->values()->all();
             $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel) {
@@ -110,6 +112,7 @@
                     'id' => (int) ($adjustment['id'] ?? 0),
                     'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
                     'liters' => (float) ($adjustment['liters'] ?? 0),
+                    'amount' => (float) ($adjustment['amount'] ?? 0),
                     'reason' => (string) ($adjustment['reason'] ?? ''),
                     'status' => (string) ($adjustment['status'] ?? 'active'),
                     'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
@@ -291,7 +294,7 @@
             <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h2>
-                    <p class="mt-1 {{ $captionClass }}">This shared view includes every staff member's Pending and Verified submissions.</p>
+                    <p class="mt-1 {{ $captionClass }}">This view includes only your Pending and Verified submissions.</p>
                 </div>
                 <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
                     {{ number_format((int) $summary['submission_count']) }} submissions
@@ -490,7 +493,7 @@
                                     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div class="min-w-0">
                                             <div class="flex flex-wrap items-center gap-2">
-                                                <p class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatNumber(adjustment.liters)"></span> L</p>
+                                                <p class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatNumber(adjustment.liters)"></span> L / &#8369;<span x-text="formatNumber(adjustment.amount)"></span></p>
                                                 <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="adjustment.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'" x-text="adjustment.status === 'voided' ? 'Voided' : 'Active'"></span>
                                             </div>
                                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Added <span x-text="adjustment.created_at_label"></span> by <span x-text="adjustment.created_by"></span>; authorized by <span x-text="adjustment.authorized_by"></span></p>
@@ -550,11 +553,19 @@
                             <span class="text-gray-500 dark:text-gray-400">Selected pump available</span>
                             <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatNumber(selectedPumpAvailable())"></span> L</span>
                         </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Available sales amount</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatNumber(selectedPumpAvailableAmount())"></span></span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Pump price</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatNumber(selectedPumpPrice())"></span> / L</span>
+                        </div>
                     </div>
 
                     <div>
                         <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="deduction_pump_number">Pump</label>
-                        <select id="deduction_pump_number" name="pump_number" x-model="deduction.pump" class="{{ $inputClass }}" required>
+                        <select id="deduction_pump_number" name="pump_number" x-model="deduction.pump" x-on:change="deduction.amountManual = false; syncDeductionAmount(true)" class="{{ $inputClass }}" required>
                             <option value="">Choose pump</option>
                             <template x-for="pump in deductionPumps()" :key="pump.pump_id">
                                 <option :value="pump.pump_id" :disabled="Number(pump.liters || 0) <= 0" x-text="`P${pump.pump_id} - ${formatNumber(pump.liters)} L available`"></option>
@@ -564,7 +575,13 @@
 
                     <div>
                         <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="deduction_liters">Liters to deduct</label>
-                        <input id="deduction_liters" name="liters" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailable()" x-model="deduction.liters" class="{{ $inputClass }}" required>
+                        <input id="deduction_liters" name="liters" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailable()" x-model="deduction.liters" x-on:input="syncDeductionAmount()" class="{{ $inputClass }}" required>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="deduction_amount">Amount to deduct</label>
+                        <input id="deduction_amount" name="amount" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailableAmount()" x-model="deduction.amount" x-on:input="deduction.amountManual = true" class="{{ $inputClass }}" required>
+                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Auto-calculated from liters x current pump price. You can still edit it.</p>
                     </div>
 
                     <div>
@@ -603,7 +620,7 @@
                 @csrf
                 <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Void Liters Deduction</h3>
-                    <p class="mt-1 {{ $captionClass }}">Restore this deduction back into the pump liters.</p>
+                    <p class="mt-1 {{ $captionClass }}">Restore this deduction back into the pump liters and sales.</p>
                 </div>
                 <div class="space-y-4 p-5">
                     <div class="rounded-xl border border-gray-200 p-4 text-theme-sm dark:border-gray-800">
@@ -614,6 +631,10 @@
                         <div class="mt-2 flex justify-between gap-4">
                             <span class="text-gray-500 dark:text-gray-400">Deducted liters</span>
                             <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatNumber(voidDialog.adjustment?.liters)"></span> L</span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Deducted amount</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatNumber(voidDialog.adjustment?.amount)"></span></span>
                         </div>
                     </div>
                     <div>
@@ -672,6 +693,8 @@
                     action: '',
                     pump: '',
                     liters: '',
+                    amount: '',
+                    amountManual: false,
                     reason: '',
                     password: '',
                     showPassword: false,
@@ -733,6 +756,8 @@
                         action: String(config.deductionUrlTemplate || '').replace('__READING__', row.id),
                         pump: firstPump ? String(firstPump.pump_id) : '',
                         liters: '',
+                        amount: '',
+                        amountManual: false,
                         reason: '',
                         password: '',
                         showPassword: false,
@@ -745,6 +770,8 @@
                         action: '',
                         pump: '',
                         liters: '',
+                        amount: '',
+                        amountManual: false,
                         reason: '',
                         password: '',
                         showPassword: false,
@@ -792,14 +819,40 @@
                 selectedPumpAvailable() {
                     return Number(this.selectedPump()?.liters || 0);
                 },
+                selectedPumpAvailableAmount() {
+                    return Number(this.selectedPump()?.amount || 0);
+                },
+                selectedPumpPrice() {
+                    return Number(this.selectedPump()?.price_per_liter || 0);
+                },
+                syncDeductionAmount(force = false) {
+                    if (this.deduction.amountManual && ! force) {
+                        return;
+                    }
+
+                    const liters = Number(this.deduction.liters || 0);
+                    const price = this.selectedPumpPrice();
+
+                    this.deduction.amount = liters > 0 && price > 0
+                        ? this.roundCurrency(Math.min(liters * price, this.selectedPumpAvailableAmount()))
+                        : '';
+                },
+                roundCurrency(value) {
+                    const number = Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+                    return number > 0 ? number.toFixed(2) : '';
+                },
                 canSubmitDeduction() {
                     const liters = Number(this.deduction.liters || 0);
+                    const amount = Number(this.deduction.amount || 0);
 
                     return this.canManageAdjustments
                         && Boolean(this.deduction.action)
                         && Boolean(this.deduction.pump)
                         && liters > 0
                         && liters <= this.selectedPumpAvailable()
+                        && amount > 0
+                        && amount <= this.selectedPumpAvailableAmount()
                         && Boolean(this.deduction.password);
                 },
                 statusClass(status) {

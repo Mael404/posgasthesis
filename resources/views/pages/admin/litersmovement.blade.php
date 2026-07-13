@@ -176,6 +176,7 @@
                             'id' => (int) ($adjustment['id'] ?? 0),
                             'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
                             'liters' => (float) ($adjustment['liters'] ?? 0),
+                            'amount' => (float) ($adjustment['amount'] ?? 0),
                             'reason' => (string) ($adjustment['reason'] ?? ''),
                             'status' => (string) ($adjustment['status'] ?? 'active'),
                             'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
@@ -200,6 +201,8 @@
                         'liters' => (float) ($entry['liters'] ?? 0),
                         'raw_liters' => (float) ($entry['raw_liters'] ?? $entry['liters'] ?? 0),
                         'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
+                        'raw_amount' => (float) ($entry['raw_amount'] ?? $entry['amount'] ?? $entry['total_sales'] ?? 0),
+                        'deducted_amount' => (float) ($entry['deducted_amount'] ?? 0),
                         'total_sales' => (float) ($entry['total_sales'] ?? 0),
                         'discounts' => (float) ($entry['discounts'] ?? 0),
                         'net_sales' => (float) ($entry['net_sales'] ?? 0),
@@ -256,6 +259,8 @@
                     'deducted_liters' => (float) ($entry['deducted_liters'] ?? 0),
                     'price_per_liter' => (float) ($entry['price_per_liter'] ?? 0),
                     'amount' => (float) ($entry['amount'] ?? 0),
+                    'raw_amount' => (float) ($entry['raw_amount'] ?? $entry['amount'] ?? 0),
+                    'deducted_amount' => (float) ($entry['deducted_amount'] ?? 0),
                     'total_sales' => (float) ($entry['total_sales'] ?? 0),
                     'discounts' => (float) ($entry['discounts'] ?? 0),
                     'net_sales' => (float) ($entry['net_sales'] ?? 0),
@@ -267,6 +272,7 @@
                     'id' => (int) ($adjustment['id'] ?? 0),
                     'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
                     'liters' => (float) ($adjustment['liters'] ?? 0),
+                    'amount' => (float) ($adjustment['amount'] ?? 0),
                     'reason' => (string) ($adjustment['reason'] ?? ''),
                     'status' => (string) ($adjustment['status'] ?? 'active'),
                     'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
@@ -432,7 +438,7 @@
             <div class="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Net Sales Per Pump</h2>
-                    <p class="mt-1 {{ $captionClass }}">Transaction sales less automatic and manual discounts, using the same net-sales formula as the admin dashboard.</p>
+                    <p class="mt-1 {{ $captionClass }}">Submitted pump sales from Pending and Verified shift readings, less their automatic and manual discounts. Rejected and Voided readings are excluded.</p>
                 </div>
                 <div class="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-left dark:border-brand-500/25 dark:bg-brand-500/10 sm:text-right">
                     <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Overall Net Sales</p>
@@ -455,7 +461,7 @@
                             <tr>
                                 <th class="{{ $thClass }}">Pump</th>
                                 <th class="{{ $thClass }}">Fuel</th>
-                                <th class="{{ $thNumberClass }}">Transactions</th>
+                                <th class="{{ $thNumberClass }}">Sales Records</th>
                                 <th class="{{ $thNumberClass }}">Total Sales</th>
                                 <th class="{{ $thNumberClass }}">Discounts</th>
                                 <th class="{{ $thNumberClass }}">Net Sales</th>
@@ -985,7 +991,7 @@
                                     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div class="min-w-0">
                                             <div class="flex flex-wrap items-center gap-2">
-                                                <p class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L</p>
+                                                <p class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L / &#8369;<span x-text="formatHistoryNumber(adjustment.amount)"></span></p>
                                                 <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium" :class="adjustment.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'" x-text="adjustment.status === 'voided' ? 'Voided' : 'Active'"></span>
                                             </div>
                                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Added <span x-text="adjustment.created_at_label"></span> by <span x-text="adjustment.created_by"></span>; authorized by <span x-text="adjustment.authorized_by"></span></p>
@@ -1238,7 +1244,7 @@
                                             <template x-for="adjustment in submission.adjustments" :key="`${submission.key}-adjustment-${adjustment.id}`">
                                                 <div class="flex flex-col gap-1 text-theme-sm text-gray-700 dark:text-gray-300 sm:flex-row sm:items-center sm:justify-between">
                                                     <div class="min-w-0">
-                                                        <span class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L</span>
+                                                        <span class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="adjustment.pump_number"></span> - <span x-text="formatHistoryNumber(adjustment.liters)"></span> L / &#8369;<span x-text="formatHistoryNumber(adjustment.amount)"></span></span>
                                                         <span class="ml-2 inline-flex rounded-full px-2 py-0.5 text-theme-xs font-medium" :class="adjustment.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400'" x-text="adjustment.status === 'voided' ? 'Voided' : 'Active'"></span>
                                                         <p x-show="adjustment.reason" class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="adjustment.reason"></p>
                                                     </div>

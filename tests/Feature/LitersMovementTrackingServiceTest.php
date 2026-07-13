@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 beforeEach(function () {
+    Schema::dropIfExists('liters_movement_adjustments');
+    Schema::dropIfExists('sales');
     Schema::dropIfExists('shift_readings');
     Schema::dropIfExists('liters_tracking_periods');
     Schema::dropIfExists('fuel_prices');
@@ -55,6 +57,36 @@ beforeEach(function () {
             $table->decimal("pump{$pump}_sales_end", 14, 2)->default(0);
         }
 
+        $table->timestamps();
+    });
+
+    Schema::create('sales', function (Blueprint $table) {
+        $table->id();
+        $table->unsignedBigInteger('user_id')->nullable();
+        $table->unsignedBigInteger('locked_by_shift_reading_id')->nullable();
+        $table->unsignedInteger('pump_id')->nullable();
+        $table->decimal('amount', 14, 2)->default(0);
+        $table->decimal('discount', 14, 2)->default(0);
+        $table->decimal('manual_discount', 14, 2)->default(0);
+        $table->string('payment_type')->nullable();
+        $table->timestamp('customer_payment_voided_at')->nullable();
+        $table->timestamps();
+    });
+
+    Schema::create('liters_movement_adjustments', function (Blueprint $table) {
+        $table->id();
+        $table->unsignedBigInteger('liters_tracking_period_id');
+        $table->unsignedBigInteger('shift_reading_id');
+        $table->unsignedTinyInteger('pump_number');
+        $table->decimal('liters', 12, 2);
+        $table->decimal('amount', 14, 2)->default(0);
+        $table->string('reason')->nullable();
+        $table->unsignedBigInteger('created_by')->nullable();
+        $table->unsignedBigInteger('authorized_by')->nullable();
+        $table->timestamp('voided_at')->nullable();
+        $table->unsignedBigInteger('voided_by')->nullable();
+        $table->unsignedBigInteger('void_authorized_by')->nullable();
+        $table->string('void_reason')->nullable();
         $table->timestamps();
     });
 
@@ -110,6 +142,42 @@ beforeEach(function () {
         $reading(12, 3, 'Rejected', [5 => 100]),
         $reading(13, 4, 'Voided', [6 => 100]),
     ]);
+
+    DB::table('sales')->insert([
+        [
+            'user_id' => 1,
+            'locked_by_shift_reading_id' => 10,
+            'pump_id' => 5,
+            'amount' => 12000,
+            'discount' => 100,
+            'manual_discount' => 20,
+            'payment_type' => 'Walkin',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+        [
+            'user_id' => 2,
+            'locked_by_shift_reading_id' => 11,
+            'pump_id' => 5,
+            'amount' => 3000,
+            'discount' => 30,
+            'manual_discount' => 5,
+            'payment_type' => 'Credit',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+        [
+            'user_id' => 3,
+            'locked_by_shift_reading_id' => 12,
+            'pump_id' => 5,
+            'amount' => 6000,
+            'discount' => 500,
+            'manual_discount' => 500,
+            'payment_type' => 'Walkin',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+    ]);
 });
 
 test('shared liters movement totals pending and verified shift reading pump deltas by tank', function () {
@@ -124,7 +192,51 @@ test('shared liters movement totals pending and verified shift reading pump delt
         ->and($diesel['remaining_liters'])->toBe(500.0)
         ->and($diesel['status']['key'])->toBe('normal')
         ->and($state['transactions']->total())->toBe(2)
-        ->and(DB::table('shift_readings')->whereNull('liters_tracking_period_id')->count())->toBe(0);
+        ->and(DB::table('shift_readings')->whereIn('id', [10, 11])->pluck('liters_tracking_period_id', 'id')->all())->toBe([10 => 1, 11 => 1])
+        ->and(DB::table('shift_readings')->whereIn('id', [12, 13])->whereNull('liters_tracking_period_id')->count())->toBe(2);
+});
+
+test('net sales uses submitted pump totals while discounts stay scoped to eligible readings', function () {
+    $state = app(LitersMovementTrackingService::class)->state(null, 20, 'page', true);
+    $pumpSales = collect($state['summary']['pump_net_sales'])->keyBy('pump_id');
+
+    expect($pumpSales[5]['total_sales'])->toBe(15000.0)
+        ->and($pumpSales[5]['discounts'])->toBe(155.0)
+        ->and($pumpSales[5]['net_sales'])->toBe(14845.0)
+        ->and($pumpSales[5]['transaction_count'])->toBe(2)
+        ->and($pumpSales[6]['total_sales'])->toBe(15000.0)
+        ->and($pumpSales[6]['discounts'])->toBe(0.0)
+        ->and($pumpSales[6]['net_sales'])->toBe(15000.0)
+        ->and($pumpSales[6]['transaction_count'])->toBe(0)
+        ->and($state['summary']['total_sales'])->toBe(30000.0)
+        ->and($state['summary']['total_discounts'])->toBe(155.0)
+        ->and($state['summary']['total_net_sales'])->toBe(29845.0);
+});
+
+test('pump deduction subtracts both liters and submitted sales amount', function () {
+    $service = app(LitersMovementTrackingService::class);
+
+    $service->deductPumpLiters(10, 5, 10, 600, 1, 99, 'Nozzle calibration');
+
+    $state = $service->state(null, 20, 'page', true);
+    $diesel = collect($state['summary']['tank_breakdown'])
+        ->firstWhere('fuel_type', 'Diesel');
+    $pumpSales = collect($state['summary']['pump_net_sales'])->keyBy('pump_id');
+    $reading = $state['transactions']->getCollection()->firstWhere('id', 10);
+    $pumpFive = collect($reading->pump_entries)->firstWhere('pump_id', 5);
+
+    expect($state['summary']['total_liters'])->toBe(490.0)
+        ->and($state['summary']['total_amount'])->toBe(29400.0)
+        ->and($diesel['liters'])->toBe(490.0)
+        ->and($pumpFive['liters'])->toBe(190.0)
+        ->and($pumpFive['amount'])->toBe(11400.0)
+        ->and($pumpFive['deducted_liters'])->toBe(10.0)
+        ->and($pumpFive['deducted_amount'])->toBe(600.0)
+        ->and($pumpSales[5]['total_sales'])->toBe(14400.0)
+        ->and($pumpSales[5]['discounts'])->toBe(155.0)
+        ->and($pumpSales[5]['net_sales'])->toBe(14245.0)
+        ->and($state['summary']['total_sales'])->toBe(29400.0)
+        ->and($state['summary']['total_net_sales'])->toBe(29245.0);
 });
 
 test('a reached shared limit remains non blocking for the next shift reading submission', function () {

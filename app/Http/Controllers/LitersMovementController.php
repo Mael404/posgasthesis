@@ -11,9 +11,9 @@ use Illuminate\View\View;
 
 class LitersMovementController extends Controller
 {
-    public function staff(LitersMovementTrackingService $tracking): View
+    public function staff(Request $request, LitersMovementTrackingService $tracking): View
     {
-        $state = $tracking->state(null, 20, 'tracking_page');
+        $state = $tracking->state((int) $request->user()->id, 20, 'tracking_page');
 
         return view('pages.staff.literstracking', [
             'title' => 'Liters Tracking',
@@ -80,6 +80,7 @@ class LitersMovementController extends Controller
         $validated = $request->validate([
             'pump_number' => ['required', 'integer', 'in:1,2,3,4,5,6'],
             'liters' => ['required', 'numeric', 'min:0.01', 'max:99999999'],
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:999999999'],
             'reason' => ['nullable', 'string', 'max:255'],
             'semiadmin_password' => ['required', 'string'],
         ]);
@@ -93,19 +94,23 @@ class LitersMovementController extends Controller
                     ->withInput($request->except('semiadmin_password'));
             }
 
+            $staffId = (int) $request->user()->id;
             $adjustment = $tracking->deductPumpLiters(
                 $reading,
                 (int) $validated['pump_number'],
                 (float) $validated['liters'],
-                (int) $request->user()->id,
+                (float) $validated['amount'],
+                $staffId,
                 (int) $authorizingSemiadmin->id,
-                $validated['reason'] ?? null
+                $validated['reason'] ?? null,
+                $staffId
             );
 
             $liters = number_format((float) ($adjustment->liters ?? $validated['liters']), 2);
+            $amount = number_format((float) ($adjustment->amount ?? $validated['amount']), 2);
             $pump = (int) ($adjustment->pump_number ?? $validated['pump_number']);
 
-            return back()->with('success', "Deducted {$liters} L from Pump {$pump}.");
+            return back()->with('success', "Deducted {$liters} L and ₱{$amount} from Pump {$pump}.");
         } catch (\Throwable $e) {
             return back()
                 ->with('error', $e->getMessage())
@@ -127,11 +132,13 @@ class LitersMovementController extends Controller
                 return back()->with('error', 'Invalid semi-admin password.');
             }
 
+            $staffId = (int) $request->user()->id;
             $adjustment = $tracking->voidDeduction(
                 $deduction,
-                (int) $request->user()->id,
+                $staffId,
                 (int) $authorizingSemiadmin->id,
-                $validated['void_reason'] ?? null
+                $validated['void_reason'] ?? null,
+                $staffId
             );
 
             $liters = number_format((float) ($adjustment->liters ?? 0), 2);

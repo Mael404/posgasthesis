@@ -96,21 +96,26 @@ class LitersMovementTrackingService
 
     public function canAdjustLiters(): bool
     {
-        return $this->isReady() && $this->hasTable('liters_movement_adjustments');
+        return $this->isReady()
+            && $this->hasTable('liters_movement_adjustments')
+            && $this->hasColumn('liters_movement_adjustments', 'amount');
     }
 
     public function deductPumpLiters(
         int $shiftReadingId,
         int $pumpNumber,
         float $liters,
+        float $amount,
         int $createdBy,
         int $authorizedBy,
-        ?string $reason = null
+        ?string $reason = null,
+        ?int $allowedStaffId = null
     ): object {
         $this->assertAdjustmentReady();
 
         $pumpNumber = (int) $pumpNumber;
         $liters = $this->liters($liters);
+        $amount = $this->money($amount);
 
         if (! array_key_exists($pumpNumber, self::PUMP_FUEL_TYPES)) {
             throw new \RuntimeException('Choose a valid pump.');
@@ -120,7 +125,11 @@ class LitersMovementTrackingService
             throw new \RuntimeException('Enter liters greater than zero.');
         }
 
-        return DB::transaction(function () use ($shiftReadingId, $pumpNumber, $liters, $createdBy, $authorizedBy, $reason) {
+        if ($amount <= 0) {
+            throw new \RuntimeException('Enter amount greater than zero.');
+        }
+
+        return DB::transaction(function () use ($shiftReadingId, $pumpNumber, $liters, $amount, $createdBy, $authorizedBy, $reason, $allowedStaffId) {
             $period = $this->ensureActivePeriod();
             $period = DB::table('liters_tracking_periods')
                 ->where('id', (int) $period->id)
@@ -143,6 +152,12 @@ class LitersMovementTrackingService
                 throw new \RuntimeException('Shift-reading submission was not found.');
             }
 
+            $this->assertReadingBelongsToStaff(
+                $reading,
+                $allowedStaffId,
+                'Only your own shift-reading submissions can be adjusted from staff liters tracking.'
+            );
+
             if ((int) ($reading->liters_tracking_period_id ?? 0) !== (int) $period->id) {
                 throw new \RuntimeException('Only submissions in the active liters movement period can be adjusted.');
             }
@@ -152,17 +167,28 @@ class LitersMovementTrackingService
             }
 
             $rawLiters = $this->rawPumpLiters($reading, $pumpNumber);
+            $rawAmount = $this->rawPumpAmount($reading, $pumpNumber);
 
             if ($rawLiters <= 0) {
                 throw new \RuntimeException("Pump {$pumpNumber} has no liters to deduct from this submission.");
             }
 
+            if ($rawAmount <= 0) {
+                throw new \RuntimeException("Pump {$pumpNumber} has no sales amount to deduct from this submission.");
+            }
+
             $activeAdjustments = $this->adjustmentsForReadings([$reading->id], true)[(int) $reading->id] ?? [];
             $alreadyDeducted = $this->activeAdjustmentLitersForPump($activeAdjustments, $pumpNumber);
             $availableLiters = $this->liters(max(0, $rawLiters - $alreadyDeducted));
+            $alreadyDeductedAmount = $this->activeAdjustmentAmountForPump($activeAdjustments, $pumpNumber);
+            $availableAmount = $this->money(max(0, $rawAmount - $alreadyDeductedAmount));
 
             if ($liters > $availableLiters) {
                 throw new \RuntimeException('Deduction cannot exceed the remaining pump liters (' . number_format($availableLiters, 2) . ' L).');
+            }
+
+            if ($amount > $availableAmount) {
+                throw new \RuntimeException('Deduction amount cannot exceed the remaining pump sales (₱' . number_format($availableAmount, 2) . ').');
             }
 
             $now = now();
@@ -171,6 +197,7 @@ class LitersMovementTrackingService
                 'shift_reading_id' => (int) $reading->id,
                 'pump_number' => $pumpNumber,
                 'liters' => $liters,
+                'amount' => $amount,
                 'reason' => $this->cleanText($reason),
                 'created_by' => $createdBy,
                 'authorized_by' => $authorizedBy,
@@ -184,11 +211,11 @@ class LitersMovementTrackingService
         });
     }
 
-    public function voidDeduction(int $adjustmentId, int $voidedBy, int $authorizedBy, ?string $reason = null): object
+    public function voidDeduction(int $adjustmentId, int $voidedBy, int $authorizedBy, ?string $reason = null, ?int $allowedStaffId = null): object
     {
         $this->assertAdjustmentReady();
 
-        return DB::transaction(function () use ($adjustmentId, $voidedBy, $authorizedBy, $reason) {
+        return DB::transaction(function () use ($adjustmentId, $voidedBy, $authorizedBy, $reason, $allowedStaffId) {
             $adjustment = DB::table('liters_movement_adjustments')
                 ->where('id', $adjustmentId)
                 ->lockForUpdate()
@@ -210,6 +237,12 @@ class LitersMovementTrackingService
             if (! $reading) {
                 throw new \RuntimeException('The shift-reading submission for this deduction was not found.');
             }
+
+            $this->assertReadingBelongsToStaff(
+                $reading,
+                $allowedStaffId,
+                'Only deductions for your own shift-reading submissions can be voided from staff liters tracking.'
+            );
 
             $period = DB::table('liters_tracking_periods')
                 ->where('id', (int) ($reading->liters_tracking_period_id ?? 0))
@@ -620,6 +653,12 @@ class LitersMovementTrackingService
             return;
         }
 
+        $excludedFromActivePeriod = DB::table('shift_readings')
+            ->where('liters_tracking_period_id', (int) $period->id);
+
+        $this->scopeToExcludedShiftReadings($excludedFromActivePeriod);
+        $excludedFromActivePeriod->update(['liters_tracking_period_id' => null]);
+
         $query = DB::table('shift_readings')
             ->whereNull('liters_tracking_period_id');
 
@@ -627,6 +666,7 @@ class LitersMovementTrackingService
             $query->where('created_at', '>=', $period->started_at);
         }
 
+        $this->scopeToIncludedShiftReadings($query);
         $query->update(['liters_tracking_period_id' => $period->id]);
     }
 
@@ -692,8 +732,9 @@ class LitersMovementTrackingService
 
             $readingLiters = 0.0;
             $readingAmount = 0.0;
+            $readingAdjustments = $adjustmentsByReading[(int) ($reading->id ?? 0)] ?? [];
             $readingNetSales = $includeNetSales
-                ? $this->netSalesByPumpForReading($reading)
+                ? $this->netSalesByPumpForReading($reading, $readingAdjustments)
                 : $this->defaultPumpNetSalesBreakdown();
 
             foreach ($readingNetSales as $pumpId => $sales) {
@@ -708,7 +749,7 @@ class LitersMovementTrackingService
                 $pumpNetSales[$pumpId]['transaction_count'] += (int) $sales['transaction_count'];
             }
 
-            foreach ($this->pumpEntriesForReading($reading, $adjustmentsByReading[(int) ($reading->id ?? 0)] ?? [], $readingNetSales) as $entry) {
+            foreach ($this->pumpEntriesForReading($reading, $readingAdjustments, $readingNetSales) as $entry) {
                 $liters = $entry['liters'];
                 $amount = $entry['amount'];
                 $fuel = $entry['fuel_type'];
@@ -753,6 +794,8 @@ class LitersMovementTrackingService
                     'deducted_liters' => $entry['deducted_liters'] ?? 0,
                     'price_per_liter' => $entry['price_per_liter'],
                     'amount' => $amount,
+                    'raw_amount' => $entry['raw_amount'] ?? $amount,
+                    'deducted_amount' => $entry['deducted_amount'] ?? 0,
                     'total_sales' => $entry['total_sales'] ?? 0,
                     'discounts' => $entry['discounts'] ?? 0,
                     'net_sales' => $entry['net_sales'] ?? 0,
@@ -850,10 +893,11 @@ class LitersMovementTrackingService
 
         $paginator->getCollection()->transform(function ($reading) use ($activeAdjustmentsByReading, $allAdjustmentsByReading, $includeNetSales) {
             $readingId = (int) ($reading->id ?? 0);
+            $activeAdjustments = $activeAdjustmentsByReading[$readingId] ?? [];
             $netSalesByPump = $includeNetSales
-                ? $this->netSalesByPumpForReading($reading)
+                ? $this->netSalesByPumpForReading($reading, $activeAdjustments)
                 : $this->defaultPumpNetSalesBreakdown();
-            $entries = $this->pumpEntriesForReading($reading, $activeAdjustmentsByReading[$readingId] ?? [], $netSalesByPump);
+            $entries = $this->pumpEntriesForReading($reading, $activeAdjustments, $netSalesByPump);
             $reading->pump_entries = $entries;
             $reading->liter_adjustments = $allAdjustmentsByReading[$readingId] ?? [];
             $reading->total_liters = $this->liters(collect($entries)->sum('liters'));
@@ -886,14 +930,22 @@ class LitersMovementTrackingService
     private function scopeToIncludedShiftReadings($query): void
     {
         if ($this->hasColumn('shift_readings', 'status')) {
-            $query->where(function ($query) {
-                $query->whereNull('shift_readings.status')
-                    ->orWhereRaw("TRIM(LOWER(shift_readings.status)) = ''")
-                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%pending%'")
-                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%verified%'")
-                    ->orWhereRaw("LOWER(shift_readings.status) LIKE '%approved%'");
-            });
+            $query->whereIn(DB::raw('LOWER(TRIM(shift_readings.status))'), $this->includedReadingStatuses());
         }
+    }
+
+    private function scopeToExcludedShiftReadings($query): void
+    {
+        if (! $this->hasColumn('shift_readings', 'status')) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->where(function ($query) {
+            $query->whereNull('shift_readings.status')
+                ->orWhereNotIn(DB::raw('LOWER(TRIM(shift_readings.status))'), $this->includedReadingStatuses());
+        });
     }
 
     private function pumpEntriesForReading(object $reading, array $activeAdjustments = [], array $netSalesByPump = []): array
@@ -909,10 +961,13 @@ class LitersMovementTrackingService
                 continue;
             }
 
-            $salesStart = (float) ($reading->{"pump{$pumpId}_sales_start"} ?? 0);
-            $salesEnd = (float) ($reading->{"pump{$pumpId}_sales_end"} ?? $salesStart);
-            $amount = $this->money(max(0, $salesEnd - $salesStart));
-            $price = $amount > 0 && $rawLiters > 0 ? $amount / $rawLiters : $this->priceForFuel($fuelType);
+            $rawAmount = $this->rawPumpAmount($reading, $pumpId);
+            $deductedAmount = $this->money(min($rawAmount, $this->activeAdjustmentAmountForPump($activeAdjustments, $pumpId)));
+            $amount = $this->money(max(0, $rawAmount - $deductedAmount));
+            $configuredPrice = $this->priceForFuel($fuelType);
+            $price = $configuredPrice > 0
+                ? $configuredPrice
+                : ($rawAmount > 0 && $rawLiters > 0 ? $rawAmount / $rawLiters : 0);
             $netSales = $netSalesByPump[$pumpId] ?? $this->emptyPumpNetSalesRow($pumpId, $fuelType);
 
             $entries[] = [
@@ -923,6 +978,8 @@ class LitersMovementTrackingService
                 'deducted_liters' => $deductedLiters,
                 'price_per_liter' => $this->money($price),
                 'amount' => $amount,
+                'raw_amount' => $rawAmount,
+                'deducted_amount' => $deductedAmount,
                 'total_sales' => $this->money($netSales['total_sales'] ?? 0),
                 'discounts' => $this->money($netSales['discounts'] ?? 0),
                 'net_sales' => $this->money($netSales['net_sales'] ?? 0),
@@ -937,22 +994,36 @@ class LitersMovementTrackingService
         return $entries;
     }
 
-    private function netSalesByPumpForReading(object $reading): array
+    private function netSalesByPumpForReading(object $reading, array $activeAdjustments = []): array
     {
         $readingId = (int) ($reading->id ?? 0);
+        $cacheKey = $readingId . ':' . md5(json_encode($activeAdjustments));
 
-        if ($readingId > 0 && array_key_exists($readingId, $this->readingNetSalesCache)) {
-            return $this->readingNetSalesCache[$readingId];
+        if ($readingId > 0 && array_key_exists($cacheKey, $this->readingNetSalesCache)) {
+            return $this->readingNetSalesCache[$cacheKey];
         }
 
-        $pumpRows = $this->defaultPumpNetSalesBreakdown();
+        $pumpRows = collect($this->defaultPumpNetSalesBreakdown())
+            ->mapWithKeys(function (array $row, int $pumpId) use ($reading) {
+                $salesStart = (float) ($reading->{"pump{$pumpId}_sales_start"} ?? 0);
+                $salesEnd = (float) ($reading->{"pump{$pumpId}_sales_end"} ?? $salesStart);
+                $totalSales = $this->money($salesEnd - $salesStart);
+
+                $row['total_sales'] = $totalSales;
+                $row['net_sales'] = $totalSales;
+
+                return [$pumpId => $row];
+            })
+            ->all();
 
         if (
             ! $this->hasTable('sales')
             || ! $this->hasColumn('sales', 'pump_id')
-            || ! $this->hasColumn('sales', 'amount')
         ) {
-            return $this->cacheReadingNetSales($readingId, $pumpRows);
+            return $this->cacheReadingNetSales(
+                $cacheKey,
+                $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments)
+            );
         }
 
         $query = DB::table('sales');
@@ -973,7 +1044,10 @@ class LitersMovementTrackingService
                         Carbon::parse($to)->endOfDay(),
                     ]);
                 } catch (\Throwable) {
-                    return $this->cacheReadingNetSales($readingId, $pumpRows);
+                    return $this->cacheReadingNetSales(
+                        $cacheKey,
+                        $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments)
+                    );
                 }
             }
         }
@@ -985,16 +1059,17 @@ class LitersMovementTrackingService
             });
         }
 
+        if ($this->hasColumn('sales', 'customer_payment_voided_at')) {
+            $query->whereNull('customer_payment_voided_at');
+        }
+
         $discount = $this->hasColumn('sales', 'discount') ? 'COALESCE(discount, 0)' : '0';
         $manualDiscount = $this->hasColumn('sales', 'manual_discount') ? 'COALESCE(manual_discount, 0)' : '0';
-        $netExpression = "COALESCE(amount, 0) - {$discount} - {$manualDiscount}";
         $salesRows = $query
             ->where('pump_id', '>', 0)
             ->selectRaw("
                 pump_id,
-                COALESCE(SUM(amount), 0) as total_sales,
                 COALESCE(SUM({$discount} + {$manualDiscount}), 0) as discounts,
-                COALESCE(SUM({$netExpression}), 0) as net_sales,
                 COUNT(*) as transaction_count
             ")
             ->groupBy('pump_id')
@@ -1007,20 +1082,39 @@ class LitersMovementTrackingService
                 continue;
             }
 
-            $pumpRows[$pumpId] = [
-                'pump_id' => $pumpId,
-                'pump_label' => 'Pump ' . $pumpId,
-                'fuel_type' => self::PUMP_FUEL_TYPES[$pumpId] ?? 'N/A',
-                'total_sales' => $this->money($sales->total_sales ?? 0),
-                'discounts' => $this->money($sales->discounts ?? 0),
-                'net_sales' => $this->money($sales->net_sales ?? 0),
-                'transaction_count' => (int) ($sales->transaction_count ?? 0),
-            ];
+            $row = $pumpRows[$pumpId] ?? $this->emptyPumpNetSalesRow(
+                $pumpId,
+                self::PUMP_FUEL_TYPES[$pumpId] ?? 'N/A'
+            );
+            $discounts = $this->money($sales->discounts ?? 0);
+
+            $row['discounts'] = $discounts;
+            $row['net_sales'] = $this->money(($row['total_sales'] ?? 0) - $discounts);
+            $row['transaction_count'] = (int) ($sales->transaction_count ?? 0);
+            $pumpRows[$pumpId] = $row;
         }
 
+        $pumpRows = $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments);
         ksort($pumpRows);
 
-        return $this->cacheReadingNetSales($readingId, $pumpRows);
+        return $this->cacheReadingNetSales($cacheKey, $pumpRows);
+    }
+
+    private function applyAdjustmentAmountsToPumpRows(array $pumpRows, array $activeAdjustments): array
+    {
+        foreach ($pumpRows as $pumpId => $row) {
+            $deductedAmount = $this->activeAdjustmentAmountForPump($activeAdjustments, (int) $pumpId);
+
+            if ($deductedAmount <= 0) {
+                continue;
+            }
+
+            $row['total_sales'] = $this->money(max(0, (float) ($row['total_sales'] ?? 0) - $deductedAmount));
+            $row['net_sales'] = $this->money($row['total_sales'] - (float) ($row['discounts'] ?? 0));
+            $pumpRows[$pumpId] = $row;
+        }
+
+        return $pumpRows;
     }
 
     private function readingHasLockedSales(object $reading): bool
@@ -1066,10 +1160,10 @@ class LitersMovementTrackingService
         ];
     }
 
-    private function cacheReadingNetSales(int $readingId, array $pumpRows): array
+    private function cacheReadingNetSales(string $cacheKey, array $pumpRows): array
     {
-        if ($readingId > 0) {
-            $this->readingNetSalesCache[$readingId] = $pumpRows;
+        if ($cacheKey !== '') {
+            $this->readingNetSalesCache[$cacheKey] = $pumpRows;
         }
 
         return $pumpRows;
@@ -1081,6 +1175,14 @@ class LitersMovementTrackingService
         $litersEnd = (float) ($reading->{"pump{$pumpId}_liters_end"} ?? $litersStart);
 
         return $this->liters(max(0, $litersEnd - $litersStart));
+    }
+
+    private function rawPumpAmount(object $reading, int $pumpId): float
+    {
+        $salesStart = (float) ($reading->{"pump{$pumpId}_sales_start"} ?? 0);
+        $salesEnd = (float) ($reading->{"pump{$pumpId}_sales_end"} ?? $salesStart);
+
+        return $this->money(max(0, $salesEnd - $salesStart));
     }
 
     private function adjustmentsForReadings(array $readingIds, bool $activeOnly = false): array
@@ -1142,6 +1244,7 @@ class LitersMovementTrackingService
             'shift_reading_id' => (int) ($adjustment->shift_reading_id ?? 0),
             'pump_number' => (int) ($adjustment->pump_number ?? 0),
             'liters' => $this->liters($adjustment->liters ?? 0),
+            'amount' => $this->adjustmentAmount($adjustment),
             'reason' => (string) ($adjustment->reason ?? ''),
             'created_at' => $adjustment->created_at ?? null,
             'created_by' => trim((string) ($adjustment->created_by_name ?? 'Staff')) ?: 'Staff',
@@ -1160,6 +1263,28 @@ class LitersMovementTrackingService
             ->filter(fn ($adjustment) => (int) ($adjustment['pump_number'] ?? 0) === $pumpId)
             ->filter(fn ($adjustment) => ($adjustment['status'] ?? 'active') === 'active')
             ->sum(fn ($adjustment) => (float) ($adjustment['liters'] ?? 0)));
+    }
+
+    private function activeAdjustmentAmountForPump(array $adjustments, int $pumpId): float
+    {
+        return $this->money(collect($adjustments)
+            ->filter(fn ($adjustment) => (int) ($adjustment['pump_number'] ?? 0) === $pumpId)
+            ->filter(fn ($adjustment) => ($adjustment['status'] ?? 'active') === 'active')
+            ->sum(fn ($adjustment) => (float) ($adjustment['amount'] ?? 0)));
+    }
+
+    private function adjustmentAmount(object $adjustment): float
+    {
+        $amount = $this->money($adjustment->amount ?? 0);
+
+        if ($amount > 0) {
+            return $amount;
+        }
+
+        $pumpNumber = (int) ($adjustment->pump_number ?? 0);
+        $price = $this->priceForFuel(self::PUMP_FUEL_TYPES[$pumpNumber] ?? '');
+
+        return $this->money(((float) ($adjustment->liters ?? 0)) * $price);
     }
 
     private function emptySummary(?object $period): array
@@ -1777,16 +1902,33 @@ class LitersMovementTrackingService
         if (! $this->hasTable('liters_movement_adjustments')) {
             throw new \RuntimeException('Liters movement adjustments are not migrated yet. Run php artisan migrate.');
         }
+
+        if (! $this->hasColumn('liters_movement_adjustments', 'amount')) {
+            throw new \RuntimeException('Liters movement adjustment amounts are not migrated yet. Run php artisan migrate.');
+        }
     }
 
     private function isIncludedReadingStatus($status): bool
     {
         $status = strtolower(trim((string) $status));
 
-        return $status === ''
-            || str_contains($status, 'pending')
-            || str_contains($status, 'verified')
-            || str_contains($status, 'approved');
+        return in_array($status, $this->includedReadingStatuses(), true);
+    }
+
+    private function assertReadingBelongsToStaff(object $reading, ?int $staffId, string $message): void
+    {
+        if ($staffId === null) {
+            return;
+        }
+
+        if ((int) $staffId <= 0 || (int) ($reading->user_id ?? 0) !== (int) $staffId) {
+            throw new \RuntimeException($message);
+        }
+    }
+
+    private function includedReadingStatuses(): array
+    {
+        return ['pending', 'verified', 'approved'];
     }
 
     private function touchPeriodAndReading(int $periodId, int $readingId, $timestamp): void
