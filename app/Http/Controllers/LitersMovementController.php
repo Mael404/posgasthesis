@@ -36,6 +36,7 @@ class LitersMovementController extends Controller
             'transactions' => $state['transactions'],
             'history' => $tracking->history(10, 'history_page'),
             'missingRequirements' => $state['missingRequirements'],
+            'canManageAdjustments' => $tracking->canAdjustLiters(),
         ]);
     }
 
@@ -115,6 +116,39 @@ class LitersMovementController extends Controller
             return back()
                 ->with('error', $e->getMessage())
                 ->withInput($request->except('semiadmin_password'));
+        }
+    }
+
+    public function storeAdminDeduction(Request $request, int $reading, LitersMovementTrackingService $tracking): RedirectResponse
+    {
+        $validated = $request->validate([
+            'pump_number' => ['required', 'integer', 'in:1,2,3,4,5,6'],
+            'liters' => ['required', 'numeric', 'min:0.01', 'max:99999999'],
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:999999999'],
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $adminId = (int) $request->user()->id;
+            $adjustment = $tracking->deductPumpLiters(
+                $reading,
+                (int) $validated['pump_number'],
+                (float) $validated['liters'],
+                (float) $validated['amount'],
+                $adminId,
+                $adminId,
+                $validated['reason'] ?? null
+            );
+
+            $liters = number_format((float) ($adjustment->liters ?? $validated['liters']), 2);
+            $amount = number_format((float) ($adjustment->amount ?? $validated['amount']), 2);
+            $pump = (int) ($adjustment->pump_number ?? $validated['pump_number']);
+
+            return back()->with('success', "Deducted {$liters} L and ₱{$amount} from Pump {$pump}.");
+        } catch (\Throwable $e) {
+            return back()
+                ->with('error', $e->getMessage())
+                ->withInput();
         }
     }
 

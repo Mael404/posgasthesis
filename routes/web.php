@@ -83,6 +83,9 @@ Route::middleware('auth')->group(function () {
             Route::get('/', [LitersMovementController::class, 'admin'])->name('index');
             Route::post('/limit', [LitersMovementController::class, 'updateLimit'])->name('limit');
             Route::post('/generate', [LitersMovementController::class, 'generate'])->name('generate');
+            Route::post('/readings/{reading}/deductions', [LitersMovementController::class, 'storeAdminDeduction'])
+                ->whereNumber('reading')
+                ->name('deductions.store');
             Route::post('/history/{period}/void', [LitersMovementController::class, 'voidGenerated'])
                 ->whereNumber('period')
                 ->name('history.void');

@@ -42,15 +42,18 @@
         $pumpNetSales = collect($summary['pump_net_sales'] ?? []);
         $reachedLimits = collect($summary['reached_limits'] ?? []);
         $missingRequirements = $missingRequirements ?? [];
+        $canManageAdjustments = (bool) ($canManageAdjustments ?? false);
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $valueClass = 'mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90';
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $textareaClass = 'min-h-20 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $dangerButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600 disabled:cursor-not-allowed disabled:opacity-60';
+        $smallPrimaryButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $smallSecondaryButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-theme-xs font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
         $smallDangerButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-error-500 px-3 text-theme-xs font-medium text-white shadow-theme-xs transition hover:bg-error-600';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -312,9 +315,11 @@
             sessionError: @js(session('error') ?: $errors->first()),
             historyRecords: @js($historyDetailsPayload),
             activeSubmissions: @js($activeSubmissionsPayload),
+            canManageAdjustments: @js($canManageAdjustments),
+            deductionUrlTemplate: @js(route('admin.liters-movement.deductions.store', ['reading' => '__READING__'])),
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || historyDetails.open || voidConfirmation.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || deduction.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
         class="space-y-6">
         <style>[x-cloak] { display: none !important; }</style>
@@ -766,6 +771,9 @@
                                                 <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 12s3.5-6.25 9.25-6.25S21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
                                                 View
                                             </button>
+                                            <button type="button" x-on:click="openDeduction({{ $transactionId }})" class="{{ $smallPrimaryButtonClass }}" title="Deduct pump liters and amount" @disabled(! $canManageAdjustments)>
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                            </button>
                                             @if ($activeAdjustmentCount > 0)
                                                 <span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-error-50 px-2 text-theme-xs font-semibold text-error-700 dark:bg-error-500/15 dark:text-error-400" title="Active deductions">{{ $activeAdjustmentCount }}</span>
                                             @endif
@@ -1015,6 +1023,81 @@
                     <button type="button" x-on:click="closeActiveDetails()" class="{{ $secondaryButtonClass }}">Close</button>
                 </div>
             </div>
+        </div>
+
+        <div x-show="deduction.open" x-cloak class="fixed inset-0 z-[100050] flex items-center justify-center overflow-y-auto p-4">
+            <div x-show="deduction.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+            <form
+                x-show="deduction.open"
+                x-transition
+                x-on:click.outside="closeDeduction()"
+                x-on:submit="if (!canSubmitDeduction()) $event.preventDefault()"
+                x-bind:action="deduction.action"
+                method="POST"
+                class="relative z-10 flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+                @csrf
+                <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Deduct Pump Liters</h3>
+                        <p class="mt-1 {{ $captionClass }}">Shift Reading #<span x-text="deduction.row?.id || 'N/A'"></span> | <span x-text="deduction.row?.staff_name || 'Staff'"></span></p>
+                    </div>
+                    <button type="button" x-on:click="closeDeduction()" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close deduction modal">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
+
+                <div class="flex-1 space-y-4 overflow-y-auto p-5">
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm dark:border-gray-800 dark:bg-white/[0.03]">
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Current submission liters</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(deduction.row?.total_liters)"></span> L</span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Selected pump available</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(selectedPumpAvailable())"></span> L</span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Available sales amount</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(selectedPumpAvailableAmount())"></span></span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Pump price</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(selectedPumpPrice())"></span> / L</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_pump_number">Pump</label>
+                        <select id="admin_deduction_pump_number" name="pump_number" x-model="deduction.pump" x-on:change="deduction.amountManual = false; syncDeductionAmount(true)" class="{{ $inputClass }}" required>
+                            <option value="">Choose pump</option>
+                            <template x-for="pump in deductionPumps()" :key="pump.pump_id">
+                                <option :value="pump.pump_id" :disabled="Number(pump.liters || 0) <= 0" x-text="`P${pump.pump_id} - ${formatHistoryNumber(pump.liters)} L available`"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_liters">Liters to Deduct <span class="text-error-500">*</span></label>
+                        <input id="admin_deduction_liters" name="liters" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailable()" x-model="deduction.liters" x-on:input="syncDeductionAmount()" class="{{ $inputClass }}" required>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_amount">Amount to Deduct <span class="text-error-500">*</span></label>
+                        <input id="admin_deduction_amount" name="amount" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailableAmount()" x-model="deduction.amount" x-on:input="deduction.amountManual = true" class="{{ $inputClass }}" required>
+                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Auto-calculated from liters x current pump price. You can still edit it.</p>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_reason">Reason</label>
+                        <textarea id="admin_deduction_reason" name="reason" x-model="deduction.reason" class="{{ $textareaClass }}" maxlength="255" placeholder="Optional note"></textarea>
+                    </div>
+                </div>
+
+                <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
+                    <button type="button" x-on:click="closeDeduction()" class="{{ $secondaryButtonClass }}">Cancel</button>
+                    <button type="submit" class="{{ $primaryButtonClass }}" :disabled="!canSubmitDeduction()">Save Deduction</button>
+                </div>
+            </form>
         </div>
 
         <div x-show="historyDetails.open" x-cloak class="fixed inset-0 z-[100040] flex items-center justify-center overflow-y-auto p-4">
@@ -1367,6 +1450,17 @@
                 tableTabs: ['tank-ledgers', 'staff-breakdown', 'shift-submissions', 'generated-history'],
                 activeSubmissions: config.activeSubmissions || {},
                 activeDetails: { open: false, row: null },
+                canManageAdjustments: Boolean(config.canManageAdjustments),
+                deduction: {
+                    open: false,
+                    row: null,
+                    action: '',
+                    pump: '',
+                    liters: '',
+                    amount: '',
+                    amountManual: false,
+                    reason: '',
+                },
                 historyRecords: config.historyRecords || {},
                 historyDetails: { open: false, record: null },
                 voidConfirmation: { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 },
@@ -1450,6 +1544,95 @@
                 },
                 activeAdjustments() {
                     return this.activeDetails.row?.adjustments || [];
+                },
+                openDeduction(recordId) {
+                    if (! this.canManageAdjustments) {
+                        this.showMessage('Migration Required', 'Run the liters movement adjustment migrations before adding deductions.');
+                        return;
+                    }
+
+                    const row = this.activeSubmissions[String(recordId)] || this.activeSubmissions[recordId] || null;
+
+                    if (! row) {
+                        this.showMessage('Deduction Unavailable', 'This shift-reading submission is not available on the current page.');
+                        return;
+                    }
+
+                    const firstPump = (row.pump_entries || []).find((pump) => Number(pump.liters || 0) > 0 && Number(pump.amount || 0) > 0);
+
+                    if (! firstPump) {
+                        this.showMessage('Deduction Unavailable', 'This submission has no remaining pump liters and sales amount to deduct.');
+                        return;
+                    }
+
+                    this.deduction = {
+                        open: true,
+                        row: JSON.parse(JSON.stringify(row)),
+                        action: String(config.deductionUrlTemplate || '').replace('__READING__', row.id),
+                        pump: String(firstPump.pump_id),
+                        liters: '',
+                        amount: '',
+                        amountManual: false,
+                        reason: '',
+                    };
+                },
+                closeDeduction() {
+                    this.deduction = {
+                        open: false,
+                        row: null,
+                        action: '',
+                        pump: '',
+                        liters: '',
+                        amount: '',
+                        amountManual: false,
+                        reason: '',
+                    };
+                },
+                deductionPumps() {
+                    return this.deduction.row?.pump_entries || [];
+                },
+                selectedPump() {
+                    const selected = Number(this.deduction.pump || 0);
+
+                    return this.deductionPumps().find((pump) => Number(pump.pump_id || 0) === selected) || null;
+                },
+                selectedPumpAvailable() {
+                    return Number(this.selectedPump()?.liters || 0);
+                },
+                selectedPumpAvailableAmount() {
+                    return Number(this.selectedPump()?.amount || 0);
+                },
+                selectedPumpPrice() {
+                    return Number(this.selectedPump()?.price_per_liter || 0);
+                },
+                syncDeductionAmount(force = false) {
+                    if (this.deduction.amountManual && ! force) {
+                        return;
+                    }
+
+                    const liters = Number(this.deduction.liters || 0);
+                    const price = this.selectedPumpPrice();
+
+                    this.deduction.amount = liters > 0 && price > 0
+                        ? this.roundCurrency(Math.min(liters * price, this.selectedPumpAvailableAmount()))
+                        : '';
+                },
+                roundCurrency(value) {
+                    const number = Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+                    return number > 0 ? number.toFixed(2) : '';
+                },
+                canSubmitDeduction() {
+                    const liters = Number(this.deduction.liters || 0);
+                    const amount = Number(this.deduction.amount || 0);
+
+                    return this.canManageAdjustments
+                        && Boolean(this.deduction.action)
+                        && Boolean(this.deduction.pump)
+                        && liters > 0
+                        && liters <= this.selectedPumpAvailable()
+                        && amount > 0
+                        && amount <= this.selectedPumpAvailableAmount();
                 },
                 openHistoryDetails(recordId) {
                     const record = this.historyRecords[String(recordId)] || this.historyRecords[recordId] || null;
@@ -1598,6 +1781,11 @@
 
                     if (this.voidConfirmation.open) {
                         this.resolveVoid(false);
+                        return;
+                    }
+
+                    if (this.deduction.open) {
+                        this.closeDeduction();
                         return;
                     }
 
