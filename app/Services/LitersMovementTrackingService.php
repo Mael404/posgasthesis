@@ -211,11 +211,18 @@ class LitersMovementTrackingService
         });
     }
 
-    public function voidDeduction(int $adjustmentId, int $voidedBy, int $authorizedBy, ?string $reason = null, ?int $allowedStaffId = null): object
+    public function voidDeduction(
+        int $adjustmentId,
+        int $voidedBy,
+        int $authorizedBy,
+        ?string $reason = null,
+        ?int $allowedStaffId = null,
+        ?int $allowedCreatedById = null
+    ): object
     {
         $this->assertAdjustmentReady();
 
-        return DB::transaction(function () use ($adjustmentId, $voidedBy, $authorizedBy, $reason, $allowedStaffId) {
+        return DB::transaction(function () use ($adjustmentId, $voidedBy, $authorizedBy, $reason, $allowedStaffId, $allowedCreatedById) {
             $adjustment = DB::table('liters_movement_adjustments')
                 ->where('id', $adjustmentId)
                 ->lockForUpdate()
@@ -227,6 +234,10 @@ class LitersMovementTrackingService
 
             if (! empty($adjustment->voided_at)) {
                 throw new \RuntimeException('This liters deduction is already voided.');
+            }
+
+            if ($allowedCreatedById !== null && (int) ($adjustment->created_by ?? 0) !== $allowedCreatedById) {
+                throw new \RuntimeException('Only deductions created by your admin account can be voided.');
             }
 
             $reading = DB::table('shift_readings')
@@ -1247,6 +1258,7 @@ class LitersMovementTrackingService
             'amount' => $this->adjustmentAmount($adjustment),
             'reason' => (string) ($adjustment->reason ?? ''),
             'created_at' => $adjustment->created_at ?? null,
+            'created_by_id' => (int) ($adjustment->created_by ?? 0),
             'created_by' => trim((string) ($adjustment->created_by_name ?? 'Staff')) ?: 'Staff',
             'authorized_by' => trim((string) ($adjustment->authorized_by_name ?? 'Semi Admin')) ?: 'Semi Admin',
             'voided_at' => $adjustment->voided_at ?? null,

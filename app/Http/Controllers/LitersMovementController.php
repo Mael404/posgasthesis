@@ -152,6 +152,33 @@ class LitersMovementController extends Controller
         }
     }
 
+    public function voidAdminDeduction(Request $request, int $deduction, LitersMovementTrackingService $tracking): RedirectResponse
+    {
+        $validated = $request->validate([
+            'void_reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $adminId = (int) $request->user()->id;
+            $adjustment = $tracking->voidDeduction(
+                $deduction,
+                $adminId,
+                $adminId,
+                $validated['void_reason'] ?? null,
+                null,
+                $adminId
+            );
+
+            $liters = number_format((float) ($adjustment->liters ?? 0), 2);
+            $amount = number_format((float) ($adjustment->amount ?? 0), 2);
+            $pump = (int) ($adjustment->pump_number ?? 0);
+
+            return back()->with('success', "Voided your {$liters} L / ₱{$amount} deduction for Pump {$pump}.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
     public function voidDeduction(Request $request, int $deduction, LitersMovementTrackingService $tracking): RedirectResponse
     {
         $validated = $request->validate([

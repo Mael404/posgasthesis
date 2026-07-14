@@ -43,6 +43,7 @@
         $reachedLimits = collect($summary['reached_limits'] ?? []);
         $missingRequirements = $missingRequirements ?? [];
         $canManageAdjustments = (bool) ($canManageAdjustments ?? false);
+        $currentAdminId = (int) auth()->id();
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -250,7 +251,7 @@
             ]];
         })->all();
 
-        $activeSubmissionsPayload = $transactionItems->mapWithKeys(function ($transaction) use ($dateLabel, $readingStatusStyle) {
+        $activeSubmissionsPayload = $transactionItems->mapWithKeys(function ($transaction) use ($dateLabel, $readingStatusStyle, $currentAdminId) {
             $transactionId = (int) ($transaction->id ?? 0);
             $readingStatus = $readingStatusStyle($transaction->status ?? 'Pending');
             $pumpEntries = collect($transaction->pump_entries ?? [])->map(function ($entry) {
@@ -270,21 +271,26 @@
                     'sales_transaction_count' => (int) ($entry['sales_transaction_count'] ?? 0),
                 ];
             })->values()->all();
-            $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel) {
+            $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel, $currentAdminId) {
+                $createdById = (int) ($adjustment['created_by_id'] ?? 0);
+                $status = strtolower((string) ($adjustment['status'] ?? 'active'));
+
                 return [
                     'id' => (int) ($adjustment['id'] ?? 0),
                     'pump_number' => (int) ($adjustment['pump_number'] ?? 0),
                     'liters' => (float) ($adjustment['liters'] ?? 0),
                     'amount' => (float) ($adjustment['amount'] ?? 0),
                     'reason' => (string) ($adjustment['reason'] ?? ''),
-                    'status' => (string) ($adjustment['status'] ?? 'active'),
+                    'status' => $status,
                     'created_at_label' => $dateLabel($adjustment['created_at'] ?? null),
+                    'created_by_id' => $createdById,
                     'created_by' => (string) ($adjustment['created_by'] ?? 'Staff'),
                     'authorized_by' => (string) ($adjustment['authorized_by'] ?? 'Semi Admin'),
                     'voided_at_label' => ! empty($adjustment['voided_at']) ? $dateLabel($adjustment['voided_at']) : null,
                     'voided_by' => (string) ($adjustment['voided_by'] ?? ''),
                     'void_authorized_by' => (string) ($adjustment['void_authorized_by'] ?? ''),
                     'void_reason' => (string) ($adjustment['void_reason'] ?? ''),
+                    'can_void' => $status === 'active' && $createdById > 0 && $createdById === $currentAdminId,
                 ];
             })->values()->all();
 
@@ -317,9 +323,10 @@
             activeSubmissions: @js($activeSubmissionsPayload),
             canManageAdjustments: @js($canManageAdjustments),
             deductionUrlTemplate: @js(route('admin.liters-movement.deductions.store', ['reading' => '__READING__'])),
+            deductionVoidUrlTemplate: @js(route('admin.liters-movement.deductions.void', ['deduction' => '__DEDUCTION__'])),
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || deduction.open || historyDetails.open || voidConfirmation.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || deduction.open || deductionVoid.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
         class="space-y-6">
         <style>[x-cloak] { display: none !important; }</style>
@@ -1009,6 +1016,14 @@
                                             </p>
                                             <p x-show="adjustment.void_reason" class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400" x-text="adjustment.void_reason"></p>
                                         </div>
+                                        <button
+                                            x-show="adjustment.can_void"
+                                            type="button"
+                                            x-on:click="openDeductionVoid(adjustment)"
+                                            class="{{ $smallDangerButtonClass }} shrink-0"
+                                            title="Void this deduction">
+                                            Void
+                                        </button>
                                     </div>
                                 </div>
                             </template>
@@ -1096,6 +1111,51 @@
                 <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
                     <button type="button" x-on:click="closeDeduction()" class="{{ $secondaryButtonClass }}">Cancel</button>
                     <button type="submit" class="{{ $primaryButtonClass }}" :disabled="!canSubmitDeduction()">Save Deduction</button>
+                </div>
+            </form>
+        </div>
+
+        <div x-show="deductionVoid.open" x-cloak class="fixed inset-0 z-[100060] flex items-center justify-center overflow-y-auto p-4">
+            <div x-show="deductionVoid.open" x-transition.opacity class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+            <form
+                x-show="deductionVoid.open"
+                x-transition
+                x-on:click.outside="closeDeductionVoid()"
+                x-on:submit="if (!deductionVoid.action) $event.preventDefault()"
+                x-bind:action="deductionVoid.action"
+                method="POST"
+                class="relative z-10 w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-theme-xl dark:bg-gray-900">
+                @csrf
+                <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Void Your Deduction</h3>
+                    <p class="mt-1 {{ $captionClass }}">This restores the deducted liters and amount to the staff submission.</p>
+                </div>
+
+                <div class="space-y-4 p-5">
+                    <div class="rounded-xl border border-gray-200 p-4 text-theme-sm dark:border-gray-800">
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Pump</span>
+                            <span class="font-semibold text-gray-800 dark:text-white/90">P<span x-text="deductionVoid.adjustment?.pump_number || 'N/A'"></span></span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Deducted liters</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(deductionVoid.adjustment?.liters)"></span> L</span>
+                        </div>
+                        <div class="mt-2 flex justify-between gap-4">
+                            <span class="text-gray-500 dark:text-gray-400">Deducted amount</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(deductionVoid.adjustment?.amount)"></span></span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_void_reason">Void reason</label>
+                        <textarea id="admin_deduction_void_reason" name="void_reason" x-model="deductionVoid.reason" class="{{ $textareaClass }}" maxlength="255" placeholder="Optional note"></textarea>
+                    </div>
+                </div>
+
+                <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
+                    <button type="button" x-on:click="closeDeductionVoid()" class="{{ $secondaryButtonClass }}">Cancel</button>
+                    <button type="submit" class="{{ $dangerButtonClass }}" :disabled="!deductionVoid.action">Void Deduction</button>
                 </div>
             </form>
         </div>
@@ -1461,6 +1521,12 @@
                     amountManual: false,
                     reason: '',
                 },
+                deductionVoid: {
+                    open: false,
+                    adjustment: null,
+                    action: '',
+                    reason: '',
+                },
                 historyRecords: config.historyRecords || {},
                 historyDetails: { open: false, record: null },
                 voidConfirmation: { open: false, periodCode: '', formId: '', liters: 0, submissions: 0 },
@@ -1585,6 +1651,27 @@
                         liters: '',
                         amount: '',
                         amountManual: false,
+                        reason: '',
+                    };
+                },
+                openDeductionVoid(adjustment) {
+                    if (! adjustment || ! adjustment.id || ! adjustment.can_void || adjustment.status !== 'active') {
+                        this.showMessage('Void Unavailable', 'Only an active deduction created by your admin account can be voided.');
+                        return;
+                    }
+
+                    this.deductionVoid = {
+                        open: true,
+                        adjustment: JSON.parse(JSON.stringify(adjustment)),
+                        action: String(config.deductionVoidUrlTemplate || '').replace('__DEDUCTION__', adjustment.id),
+                        reason: '',
+                    };
+                },
+                closeDeductionVoid() {
+                    this.deductionVoid = {
+                        open: false,
+                        adjustment: null,
+                        action: '',
                         reason: '',
                     };
                 },
@@ -1776,6 +1863,11 @@
                 closeTopLayer() {
                     if (this.messageDialog.open) {
                         this.closeMessage();
+                        return;
+                    }
+
+                    if (this.deductionVoid.open) {
+                        this.closeDeductionVoid();
                         return;
                     }
 

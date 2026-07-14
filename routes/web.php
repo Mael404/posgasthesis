@@ -86,6 +86,9 @@ Route::middleware('auth')->group(function () {
             Route::post('/readings/{reading}/deductions', [LitersMovementController::class, 'storeAdminDeduction'])
                 ->whereNumber('reading')
                 ->name('deductions.store');
+            Route::post('/deductions/{deduction}/void', [LitersMovementController::class, 'voidAdminDeduction'])
+                ->whereNumber('deduction')
+                ->name('deductions.void');
             Route::post('/history/{period}/void', [LitersMovementController::class, 'voidGenerated'])
                 ->whereNumber('period')
                 ->name('history.void');
