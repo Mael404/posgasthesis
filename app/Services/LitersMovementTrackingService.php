@@ -763,8 +763,19 @@ class LitersMovementTrackingService
             foreach ($this->pumpEntriesForReading($reading, $readingAdjustments, $readingNetSales) as $entry) {
                 $liters = $entry['liters'];
                 $amount = $entry['amount'];
+                $totalSales = $this->money($includeNetSales ? ($entry['total_sales'] ?? $amount) : $amount);
+                $discounts = $this->money($includeNetSales ? ($entry['discounts'] ?? 0) : 0);
+                $netSales = $this->money($includeNetSales ? ($entry['net_sales'] ?? ($totalSales - $discounts)) : $amount);
                 $fuel = $entry['fuel_type'];
                 $fuelKey = $this->normalizeFuelKey($fuel);
+
+                if (! isset($pumpNetSales[$entry['pump_id']])) {
+                    $pumpNetSales[$entry['pump_id']] = $this->emptyPumpNetSalesRow($entry['pump_id'], $fuel);
+                }
+
+                $pumpNetSales[$entry['pump_id']]['liters'] = $this->liters(
+                    ($pumpNetSales[$entry['pump_id']]['liters'] ?? 0) + $liters
+                );
 
                 if (! isset($fuelBreakdown[$fuel])) {
                     $fuelBreakdown[$fuel] = [
@@ -791,6 +802,9 @@ class LitersMovementTrackingService
 
                 $tankBreakdown[$tankId]['liters'] = $this->liters($tankBreakdown[$tankId]['liters'] + $liters);
                 $tankBreakdown[$tankId]['amount'] = $this->money($tankBreakdown[$tankId]['amount'] + $amount);
+                $tankBreakdown[$tankId]['total_sales'] = $this->money(($tankBreakdown[$tankId]['total_sales'] ?? 0) + $totalSales);
+                $tankBreakdown[$tankId]['discounts'] = $this->money(($tankBreakdown[$tankId]['discounts'] ?? 0) + $discounts);
+                $tankBreakdown[$tankId]['net_sales'] = $this->money(($tankBreakdown[$tankId]['net_sales'] ?? 0) + $netSales);
                 $tankBreakdown[$tankId]['transaction_count']++;
                 $tankBreakdown[$tankId]['entries'][] = [
                     'id' => (int) ($reading->id ?? 0),
@@ -807,9 +821,9 @@ class LitersMovementTrackingService
                     'amount' => $amount,
                     'raw_amount' => $entry['raw_amount'] ?? $amount,
                     'deducted_amount' => $entry['deducted_amount'] ?? 0,
-                    'total_sales' => $entry['total_sales'] ?? 0,
-                    'discounts' => $entry['discounts'] ?? 0,
-                    'net_sales' => $entry['net_sales'] ?? 0,
+                    'total_sales' => $totalSales,
+                    'discounts' => $discounts,
+                    'net_sales' => $netSales,
                     'sales_transaction_count' => $entry['sales_transaction_count'] ?? 0,
                     'adjustments' => $entry['adjustments'] ?? [],
                 ];
@@ -1164,6 +1178,7 @@ class LitersMovementTrackingService
             'pump_id' => $pumpId,
             'pump_label' => 'Pump ' . $pumpId,
             'fuel_type' => $fuelType,
+            'liters' => 0.0,
             'total_sales' => 0.0,
             'discounts' => 0.0,
             'net_sales' => 0.0,
@@ -1377,6 +1392,9 @@ class LitersMovementTrackingService
                         'has_limit' => $limit !== null && (float) $limit > 0,
                         'liters' => 0.0,
                         'amount' => 0.0,
+                        'total_sales' => 0.0,
+                        'discounts' => 0.0,
+                        'net_sales' => 0.0,
                         'remaining_liters' => $limit !== null ? (float) $limit : 0.0,
                         'over_liters' => 0.0,
                         'percent' => 0.0,
@@ -1396,13 +1414,29 @@ class LitersMovementTrackingService
             ->map(function (array $tank) {
                 $limit = $tank['limit'];
                 $hasLimit = $limit !== null && (float) $limit > 0;
+                $entries = collect($tank['entries'] ?? []);
                 $liters = $this->liters($tank['liters'] ?? 0);
                 $amount = $this->money($tank['amount'] ?? 0);
+                $entryTotalSales = $this->money($entries->sum(fn ($entry) => (float) ($entry['total_sales'] ?? $entry['amount'] ?? 0)));
+                $entryDiscounts = $this->money($entries->sum(fn ($entry) => (float) ($entry['discounts'] ?? 0)));
+                $entryNetSales = $this->money($entries->sum(function ($entry) {
+                    if (array_key_exists('net_sales', $entry)) {
+                        return (float) $entry['net_sales'];
+                    }
+
+                    return (float) ($entry['total_sales'] ?? $entry['amount'] ?? 0) - (float) ($entry['discounts'] ?? 0);
+                }));
+                $totalSales = $this->money(array_key_exists('total_sales', $tank) ? $tank['total_sales'] : ($entryTotalSales ?: $amount));
+                $discounts = $this->money(array_key_exists('discounts', $tank) ? $tank['discounts'] : $entryDiscounts);
+                $netSales = $this->money(array_key_exists('net_sales', $tank) ? $tank['net_sales'] : ($entryNetSales ?: ($totalSales - $discounts)));
                 $limitValue = $hasLimit ? $this->liters($limit) : null;
                 $percent = $hasLimit ? round(($liters / $limitValue) * 100, 2) : 0.0;
 
                 $tank['liters'] = $liters;
                 $tank['amount'] = $amount;
+                $tank['total_sales'] = $totalSales;
+                $tank['discounts'] = $discounts;
+                $tank['net_sales'] = $netSales;
                 $tank['price_per_liter'] = $this->money($tank['price_per_liter'] ?? 0);
                 $tank['limit'] = $limitValue;
                 $tank['has_limit'] = $hasLimit;
@@ -1411,7 +1445,7 @@ class LitersMovementTrackingService
                 $tank['percent'] = $percent;
                 $tank['progress_width'] = min(100, max(0, $percent));
                 $tank['transaction_count'] = (int) ($tank['transaction_count'] ?? 0);
-                $tank['entries'] = collect($tank['entries'] ?? [])->sortBy('created_at')->values()->all();
+                $tank['entries'] = $entries->sortBy('created_at')->values()->all();
                 $tank['status'] = $this->statusFor($liters, (float) ($limitValue ?? 0));
 
                 return $tank;
@@ -1440,6 +1474,9 @@ class LitersMovementTrackingService
             'has_limit' => false,
             'liters' => 0.0,
             'amount' => 0.0,
+            'total_sales' => 0.0,
+            'discounts' => 0.0,
+            'net_sales' => 0.0,
             'remaining_liters' => 0.0,
             'over_liters' => 0.0,
             'percent' => 0.0,

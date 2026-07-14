@@ -149,12 +149,17 @@
             $recordLiters = (float) ($snapshot['total_liters'] ?? 0);
             $recordSubmissions = (int) ($snapshot['submission_count'] ?? $snapshot['transaction_count'] ?? 0);
             $voidedAt = $record->voided_at ?? ($snapshot['voided_at'] ?? null);
-            $recordPumpNetSales = collect($snapshot['pump_net_sales'] ?? [])->map(function ($pump, $key) {
+            $recordPumpLiters = collect($snapshot['tank_breakdown'] ?? [])
+                ->flatMap(fn ($tank) => collect($tank['entries'] ?? []))
+                ->groupBy(fn ($entry) => (int) ($entry['pump_id'] ?? 0))
+                ->map(fn ($entries) => (float) $entries->sum(fn ($entry) => (float) ($entry['liters'] ?? 0)));
+            $recordPumpNetSales = collect($snapshot['pump_net_sales'] ?? [])->map(function ($pump, $key) use ($recordPumpLiters) {
                 $pumpId = (int) ($pump['pump_id'] ?? (is_numeric($key) ? $key : 0));
 
                 return [
                     'pump_id' => $pumpId,
                     'fuel_type' => (string) ($pump['fuel_type'] ?? 'Fuel'),
+                    'liters' => (float) ($pump['liters'] ?? $recordPumpLiters->get($pumpId, 0)),
                     'transaction_count' => (int) ($pump['transaction_count'] ?? 0),
                     'total_sales' => (float) ($pump['total_sales'] ?? 0),
                     'discounts' => (float) ($pump['discounts'] ?? 0),
@@ -214,6 +219,7 @@
                         'adjustments' => $adjustments,
                     ];
                 })->values()->all();
+                $entryRows = collect($entries);
 
                 return [
                     'id' => (string) ($tank['id'] ?? ''),
@@ -221,6 +227,9 @@
                     'fuel_type' => $fuelType,
                     'connected_pumps' => (string) ($tank['connected_pumps_display'] ?? 'N/A'),
                     'liters' => (float) ($tank['liters'] ?? 0),
+                    'total_sales' => (float) ($tank['total_sales'] ?? $entryRows->sum('total_sales')),
+                    'discounts' => (float) ($tank['discounts'] ?? $entryRows->sum('discounts')),
+                    'net_sales' => (float) ($tank['net_sales'] ?? $entryRows->sum('net_sales')),
                     'limit' => isset($tank['limit']) ? (float) $tank['limit'] : null,
                     'has_limit' => (bool) ($tank['has_limit'] ?? false),
                     'status_label' => (string) ($tank['status']['label'] ?? 'Normal'),
@@ -311,6 +320,125 @@
                 'active_adjustments_count' => collect($adjustments)->where('status', 'active')->count(),
             ]];
         })->all();
+
+        $printGeneratedAt = now();
+        $printGeneratedBy = auth()->user()->name ?? 'Administrator';
+        $printPeriodCode = $period ? (string) ($period->period_code ?? 'Active Period') : 'Pending Migration';
+        $printReportingPeriod = $period
+            ? $dateLabel($period->started_at ?? null, 'M d, Y h:i A') . ' to ' . (! empty($period->ended_at) ? $dateLabel($period->ended_at, 'M d, Y h:i A') : $printGeneratedAt->format('M d, Y h:i A'))
+            : 'N/A';
+        $printStatus = $period ? ucfirst((string) ($period->status ?? 'active')) : 'Pending Migration';
+        $fuelSortOrder = function ($fuel) {
+            $fuel = strtolower((string) $fuel);
+
+            if (str_contains($fuel, 'premium')) {
+                return 1;
+            }
+
+            if (str_contains($fuel, 'unleaded') || str_contains($fuel, 'regular')) {
+                return 2;
+            }
+
+            if (str_contains($fuel, 'diesel')) {
+                return 3;
+            }
+
+            return 99;
+        };
+        $printFuelRows = collect($summary['fuel_breakdown'] ?? [])
+            ->sortBy(fn ($fuel) => $fuelSortOrder($fuel['fuel_type'] ?? ''))
+            ->values();
+        $printTankEntries = $tankBreakdown
+            ->flatMap(function ($tank) {
+                return collect($tank['entries'] ?? [])->map(function ($entry) use ($tank) {
+                    return array_merge($entry, [
+                        'tank_name' => (string) ($tank['name'] ?? 'Tank'),
+                        'tank_fuel_type' => (string) ($tank['fuel_type'] ?? 'Fuel'),
+                    ]);
+                });
+            })
+            ->values();
+        $printPumpLiters = $printTankEntries
+            ->groupBy(fn ($entry) => (int) ($entry['pump_id'] ?? 0))
+            ->map(function ($entries) {
+                $first = $entries->first() ?? [];
+
+                return [
+                    'fuel_type' => (string) ($first['fuel_type'] ?? 'Fuel'),
+                    'liters' => (float) $entries->sum(fn ($entry) => (float) ($entry['liters'] ?? 0)),
+                    'reading_count' => $entries->pluck('id')->filter()->unique()->count(),
+                ];
+            });
+        $printPumpRows = $pumpNetSales
+            ->map(function ($pump) use ($printPumpLiters) {
+                $pumpId = (int) ($pump['pump_id'] ?? 0);
+                $movement = $printPumpLiters->get($pumpId, []);
+
+                return [
+                    'pump_id' => $pumpId,
+                    'fuel_type' => (string) ($pump['fuel_type'] ?? ($movement['fuel_type'] ?? 'Fuel')),
+                    'liters' => (float) ($movement['liters'] ?? 0),
+                    'records' => (int) ($pump['transaction_count'] ?? 0),
+                    'gross' => (float) ($pump['total_sales'] ?? 0),
+                    'discount' => (float) ($pump['discounts'] ?? 0),
+                    'net' => (float) ($pump['net_sales'] ?? 0),
+                ];
+            })
+            ->sortBy('pump_id')
+            ->values();
+        $printAdjustmentRows = $printTankEntries
+            ->flatMap(function ($entry) use ($dateLabel) {
+                return collect($entry['adjustments'] ?? [])->map(function ($adjustment) use ($entry, $dateLabel) {
+                    $adjustmentId = (int) ($adjustment['id'] ?? 0);
+                    $sortDate = (string) ($adjustment['created_at'] ?? $entry['created_at'] ?? '');
+
+                    return [
+                        'dedupe_key' => $adjustmentId > 0
+                            ? 'adjustment-' . $adjustmentId
+                            : implode('|', [
+                                $sortDate,
+                                (int) ($adjustment['pump_number'] ?? $entry['pump_id'] ?? 0),
+                                (float) ($adjustment['liters'] ?? 0),
+                                (float) ($adjustment['amount'] ?? 0),
+                                (string) ($adjustment['reason'] ?? ''),
+                            ]),
+                        'sort_date' => $sortDate,
+                        'date_label' => $dateLabel($adjustment['created_at'] ?? $entry['created_at'] ?? null, 'M d, Y'),
+                        'pump_number' => (int) ($adjustment['pump_number'] ?? $entry['pump_id'] ?? 0),
+                        'liters' => (float) ($adjustment['liters'] ?? 0),
+                        'amount' => (float) ($adjustment['amount'] ?? 0),
+                        'reason' => (string) ($adjustment['reason'] ?? 'Adjustment'),
+                        'authorized_by' => (string) ($adjustment['authorized_by'] ?? 'Administrator'),
+                    ];
+                });
+            })
+            ->unique('dedupe_key')
+            ->sortBy('sort_date')
+            ->values();
+        $printShiftReadingRows = $printTankEntries
+            ->groupBy(fn ($entry) => (int) ($entry['id'] ?? 0))
+            ->map(function ($entries, $id) use ($dateLabel) {
+                $first = $entries->first() ?? [];
+                $periodFrom = $first['period_from'] ?? null;
+                $periodTo = $first['period_to'] ?? null;
+                $periodLabel = $periodFrom || $periodTo
+                    ? $dateLabel($periodFrom, 'M d, Y') . ' to ' . $dateLabel($periodTo, 'M d, Y')
+                    : 'N/A';
+
+                return [
+                    'id' => (int) $id,
+                    'sort_date' => (string) ($first['created_at'] ?? ''),
+                    'date_label' => $dateLabel($first['created_at'] ?? null, 'M d, Y'),
+                    'staff_name' => (string) ($first['staff_name'] ?? 'Staff'),
+                    'period_label' => $periodLabel,
+                    'liters' => (float) $entries->sum(fn ($entry) => (float) ($entry['liters'] ?? 0)),
+                    'meter_sales' => (float) $entries->sum(fn ($entry) => (float) ($entry['amount'] ?? 0)),
+                    'net_sales' => (float) $entries->sum(fn ($entry) => (float) ($entry['net_sales'] ?? 0)),
+                    'status' => (string) ($first['status'] ?? 'Pending'),
+                ];
+            })
+            ->sortBy('sort_date')
+            ->values();
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Liters Movement" />
@@ -328,8 +456,227 @@
         x-init="init()"
         x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || deduction.open || deductionVoid.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
-        class="space-y-6">
-        <style>[x-cloak] { display: none !important; }</style>
+        class="liters-movement-admin space-y-6">
+        <style>
+            [x-cloak] { display: none !important; }
+            .liters-print-report { display: none; }
+
+            @media print {
+                @page { margin: 1cm; size: A4 portrait; }
+                html, body {
+                    background: #fff !important;
+                    margin: 0 !important;
+                    min-height: 0 !important;
+                    padding: 0 !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+                body > :not(.min-h-screen) {
+                    display: none !important;
+                }
+                body > .min-h-screen {
+                    min-height: 0 !important;
+                    overflow: visible !important;
+                }
+                body > .min-h-screen > :not(.min-w-0),
+                body > .min-h-screen > .min-w-0 > header,
+                body > .min-h-screen > .min-w-0 > .min-w-0 > :not(.liters-movement-admin),
+                .liters-movement-admin > :not(.liters-print-report) {
+                    display: none !important;
+                }
+                body > .min-h-screen > .min-w-0,
+                body > .min-h-screen > .min-w-0 > .min-w-0,
+                .liters-movement-admin {
+                    display: block !important;
+                    margin: 0 !important;
+                    max-width: none !important;
+                    min-height: 0 !important;
+                    padding: 0 !important;
+                    transition: none !important;
+                    width: 100% !important;
+                }
+                .liters-print-report {
+                    box-sizing: border-box;
+                    color: #222 !important;
+                    display: flex !important;
+                    flex-direction: column;
+                    font-family: Arial, Helvetica, sans-serif;
+                    font-size: 10px;
+                    line-height: 1.32;
+                    min-height: 277mm;
+                    position: static;
+                    width: 100%;
+                }
+                .liters-print-main { flex: 1; }
+                .liters-report-header {
+                    border-bottom: 3px solid #465fff;
+                    margin-bottom: 12px;
+                    padding-bottom: 10px;
+                }
+                .liters-header-table, .liters-meta-table, .liters-data-table, .liters-summary-table {
+                    border-collapse: collapse;
+                    width: 100%;
+                }
+                .liters-header-table td {
+                    border: 0;
+                    padding: 0;
+                    vertical-align: middle;
+                }
+                .liters-print-logo {
+                    height: auto;
+                    max-width: 130px;
+                }
+                .liters-company-name {
+                    color: #465fff;
+                    font-size: 22px;
+                    font-weight: 900;
+                    letter-spacing: 0;
+                    margin: 0;
+                }
+                .liters-company-details { color: #475467; margin: 2px 0 0; }
+                .liters-report-title {
+                    color: #98a2b3;
+                    font-size: 18px;
+                    font-weight: 900;
+                    letter-spacing: 0;
+                    text-align: right;
+                    text-transform: uppercase;
+                }
+                .liters-report-number {
+                    color: #d92d20;
+                    font-size: 14px;
+                    font-weight: 900;
+                    margin-top: 5px;
+                    text-align: right;
+                }
+                .liters-meta-box {
+                    background: #f8f9fc;
+                    border: 1px solid #e4e7ec;
+                    border-radius: 8px;
+                    margin-bottom: 12px;
+                    padding: 10px 12px;
+                }
+                .liters-meta-table td {
+                    border: 0;
+                    font-size: 10px;
+                    padding: 2px 8px;
+                    vertical-align: top;
+                }
+                .liters-meta-table td:first-child {
+                    color: #667085;
+                    font-weight: 800;
+                    text-transform: uppercase;
+                    width: 24%;
+                }
+                .liters-meta-table td:last-child {
+                    color: #101828;
+                    font-weight: 700;
+                }
+                .liters-divider {
+                    border-top: 1px solid #101828;
+                    margin: 12px 0;
+                }
+                .liters-section-title {
+                    color: #465fff;
+                    font-size: 11px;
+                    font-weight: 900;
+                    margin: 0 0 6px;
+                    text-transform: uppercase;
+                }
+                .liters-summary-grid {
+                    display: grid;
+                    gap: 12px;
+                    grid-template-columns: 1fr 1fr;
+                    margin-bottom: 8px;
+                    text-align: center;
+                }
+                .liters-summary-label {
+                    color: #667085;
+                    font-size: 10px;
+                    font-weight: 800;
+                    text-transform: uppercase;
+                }
+                .liters-summary-value {
+                    color: #101828;
+                    font-size: 18px;
+                    font-weight: 900;
+                    margin-top: 2px;
+                }
+                .liters-summary-table {
+                    margin-top: 6px;
+                    width: 45%;
+                }
+                .liters-summary-table td {
+                    border: 0;
+                    border-bottom: 1px solid #e4e7ec;
+                    padding: 3px 6px;
+                }
+                .liters-summary-table td:first-child {
+                    color: #475467;
+                    font-weight: 700;
+                }
+                .liters-data-table {
+                    margin-bottom: 8px;
+                    page-break-inside: auto;
+                }
+                .liters-data-table th, .liters-data-table td {
+                    border: 1px solid #d0d5dd;
+                    padding: 4px 5px;
+                    vertical-align: top;
+                }
+                .liters-data-table th {
+                    background: #f2f4f7;
+                    color: #344054;
+                    font-size: 8.5px;
+                    font-weight: 900;
+                    text-align: left;
+                    text-transform: uppercase;
+                }
+                .liters-data-table tfoot td {
+                    background: #f8f9fc;
+                    font-weight: 900;
+                }
+                .liters-amount-col {
+                    font-family: "Courier New", monospace;
+                    font-weight: 700;
+                    text-align: right !important;
+                    white-space: nowrap;
+                }
+                .liters-text-center { text-align: center !important; }
+                .liters-bottom-section {
+                    margin-top: auto;
+                    page-break-inside: avoid;
+                    padding-top: 22px;
+                }
+                .liters-signatures {
+                    display: flex;
+                    justify-content: space-between;
+                    margin-top: 24px;
+                }
+                .liters-signature-box {
+                    text-align: center;
+                    width: 40%;
+                }
+                .liters-sig-heading {
+                    color: #101828;
+                    font-size: 10px;
+                    font-weight: 800;
+                    margin: 0 0 18px;
+                    text-align: left;
+                }
+                .liters-sig-line {
+                    border-bottom: 1px solid #101828;
+                    height: 24px;
+                    margin-bottom: 5px;
+                }
+                .liters-sig-label {
+                    color: #344054;
+                    font-size: 10px;
+                    font-weight: 800;
+                    margin: 0;
+                }
+            }
+        </style>
 
         <div
             x-show="toast.open"
@@ -418,6 +765,10 @@
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M8 7.5V5.75C8 4.784 8.784 4 9.75 4h4.5C15.216 4 16 4.784 16 5.75V7.5M9 10.75v6M15 10.75v6M6.5 7.5l.75 12A1.75 1.75 0 0 0 9 21.25h6a1.75 1.75 0 0 0 1.75-1.75l.75-12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             Generate Record & Reset
                         </button>
+                        <button type="button" x-on:click="printReport()" class="{{ $secondaryButtonClass }}">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8.25V4.75h10v3.5M7.25 17.25H5.75A1.75 1.75 0 0 1 4 15.5v-4A1.75 1.75 0 0 1 5.75 9.75h12.5A1.75 1.75 0 0 1 20 11.5v4a1.75 1.75 0 0 1-1.75 1.75h-1.5M7.25 14.25h9.5v5h-9.5v-5ZM16.75 12.25h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Print Report
+                        </button>
                     </div>
                 @endif
             </div>
@@ -460,19 +811,21 @@
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[760px] w-full table-fixed">
+                    <table class="min-w-[900px] w-full table-fixed">
                         <colgroup>
-                            <col class="w-[18%]">
-                            <col class="w-[20%]">
+                            <col class="w-[15%]">
+                            <col class="w-[16%]">
                             <col class="w-[14%]">
-                            <col class="w-[16%]">
-                            <col class="w-[16%]">
-                            <col class="w-[16%]">
+                            <col class="w-[13%]">
+                            <col class="w-[14%]">
+                            <col class="w-[14%]">
+                            <col class="w-[14%]">
                         </colgroup>
                         <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                             <tr>
                                 <th class="{{ $thClass }}">Pump</th>
                                 <th class="{{ $thClass }}">Fuel</th>
+                                <th class="{{ $thNumberClass }}">Total Liters</th>
                                 <th class="{{ $thNumberClass }}">Sales Records</th>
                                 <th class="{{ $thNumberClass }}">Total Sales</th>
                                 <th class="{{ $thNumberClass }}">Discounts</th>
@@ -489,6 +842,7 @@
                                     <td class="{{ $tdClass }}">
                                         <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $style['badge'] }}">{{ $pump['fuel_type'] ?? 'N/A' }}</span>
                                     </td>
+                                    <td class="{{ $tdNumberClass }}">{{ number_format((float) ($pump['liters'] ?? 0), 2) }} L</td>
                                     <td class="{{ $tdNumberClass }}">{{ number_format((int) ($pump['transaction_count'] ?? 0)) }}</td>
                                     <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) ($pump['total_sales'] ?? 0), 2) }}</td>
                                     <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">-&#8369;{{ number_format((float) ($pump['discounts'] ?? 0), 2) }}</td>
@@ -499,6 +853,7 @@
                         <tfoot class="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
                             <tr>
                                 <td colspan="2" class="{{ $tdPrimaryClass }}">Overall</td>
+                                <td class="{{ $tdNumberClass }}">{{ number_format($pumpNetSales->sum(fn ($pump) => (float) ($pump['liters'] ?? 0)), 2) }} L</td>
                                 <td class="{{ $tdNumberClass }}">{{ number_format($pumpNetSales->sum(fn ($pump) => (int) ($pump['transaction_count'] ?? 0))) }}</td>
                                 <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $summary['total_sales'], 2) }}</td>
                                 <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">-&#8369;{{ number_format((float) $summary['total_discounts'], 2) }}</td>
@@ -598,21 +953,24 @@
             <div x-show="tableTab === 'tank-ledgers'" x-cloak role="tabpanel" class="space-y-4">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
-                    <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank.</p>
+                    <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank and uses the same discount-adjusted net sales as the Net Sales card.</p>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                     @foreach ($tankBreakdown as $tank)
                         @php
                             $style = $fuelStyle($tank['fuel_type'] ?? '');
                             $entries = collect($tank['entries'] ?? []);
+                            $tankGrossSales = (float) ($tank['total_sales'] ?? $entries->sum(fn ($entry) => (float) ($entry['total_sales'] ?? $entry['amount'] ?? 0)));
+                            $tankDiscounts = (float) ($tank['discounts'] ?? $entries->sum(fn ($entry) => (float) ($entry['discounts'] ?? 0)));
+                            $tankNetSales = (float) ($tank['net_sales'] ?? $entries->sum(fn ($entry) => (float) ($entry['net_sales'] ?? 0)));
                         @endphp
-                        <article class="{{ $cardClass }} overflow-hidden p-0">
-                            <div class="px-5 py-4 {{ $style['header'] }}">
-                                <div class="flex items-start justify-between gap-4">
+                        <article class="{{ $cardClass }} flex h-[520px] flex-col overflow-hidden p-0">
+                            <div class="px-4 py-3 {{ $style['header'] }}">
+                                <div class="flex items-start justify-between gap-3">
                                     <div class="min-w-0">
                                         <p class="truncate text-base font-semibold">{{ $tank['fuel_type'] ?? 'Fuel' }}</p>
-                                        <p class="mt-1 truncate text-theme-xs opacity-90">{{ $tank['name'] ?? 'Tank' }} | {{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
+                                        <p class="mt-1 line-clamp-2 text-theme-xs opacity-90">{{ $tank['name'] ?? 'Tank' }} | {{ $tank['connected_pumps_display'] ?? 'N/A' }}</p>
                                     </div>
                                     <span class="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-theme-xs font-semibold">
                                         {{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L' : 'No limit' }}
@@ -620,33 +978,57 @@
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-4 border-b border-gray-200 bg-gray-50 text-theme-xs font-semibold uppercase text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
-                                <div class="px-4 py-2">Pump</div>
-                                <div class="px-4 py-2 text-right">Qty (L)</div>
-                                <div class="px-4 py-2 text-right">Price</div>
-                                <div class="px-4 py-2 text-right">Total</div>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+                                <div>
+                                    <p class="{{ $labelClass }}">Liters</p>
+                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }} L</p>
+                                </div>
+                                <div>
+                                    <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
+                                    <p class="mt-1 text-theme-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format($tankNetSales, 2) }}</p>
+                                </div>
+                                <div>
+                                    <p class="{{ $labelClass }}">Sales</p>
+                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($tankGrossSales, 2) }}</p>
+                                </div>
+                                <div>
+                                    <p class="{{ $labelClass }}">Discount</p>
+                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-error-600 dark:text-error-400">-&#8369;{{ number_format($tankDiscounts, 2) }}</p>
+                                </div>
                             </div>
 
-                            <div class="max-h-[360px] overflow-y-auto">
-                                @forelse ($entries as $entry)
-                                    <div class="grid grid-cols-4 border-b border-gray-100 text-theme-sm last:border-b-0 dark:border-gray-800">
-                                        <div class="px-4 py-2.5 font-medium text-gray-800 dark:text-white/90">P{{ (int) ($entry['pump_id'] ?? 0) }}</div>
-                                        <div class="px-4 py-2.5 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }}</div>
-                                        <div class="px-4 py-2.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($entry['price_per_liter'] ?? 0), 2) }}</div>
-                                        <div class="px-4 py-2.5 text-right tabular-nums font-medium text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['amount'] ?? 0), 2) }}</div>
+                            <div class="min-h-0 flex-1 overflow-x-auto">
+                                <div class="flex h-full min-w-[430px] flex-col">
+                                    <div class="shrink-0 grid grid-cols-[0.55fr_0.9fr_1.15fr_1fr] border-b border-gray-100 bg-gray-50 px-4 py-2 text-theme-xs font-semibold uppercase text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
+                                        <div>Pump</div>
+                                        <div class="text-right">Qty</div>
+                                        <div class="text-right">Sales / Disc</div>
+                                        <div class="text-right">Net</div>
                                     </div>
-                                @empty
-                                    <div class="px-4 py-10 text-center text-theme-sm text-gray-500 dark:text-gray-400">
-                                        No active-period records.
-                                    </div>
-                                @endforelse
-                            </div>
 
-                            <div class="grid grid-cols-4 border-t border-gray-200 bg-gray-50 text-theme-sm font-semibold dark:border-gray-800 dark:bg-white/[0.03]">
-                                <div class="px-4 py-3 text-gray-800 dark:text-white/90">Total</div>
-                                <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }}</div>
-                                <div class="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">{{ number_format((float) ($tank['price_per_liter'] ?? 0), 2) }}</div>
-                                <div class="px-4 py-3 text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['amount'] ?? 0), 2) }}</div>
+                                    <div class="min-h-0 flex-1 overflow-y-auto">
+                                        @forelse ($entries as $entry)
+                                            @php
+                                                $entryGrossSales = (float) ($entry['total_sales'] ?? $entry['amount'] ?? 0);
+                                                $entryDiscounts = (float) ($entry['discounts'] ?? 0);
+                                                $entryNetSales = (float) ($entry['net_sales'] ?? ($entryGrossSales - $entryDiscounts));
+                                            @endphp
+                                            <div class="grid grid-cols-[0.55fr_0.9fr_1.15fr_1fr] items-center border-b border-gray-100 px-4 py-2.5 text-theme-xs last:border-b-0 dark:border-gray-800">
+                                                <div class="font-semibold text-gray-800 dark:text-white/90">P{{ (int) ($entry['pump_id'] ?? 0) }}</div>
+                                                <div class="text-right tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($entry['liters'] ?? 0), 2) }} L</div>
+                                                <div class="text-right tabular-nums">
+                                                    <p class="text-gray-700 dark:text-gray-300">&#8369;{{ number_format($entryGrossSales, 2) }}</p>
+                                                    <p class="text-error-600 dark:text-error-400">-&#8369;{{ number_format($entryDiscounts, 2) }}</p>
+                                                </div>
+                                                <div class="text-right font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($entryNetSales, 2) }}</div>
+                                            </div>
+                                        @empty
+                                            <div class="px-4 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                                No active-period records.
+                                            </div>
+                                        @endforelse
+                                    </div>
+                                </div>
                             </div>
                         </article>
                     @endforeach
@@ -906,6 +1288,254 @@
                 </div>
             @endif
             </div>
+        </section>
+
+        <section class="liters-print-report" aria-hidden="true">
+            <div class="liters-print-main">
+                <header class="liters-report-header">
+                    <table class="liters-header-table">
+                        <tr>
+                            <td style="width: 20%;">
+                                <img src="{{ asset('images/logojrs.png') }}" alt="JR-M Fuel Station Logo" class="liters-print-logo">
+                            </td>
+                            <td style="width: 45%;">
+                                <h1 class="liters-company-name">JR-M FUEL STATION</h1>
+                                <p class="liters-company-details">Sitio Apad, Calongay, Pilar Sorsogon</p>
+                            </td>
+                            <td style="width: 35%;">
+                                <div class="liters-report-title">Liters Movement and Net Sales Report</div>
+                                <div class="liters-report-number">{{ $printPeriodCode }}</div>
+                            </td>
+                        </tr>
+                    </table>
+                </header>
+
+                <section class="liters-meta-box">
+                    <table class="liters-meta-table">
+                        <tr>
+                            <td>Period Code:</td>
+                            <td>{{ $printPeriodCode }}</td>
+                        </tr>
+                        <tr>
+                            <td>Reporting Period:</td>
+                            <td>{{ $printReportingPeriod }}</td>
+                        </tr>
+                        <tr>
+                            <td>Generated Date:</td>
+                            <td>{{ $printGeneratedAt->format('M d, Y h:i A') }}</td>
+                        </tr>
+                        <tr>
+                            <td>Generated By:</td>
+                            <td>{{ $printGeneratedBy }}</td>
+                        </tr>
+                        <tr>
+                            <td>Status:</td>
+                            <td>{{ $printStatus }}</td>
+                        </tr>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Period Summary</h2>
+                    <div class="liters-summary-grid">
+                        <div>
+                            <div class="liters-summary-label">Total Liters Movement</div>
+                            <div class="liters-summary-value">{{ number_format((float) $summary['total_liters'], 2) }} L</div>
+                        </div>
+                        <div>
+                            <div class="liters-summary-label">Net Sales</div>
+                            <div class="liters-summary-value">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</div>
+                        </div>
+                    </div>
+                    <table class="liters-summary-table">
+                        <tr>
+                            <td>Gross Sales</td>
+                            <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_sales'], 2) }}</td>
+                        </tr>
+                        <tr>
+                            <td>Discounts</td>
+                            <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_discounts'], 2) }}</td>
+                        </tr>
+                        <tr>
+                            <td>Submissions</td>
+                            <td class="liters-amount-col">{{ number_format((int) $summary['submission_count']) }}</td>
+                        </tr>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Liters Movement by Fuel / Tank</h2>
+                    <table class="liters-data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 34%;">Fuel / Tank</th>
+                                <th style="width: 22%;" class="liters-amount-col">Liters</th>
+                                <th style="width: 24%;" class="liters-amount-col">Meter Sales</th>
+                                <th style="width: 20%;" class="liters-amount-col">Records</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse ($printFuelRows as $fuel)
+                                <tr>
+                                    <td>{{ $fuel['fuel_type'] ?? 'Fuel' }}</td>
+                                    <td class="liters-amount-col">{{ number_format((float) ($fuel['liters'] ?? 0), 2) }} L</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($fuel['amount'] ?? 0), 2) }}</td>
+                                    <td class="liters-amount-col">{{ number_format((int) ($fuel['transaction_count'] ?? 0)) }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="4" class="liters-text-center">No fuel movement recorded.</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td>Total</td>
+                                <td class="liters-amount-col">{{ number_format((float) $summary['total_liters'], 2) }} L</td>
+                                <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_amount'], 2) }}</td>
+                                <td class="liters-amount-col">{{ number_format((int) $summary['pump_entry_count']) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Pump Sales and Liters Movement</h2>
+                    <table class="liters-data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 9%;">Pump</th>
+                                <th style="width: 17%;">Fuel</th>
+                                <th style="width: 14%;" class="liters-amount-col">Liters</th>
+                                <th style="width: 11%;" class="liters-amount-col">Records</th>
+                                <th style="width: 17%;" class="liters-amount-col">Gross</th>
+                                <th style="width: 15%;" class="liters-amount-col">Discount</th>
+                                <th style="width: 17%;" class="liters-amount-col">Net</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse ($printPumpRows as $pump)
+                                <tr>
+                                    <td>P{{ (int) ($pump['pump_id'] ?? 0) }}</td>
+                                    <td>{{ $pump['fuel_type'] ?? 'Fuel' }}</td>
+                                    <td class="liters-amount-col">{{ number_format((float) ($pump['liters'] ?? 0), 2) }} L</td>
+                                    <td class="liters-amount-col">{{ number_format((int) ($pump['records'] ?? 0)) }}</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($pump['gross'] ?? 0), 2) }}</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($pump['discount'] ?? 0), 2) }}</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($pump['net'] ?? 0), 2) }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="7" class="liters-text-center">No pump movement recorded.</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="2">Total</td>
+                                <td class="liters-amount-col">{{ number_format((float) $summary['total_liters'], 2) }} L</td>
+                                <td class="liters-amount-col">{{ number_format($pumpNetSales->sum(fn ($pump) => (int) ($pump['transaction_count'] ?? 0))) }}</td>
+                                <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_sales'], 2) }}</td>
+                                <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_discounts'], 2) }}</td>
+                                <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Liters and Sales Adjustments</h2>
+                    <table class="liters-data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">Date</th>
+                                <th style="width: 9%;">Pump</th>
+                                <th style="width: 17%;" class="liters-amount-col">Liters Deducted</th>
+                                <th style="width: 16%;" class="liters-amount-col">Amount</th>
+                                <th style="width: 27%;">Reason</th>
+                                <th style="width: 16%;">Authorized By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse ($printAdjustmentRows as $adjustment)
+                                <tr>
+                                    <td>{{ $adjustment['date_label'] }}</td>
+                                    <td>P{{ (int) ($adjustment['pump_number'] ?? 0) }}</td>
+                                    <td class="liters-amount-col">{{ number_format((float) ($adjustment['liters'] ?? 0), 2) }} L</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($adjustment['amount'] ?? 0), 2) }}</td>
+                                    <td>{{ $adjustment['reason'] }}</td>
+                                    <td>{{ $adjustment['authorized_by'] }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="6" class="liters-text-center">No active liters or sales adjustments.</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Included Shift Readings</h2>
+                    <table class="liters-data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 12%;">Date</th>
+                                <th style="width: 17%;">Staff</th>
+                                <th style="width: 20%;">Period</th>
+                                <th style="width: 13%;" class="liters-amount-col">Liters</th>
+                                <th style="width: 15%;" class="liters-amount-col">Meter Sales</th>
+                                <th style="width: 15%;" class="liters-amount-col">Net Sales</th>
+                                <th style="width: 8%;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse ($printShiftReadingRows as $reading)
+                                <tr>
+                                    <td>{{ $reading['date_label'] }}</td>
+                                    <td>{{ $reading['staff_name'] }}</td>
+                                    <td>{{ $reading['period_label'] }}</td>
+                                    <td class="liters-amount-col">{{ number_format((float) ($reading['liters'] ?? 0), 2) }} L</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($reading['meter_sales'] ?? 0), 2) }}</td>
+                                    <td class="liters-amount-col">&#8369;{{ number_format((float) ($reading['net_sales'] ?? 0), 2) }}</td>
+                                    <td>{{ $reading['status'] }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="7" class="liters-text-center">No included shift readings.</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </section>
+
+                <div class="liters-divider"></div>
+
+                <section>
+                    <h2 class="liters-section-title">Final Report Totals</h2>
+                    <table class="liters-summary-table">
+                        <tr>
+                            <td>Net Liters Movement</td>
+                            <td class="liters-amount-col">{{ number_format((float) $summary['total_liters'], 2) }} L</td>
+                        </tr>
+                        <tr>
+                            <td>Net Sales</td>
+                            <td class="liters-amount-col">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</td>
+                        </tr>
+                    </table>
+                </section>
+            </div>
+
         </section>
 
         <div x-show="activeDetails.open" x-cloak class="fixed inset-0 z-[100035] flex items-center justify-center overflow-y-auto p-4">
@@ -1224,19 +1854,21 @@
                         <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Saved Sales Per Pump</h4>
                         <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                             <div class="max-w-full overflow-x-auto">
-                                <table class="min-w-[820px] w-full table-fixed">
+                                <table class="min-w-[940px] w-full table-fixed">
                                     <colgroup>
-                                        <col class="w-[12%]">
-                                        <col class="w-[20%]">
+                                        <col class="w-[10%]">
                                         <col class="w-[16%]">
-                                        <col class="w-[18%]">
+                                        <col class="w-[14%]">
+                                        <col class="w-[14%]">
                                         <col class="w-[16%]">
-                                        <col class="w-[18%]">
+                                        <col class="w-[14%]">
+                                        <col class="w-[16%]">
                                     </colgroup>
                                     <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                                         <tr>
                                             <th class="{{ $thClass }}">Pump</th>
                                             <th class="{{ $thClass }}">Fuel</th>
+                                            <th class="{{ $thNumberClass }}">Total Liters</th>
                                             <th class="{{ $thNumberClass }}">Transactions</th>
                                             <th class="{{ $thNumberClass }}">Total Sales</th>
                                             <th class="{{ $thNumberClass }}">Discounts</th>
@@ -1248,6 +1880,7 @@
                                             <tr>
                                                 <td class="{{ $tdPrimaryClass }}">P<span x-text="pump.pump_id"></span></td>
                                                 <td class="{{ $tdClass }}" x-text="pump.fuel_type"></td>
+                                                <td class="{{ $tdNumberClass }}"><span x-text="formatHistoryNumber(pump.liters)"></span> L</td>
                                                 <td class="{{ $tdNumberClass }}" x-text="formatHistoryNumber(pump.transaction_count, 0)"></td>
                                                 <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.total_sales)"></span></td>
                                                 <td class="{{ $tdNumberClass }} text-error-600 dark:text-error-400">&#8369;<span x-text="formatHistoryNumber(pump.discounts)"></span></td>
@@ -1255,7 +1888,7 @@
                                             </tr>
                                         </template>
                                         <tr x-show="historyPumpSales().length === 0">
-                                            <td colspan="6" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No saved sales breakdown was found in this record.</td>
+                                            <td colspan="7" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No saved sales breakdown was found in this record.</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -1588,6 +2221,9 @@
                     if (confirmed && this.$refs.generateForm) {
                         this.$refs.generateForm.submit();
                     }
+                },
+                printReport() {
+                    this.$nextTick(() => window.print());
                 },
                 openActiveDetails(recordId) {
                     const row = this.activeSubmissions[String(recordId)] || this.activeSubmissions[recordId] || null;

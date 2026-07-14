@@ -242,7 +242,7 @@
                 <div class="company-title">JR-M FUEL STATION</div>
                 <div class="receipt-title">Acknowledgement Receipt</div>
             </div>
-            <img src="{{ asset('img/logojrs.png') }}" alt="JR-M Fuel Station Logo" class="logo">
+            <img src="{{ asset('images/logojrs.png') }}" alt="JR-M Fuel Station Logo" class="logo">
         </header>
 
         <div class="payment-type">
