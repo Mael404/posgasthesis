@@ -8,10 +8,20 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class StaffPumpController extends Controller
 {
+    private const PUMP_FUEL_TYPES = [
+        1 => 'Premium',
+        2 => 'Unleaded',
+        3 => 'Premium',
+        4 => 'Unleaded',
+        5 => 'Diesel',
+        6 => 'Diesel',
+    ];
+
     private array $tablePresence = [];
     private array $columnPresence = [];
 
@@ -62,8 +72,8 @@ class StaffPumpController extends Controller
     public function storeSale(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'pump_id' => 'required|integer|min:1',
-            'fuel_type' => 'required|string|max:50',
+            'pump_id' => ['required', 'integer', Rule::in(array_keys(self::PUMP_FUEL_TYPES))],
+            'fuel_type' => ['required', 'string', Rule::in(array_values(self::PUMP_FUEL_TYPES))],
             'liters' => 'required|numeric|min:0.1',
             'price' => 'nullable|numeric|min:0',
             'standard_price' => 'nullable|numeric|min:0',
@@ -83,7 +93,7 @@ class StaffPumpController extends Controller
         try {
             DB::transaction(function () use ($validated) {
                 $paymentType = $validated['payment_type'] === 'cash' ? 'walkin' : $validated['payment_type'];
-                $fuelType = $validated['fuel_type'];
+                $fuelType = $this->fuelTypeForPump((int) $validated['pump_id']);
                 $liters = (float) $validated['liters'];
                 $manualDiscount = (float) ($validated['manual_discount'] ?? 0);
                 $manualExcess = (float) ($validated['manual_excess'] ?? 0);
@@ -190,8 +200,8 @@ class StaffPumpController extends Controller
     public function updateSale(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
-            'pump_id' => 'required|integer|min:1',
-            'fuel_type' => 'required|string|max:50',
+            'pump_id' => ['required', 'integer', Rule::in(array_keys(self::PUMP_FUEL_TYPES))],
+            'fuel_type' => ['required', 'string', Rule::in(array_values(self::PUMP_FUEL_TYPES))],
             'liters' => 'required|numeric|min:0.1',
             'price' => 'nullable|numeric|min:0',
             'standard_price' => 'nullable|numeric|min:0',
@@ -225,7 +235,7 @@ class StaffPumpController extends Controller
                 }
 
                 $paymentType = $validated['payment_type'] === 'cash' ? 'walkin' : $validated['payment_type'];
-                $fuelType = $validated['fuel_type'];
+                $fuelType = $this->fuelTypeForPump((int) $validated['pump_id']);
                 $liters = (float) $validated['liters'];
                 $manualDiscount = (float) ($validated['manual_discount'] ?? 0);
                 $manualExcess = (float) ($validated['manual_excess'] ?? 0);
@@ -744,6 +754,15 @@ class StaffPumpController extends Controller
         return (float) DB::table('fuel_prices')
             ->where('fuel_type', $fuelType)
             ->value('price_per_liter');
+    }
+
+    private function fuelTypeForPump(int $pumpId): string
+    {
+        if (! isset(self::PUMP_FUEL_TYPES[$pumpId])) {
+            throw new \RuntimeException('The selected pump is invalid.');
+        }
+
+        return self::PUMP_FUEL_TYPES[$pumpId];
     }
 
     private function customerPriceForFuel(?object $customer, string $fuelType, float $standardPrice): float

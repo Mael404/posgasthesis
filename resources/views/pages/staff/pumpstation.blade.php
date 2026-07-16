@@ -652,7 +652,18 @@
                             </span>
                             <div class="min-w-0">
                                 <p class="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">Pump</p>
-                                <p class="mt-0.5 truncate text-sm font-semibold text-gray-800 dark:text-white/90">
+                                <select
+                                    x-show="sale.id"
+                                    x-model.number="sale.pump_id"
+                                    x-on:change="changeSalePump($event.target.value)"
+                                    class="mt-0.5 h-8 min-w-0 max-w-full rounded-lg border border-gray-300 bg-white px-2 pr-7 text-sm font-semibold text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                                    aria-label="Change transaction pump"
+                                    required>
+                                    @foreach ($pumps as $pump)
+                                        <option value="{{ $pump['id'] }}">{{ $pump['label'] }} / {{ $pump['fuel_type'] }}</option>
+                                    @endforeach
+                                </select>
+                                <p x-show="!sale.id" class="mt-0.5 truncate text-sm font-semibold text-gray-800 dark:text-white/90">
                                     <span x-text="sale.pumpLabel || 'Pump'"></span>
                                     <span class="text-gray-400">/</span>
                                     <span x-text="sale.fuel_type || 'Fuel'"></span>
@@ -1495,7 +1506,8 @@
                         original_payment_type: '',
                         original_customer_id: '',
                         original_amount: 0,
-                        original_price_applied: null
+                        original_price_applied: null,
+                        original_fuel_type: ''
                     };
                     this.saleCreditCustomerSearch = '';
                     this.saleCreditCustomerDropdownOpen = false;
@@ -1556,9 +1568,27 @@
                     this.sale.original_customer_id = row.customer_id ? String(row.customer_id) : '';
                     this.sale.original_amount = Number(row.amount || 0);
                     this.sale.original_price_applied = Number(row.price_applied || 0);
+                    this.sale.original_fuel_type = row.fuel_type || '';
                     this.touchSale();
                     this.saleModalOpen = true;
                     this.$nextTick(() => document.querySelector('[x-model\\.number="sale.liters"]')?.focus());
+                },
+                changeSalePump(pumpId = this.sale.pump_id) {
+                    const pump = this.pumps.find(item => Number(item.id) === Number(pumpId));
+
+                    if (!pump) {
+                        this.sale.pumpLabel = '';
+                        this.sale.fuel_type = '';
+                        this.sale.standard_price = 0;
+                        this.touchSale();
+                        return;
+                    }
+
+                    this.sale.pump_id = Number(pump.id);
+                    this.sale.pumpLabel = pump.label;
+                    this.sale.fuel_type = pump.fuel_type;
+                    this.sale.standard_price = Number(pump.standard_price || this.priceForFuel(pump.fuel_type));
+                    this.touchSale();
                 },
                 closeSaleModal() {
                     this.saleModalOpen = false;
@@ -1732,7 +1762,7 @@
 
                     return this.sale.walkin_customer_id ? this.customersById[String(this.sale.walkin_customer_id)] : null;
                 },
-                editingOriginalCustomer() {
+                editingOriginalPricingContext() {
                     if (!this.sale.id) {
                         return false;
                     }
@@ -1743,10 +1773,11 @@
                     const originalMode = this.sale.original_payment_type === 'credit' ? 'credit' : 'walkin';
 
                     return this.sale.mode === originalMode
-                        && currentCustomerId === String(this.sale.original_customer_id || '');
+                        && currentCustomerId === String(this.sale.original_customer_id || '')
+                        && this.sale.fuel_type === this.sale.original_fuel_type;
                 },
                 appliedPrice() {
-                    if (this.editingOriginalCustomer() && Number(this.sale.original_price_applied || 0) > 0) {
+                    if (this.editingOriginalPricingContext() && Number(this.sale.original_price_applied || 0) > 0) {
                         return Number(this.sale.original_price_applied);
                     }
 
@@ -1819,6 +1850,11 @@
 
                     if (this.sale.mode === 'credit' && !this.sale.customer_id) {
                         this.showNotice('error', 'Please select a credit customer.');
+                        return;
+                    }
+
+                    if (!this.sale.pump_id) {
+                        this.showNotice('error', 'Please select a pump.');
                         return;
                     }
 
