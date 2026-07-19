@@ -266,6 +266,7 @@
 
         $activeSubmissionsPayload = $transactionItems->mapWithKeys(function ($transaction) use ($dateLabel, $readingStatusStyle, $currentAdminId) {
             $transactionId = (int) ($transaction->id ?? 0);
+            $isCorrection = (bool) ($transaction->is_liters_movement_correction ?? false);
             $readingStatus = $readingStatusStyle($transaction->status ?? 'Pending');
             $pumpEntries = collect($transaction->pump_entries ?? [])->map(function ($entry) {
                 return [
@@ -282,8 +283,37 @@
                     'discounts' => (float) ($entry['discounts'] ?? 0),
                     'net_sales' => (float) ($entry['net_sales'] ?? 0),
                     'sales_transaction_count' => (int) ($entry['sales_transaction_count'] ?? 0),
+                    'correction_id' => (int) ($entry['correction_id'] ?? 0),
+                    'correction_entry_type' => (string) ($entry['correction_entry_type'] ?? ''),
+                    'correction_status' => (string) ($entry['correction_status'] ?? ''),
                 ];
-            })->values()->all();
+            })->values();
+            $correctionPumps = $isCorrection
+                ? $pumpEntries
+                    ->groupBy('pump_id')
+                    ->map(function ($entries) {
+                        $reversals = $entries->where('correction_entry_type', 'reversal');
+                        $replacements = $entries->where('correction_entry_type', 'replacement');
+                        $first = $entries->first() ?? [];
+
+                        return [
+                            'pump_id' => (int) ($first['pump_id'] ?? 0),
+                            'fuel_type' => (string) ($first['fuel_type'] ?? 'Fuel'),
+                            'original_liters' => abs((float) $reversals->sum('liters')),
+                            'replacement_liters' => (float) $replacements->sum('liters'),
+                            'net_liters' => (float) $entries->sum('liters'),
+                            'original_amount' => abs((float) $reversals->sum('amount')),
+                            'replacement_amount' => (float) $replacements->sum('amount'),
+                            'net_amount' => (float) $entries->sum('amount'),
+                            'net_discounts' => (float) $entries->sum('discounts'),
+                            'net_sales' => (float) $entries->sum('net_sales'),
+                        ];
+                    })
+                    ->sortBy('pump_id')
+                    ->values()
+                    ->all()
+                : [];
+            $pumpEntries = $pumpEntries->all();
             $adjustments = collect($transaction->liter_adjustments ?? [])->map(function ($adjustment) use ($dateLabel, $currentAdminId) {
                 $createdById = (int) ($adjustment['created_by_id'] ?? 0);
                 $status = strtolower((string) ($adjustment['status'] ?? 'active'));
@@ -309,8 +339,10 @@
 
             return [$transactionId => [
                 'id' => $transactionId,
-                'is_correction' => (bool) ($transaction->is_liters_movement_correction ?? false),
+                'is_correction' => $isCorrection,
                 'can_adjust_liters' => (bool) ($transaction->can_adjust_liters ?? true),
+                'original_shift_reading_id' => (int) ($transaction->original_shift_reading_id ?? 0),
+                'replacement_shift_reading_id' => (int) ($transaction->replacement_shift_reading_id ?? 0),
                 'staff_name' => (string) ($transaction->staff_name ?? 'Staff'),
                 'status' => (string) ($transaction->status ?? 'Pending'),
                 'status_label' => $readingStatus['label'],
@@ -322,6 +354,7 @@
                 'total_discounts' => (float) ($transaction->total_discounts ?? 0),
                 'total_net_sales' => (float) ($transaction->total_net_sales ?? 0),
                 'pump_entries' => $pumpEntries,
+                'correction_pumps' => $correctionPumps,
                 'adjustments' => $adjustments,
                 'active_adjustments_count' => collect($adjustments)->where('status', 'active')->count(),
             ]];
@@ -1571,22 +1604,28 @@
                             <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90" x-text="activeDetails.row?.submitted_at_label || 'N/A'"></p>
                         </div>
                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                            <p class="{{ $labelClass }}">Current Liters</p>
+                            <p class="{{ $labelClass }}" x-text="activeDetails.row?.is_correction ? 'Net Liters' : 'Current Liters'"></p>
                             <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90"><span x-text="formatHistoryNumber(activeDetails.row?.total_liters)"></span> L</p>
                         </div>
                         <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                            <p class="{{ $labelClass }}">Meter Sales</p>
+                            <p class="{{ $labelClass }}" x-text="activeDetails.row?.is_correction ? 'Net Meter Sales' : 'Meter Sales'"></p>
                             <p class="mt-2 text-title-sm font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_amount)"></span></p>
                         </div>
                         <div class="rounded-xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-500/25 dark:bg-brand-500/10">
                             <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
                             <p class="mt-2 text-title-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_net_sales)"></span></p>
-                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_discounts)"></span> discounts</p>
+                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">&#8369;<span x-text="formatHistoryNumber(activeDetails.row?.total_discounts)"></span><span x-text="activeDetails.row?.is_correction ? ' net discounts' : ' discounts'"></span></p>
                         </div>
                     </div>
 
                     <div class="mt-6">
-                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Pump Movement</h4>
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90" x-text="activeDetails.row?.is_correction ? 'Correction Breakdown' : 'Pump Movement'"></h4>
+                        <p x-show="activeDetails.row?.is_correction" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
+                            Original Shift Reading #<span x-text="activeDetails.row?.original_shift_reading_id || 'N/A'"></span> was reversed
+                            <span x-show="activeDetails.row?.replacement_shift_reading_id">and replaced by Shift Reading #<span x-text="activeDetails.row?.replacement_shift_reading_id"></span>.</span>
+                            <span x-show="!activeDetails.row?.replacement_shift_reading_id">and is awaiting a corrected replacement.</span>
+                            Original and replacement cells show liters with meter sales underneath.
+                        </p>
                         <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                             <div class="max-w-full overflow-x-auto">
                                 <table class="min-w-[1040px] w-full table-fixed">
@@ -1601,7 +1640,7 @@
                                         <col class="w-[13%]">
                                     </colgroup>
                                     <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
-                                        <tr>
+                                        <tr x-show="!activeDetails.row?.is_correction">
                                             <th class="{{ $thClass }}">Pump</th>
                                             <th class="{{ $thClass }}">Fuel</th>
                                             <th class="{{ $thNumberClass }}">Original</th>
@@ -1611,8 +1650,18 @@
                                             <th class="{{ $thNumberClass }}">Discounts</th>
                                             <th class="{{ $thNumberClass }}">Net Sales</th>
                                         </tr>
+                                        <tr x-show="activeDetails.row?.is_correction">
+                                            <th class="{{ $thClass }}">Pump</th>
+                                            <th class="{{ $thClass }}">Fuel</th>
+                                            <th class="{{ $thNumberClass }}">Original</th>
+                                            <th class="{{ $thNumberClass }}">Replacement</th>
+                                            <th class="{{ $thNumberClass }}">Net Liters</th>
+                                            <th class="{{ $thNumberClass }}">Net Meter Sales</th>
+                                            <th class="{{ $thNumberClass }}">Net Discounts</th>
+                                            <th class="{{ $thNumberClass }}">Net Sales</th>
+                                        </tr>
                                     </thead>
-                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                    <tbody x-show="!activeDetails.row?.is_correction" class="divide-y divide-gray-100 dark:divide-gray-800">
                                         <template x-for="pump in activePumps()" :key="pump.pump_id">
                                             <tr>
                                                 <td class="{{ $tdPrimaryClass }}">P<span x-text="pump.pump_id"></span></td>
@@ -1629,12 +1678,35 @@
                                             <td colspan="8" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No pump movement found for this submission.</td>
                                         </tr>
                                     </tbody>
+                                    <tbody x-show="activeDetails.row?.is_correction" class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        <template x-for="pump in activeCorrectionPumps()" :key="`correction-${pump.pump_id}`">
+                                            <tr>
+                                                <td class="{{ $tdPrimaryClass }}">P<span x-text="pump.pump_id"></span></td>
+                                                <td class="{{ $tdClass }}" x-text="pump.fuel_type"></td>
+                                                <td class="{{ $tdNumberClass }}">
+                                                    <span><span x-text="formatHistoryNumber(pump.original_liters)"></span> L</span>
+                                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">&#8369;<span x-text="formatHistoryNumber(pump.original_amount)"></span></span>
+                                                </td>
+                                                <td class="{{ $tdNumberClass }}">
+                                                    <span><span x-text="formatHistoryNumber(pump.replacement_liters)"></span> L</span>
+                                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">&#8369;<span x-text="formatHistoryNumber(pump.replacement_amount)"></span></span>
+                                                </td>
+                                                <td class="{{ $tdNumberClass }} font-semibold" :class="Number(pump.net_liters || 0) < 0 ? 'text-error-600 dark:text-error-400' : (Number(pump.net_liters || 0) > 0 ? 'text-success-600 dark:text-success-400' : 'text-gray-800 dark:text-white/90')"><span x-text="formatHistoryNumber(pump.net_liters)"></span> L</td>
+                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.net_amount)"></span></td>
+                                                <td class="{{ $tdNumberClass }}">&#8369;<span x-text="formatHistoryNumber(pump.net_discounts)"></span></td>
+                                                <td class="{{ $tdNumberClass }} font-semibold text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(pump.net_sales)"></span></td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="activeCorrectionPumps().length === 0">
+                                            <td colspan="8" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No correction entries were found for this submission.</td>
+                                        </tr>
+                                    </tbody>
                                 </table>
                             </div>
                         </div>
                     </div>
 
-                    <div class="mt-6">
+                    <div x-show="!activeDetails.row?.is_correction" class="mt-6">
                         <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Deduction History</h4>
                         <div class="mt-3 space-y-3">
                             <template x-for="adjustment in activeAdjustments()" :key="adjustment.id">
@@ -1666,6 +1738,12 @@
                             <div x-show="activeAdjustments().length === 0" class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-theme-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                                 No liters deductions have been added for this submission.
                             </div>
+                        </div>
+                    </div>
+                    <div x-show="activeDetails.row?.is_correction" class="mt-6">
+                        <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Correction Accounting</h4>
+                        <div class="mt-3 rounded-xl border border-dashed border-brand-300 bg-brand-50/50 p-4 text-theme-sm text-gray-600 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-gray-300">
+                            This row applies only the difference between the generated reading and its corrected replacement. Manual liters deductions do not apply to Net Correction entries.
                         </div>
                     </div>
                 </div>
@@ -2249,6 +2327,9 @@
                 },
                 activePumps() {
                     return this.activeDetails.row?.pump_entries || [];
+                },
+                activeCorrectionPumps() {
+                    return this.activeDetails.row?.correction_pumps || [];
                 },
                 activeAdjustments() {
                     return this.activeDetails.row?.adjustments || [];
