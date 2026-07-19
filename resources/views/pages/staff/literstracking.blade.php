@@ -84,6 +84,10 @@
         $readingStatusStyle = function ($status) {
             $status = strtolower(trim((string) $status));
 
+            if (str_contains($status, 'correction')) {
+                return ['label' => 'Net Correction', 'class' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'];
+            }
+
             if (str_contains($status, 'verified') || str_contains($status, 'approved')) {
                 return ['label' => 'Verified', 'class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500'];
             }
@@ -127,6 +131,8 @@
 
             return [$transactionId => [
                 'id' => $transactionId,
+                'is_correction' => (bool) ($transaction->is_liters_movement_correction ?? false),
+                'can_adjust_liters' => (bool) ($transaction->can_adjust_liters ?? true),
                 'staff_name' => (string) ($transaction->staff_name ?? 'Staff'),
                 'status' => (string) ($transaction->status ?? 'Pending'),
                 'status_label' => $readingStatus['label'],
@@ -372,7 +378,7 @@
                                                 <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 12s3.5-6.25 9.25-6.25S21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z" stroke="currentColor" stroke-width="1.7"/></svg>
                                                 View
                                             </button>
-                                            <button type="button" x-on:click="openDeduction({{ $transactionId }})" class="{{ $smallPrimaryButtonClass }}" title="Deduct pump liters" @disabled(! $canManageAdjustments)>
+                                            <button type="button" x-on:click="openDeduction({{ $transactionId }})" class="{{ $smallPrimaryButtonClass }}" title="Deduct pump liters" @disabled(! $canManageAdjustments || ! ($transaction->can_adjust_liters ?? true))>
                                                 <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                                             </button>
                                             @if ($activeAdjustmentCount > 0)
@@ -482,7 +488,7 @@
                     <div class="mt-6">
                         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Deduction History</h4>
-                            <button type="button" x-on:click="openDeduction(details.row?.id)" class="{{ $smallPrimaryButtonClass }}" :disabled="!canManageAdjustments || !details.row">
+                            <button type="button" x-on:click="openDeduction(details.row?.id)" class="{{ $smallPrimaryButtonClass }}" :disabled="!canManageAdjustments || !details.row || !details.row.can_adjust_liters">
                                 <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                                 Add Deduction
                             </button>
@@ -745,6 +751,11 @@
 
                     if (! row) {
                         this.showMessage('Deduction Unavailable', 'This shift-reading submission is not available on the current page.');
+                        return;
+                    }
+
+                    if (row.is_correction || ! row.can_adjust_liters) {
+                        this.showMessage('Deduction Unavailable', 'Net correction rows already combine the generated reversal and corrected replacement and cannot receive another liters deduction.');
                         return;
                     }
 

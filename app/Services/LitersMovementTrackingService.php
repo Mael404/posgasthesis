@@ -16,6 +16,12 @@ class LitersMovementTrackingService
     private const ACTIVE_STATUS = 'active';
     private const GENERATED_STATUS = 'generated';
     private const VOIDED_STATUS = 'voided';
+    private const CORRECTION_REVERSAL = 'reversal';
+    private const CORRECTION_REPLACEMENT = 'replacement';
+    private const CORRECTION_PENDING = 'pending';
+    private const CORRECTION_MATCHED = 'matched';
+    private const CORRECTION_APPLIED = 'applied';
+    private const CORRECTION_CANCELLED = 'cancelled';
     private const DEFAULT_FUEL_TYPES = ['Unleaded', 'Premium', 'Diesel'];
     private const DEFAULT_FUEL_LIMITS = [
         'regular' => 4000.0,
@@ -101,6 +107,289 @@ class LitersMovementTrackingService
             && $this->hasColumn('liters_movement_adjustments', 'amount');
     }
 
+    public function recordShiftReadingVoid(int $shiftReadingId, ?int $createdBy = null): array
+    {
+        if (! $this->isReady()) {
+            throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
+        }
+
+        return DB::transaction(function () use ($shiftReadingId, $createdBy) {
+            $preliminaryReading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->first();
+
+            if (! $preliminaryReading) {
+                throw new \RuntimeException('Shift-reading submission was not found.');
+            }
+
+            $periodId = (int) ($preliminaryReading->liters_tracking_period_id ?? 0);
+
+            if ($periodId <= 0) {
+                return ['action' => 'none', 'correction_ids' => []];
+            }
+
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', $periodId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                return ['action' => 'none', 'correction_ids' => []];
+            }
+
+            $periodStatus = strtolower(trim((string) ($period->status ?? '')));
+            $activePeriod = $periodStatus === self::GENERATED_STATUS
+                ? $this->lockedActivePeriodForCorrection($period)
+                : null;
+            $reading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reading || (int) ($reading->liters_tracking_period_id ?? 0) !== (int) $period->id) {
+                throw new \RuntimeException('The Shift Reading changed Liters Movement periods while it was being voided. Please retry.');
+            }
+
+            if ($periodStatus === self::ACTIVE_STATUS) {
+                DB::table('shift_readings')
+                    ->where('id', $reading->id)
+                    ->update(['liters_tracking_period_id' => null]);
+
+                DB::table('liters_tracking_periods')
+                    ->where('id', $period->id)
+                    ->update(['updated_at' => now()]);
+
+                return ['action' => 'detached', 'correction_ids' => []];
+            }
+
+            if ($periodStatus !== self::GENERATED_STATUS) {
+                return ['action' => 'none', 'correction_ids' => []];
+            }
+
+            $this->assertCorrectionReady();
+
+            $existingIds = DB::table('liters_movement_corrections')
+                ->where('original_shift_reading_id', (int) $reading->id)
+                ->where('entry_type', self::CORRECTION_REVERSAL)
+                ->where('status', '<>', self::CORRECTION_CANCELLED)
+                ->lockForUpdate()
+                ->orderBy('id')
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($existingIds !== []) {
+                return ['action' => 'existing_reversal', 'correction_ids' => $existingIds];
+            }
+
+            $breakdown = $this->generatedCorrectionBreakdown($period, (int) $reading->id);
+
+            if ($breakdown === []) {
+                throw new \RuntimeException(
+                    "Generated history for Shift Reading #{$reading->id} has no per-pump snapshot entries. The reading was not voided to avoid an inaccurate reversal."
+                );
+            }
+
+            $now = now();
+            $correctionIds = [];
+
+            foreach ($breakdown as $entry) {
+                $correctionIds[] = (int) DB::table('liters_movement_corrections')->insertGetId([
+                    'liters_tracking_period_id' => (int) $activePeriod->id,
+                    'generated_period_id' => (int) $period->id,
+                    'original_shift_reading_id' => (int) $reading->id,
+                    'replacement_shift_reading_id' => null,
+                    'entry_type' => self::CORRECTION_REVERSAL,
+                    'status' => self::CORRECTION_PENDING,
+                    'pump_number' => (int) $entry['pump_number'],
+                    'fuel_type' => $entry['fuel_type'],
+                    'liters' => -abs((float) $entry['liters']),
+                    'amount' => -abs((float) $entry['amount']),
+                    'total_sales' => -abs((float) $entry['total_sales']),
+                    'discounts' => -abs((float) $entry['discounts']),
+                    'net_sales' => -abs((float) $entry['net_sales']),
+                    'created_by' => $createdBy,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+
+            DB::table('liters_tracking_periods')
+                ->where('id', $activePeriod->id)
+                ->update(['updated_at' => $now]);
+
+            return ['action' => 'reversal_created', 'correction_ids' => $correctionIds];
+        });
+    }
+
+    public function registerShiftReadingReplacement(int $shiftReadingId, ?int $createdBy = null): array
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return ['action' => 'normal_submission', 'correction_ids' => []];
+        }
+
+        return DB::transaction(function () use ($shiftReadingId, $createdBy) {
+            $preliminaryReading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->first();
+
+            if (! $preliminaryReading || ! $this->isIncludedReadingStatus($preliminaryReading->status ?? null)) {
+                return ['action' => 'normal_submission', 'correction_ids' => []];
+            }
+
+            $activePeriodId = (int) ($preliminaryReading->liters_tracking_period_id ?? 0);
+
+            if ($activePeriodId <= 0) {
+                return ['action' => 'normal_submission', 'correction_ids' => []];
+            }
+
+            $activePeriod = DB::table('liters_tracking_periods')
+                ->where('id', $activePeriodId)
+                ->where('status', self::ACTIVE_STATUS)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $activePeriod) {
+                throw new \RuntimeException('The replacement Shift Reading is not attached to the active Liters Movement period.');
+            }
+
+            $reading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->lockForUpdate()
+                ->first();
+
+            if (
+                ! $reading
+                || ! $this->isIncludedReadingStatus($reading->status ?? null)
+                || (int) ($reading->liters_tracking_period_id ?? 0) !== $activePeriodId
+            ) {
+                throw new \RuntimeException('The replacement Shift Reading changed while its Liters Movement correction was being recorded. Please retry.');
+            }
+
+            $existingReplacementMatches = DB::table('liters_movement_corrections')
+                ->join('shift_readings as originals', 'liters_movement_corrections.original_shift_reading_id', '=', 'originals.id')
+                ->where('liters_movement_corrections.liters_tracking_period_id', $activePeriodId)
+                ->where('liters_movement_corrections.entry_type', self::CORRECTION_REPLACEMENT)
+                ->where('liters_movement_corrections.status', self::CORRECTION_APPLIED)
+                ->where('originals.user_id', (int) ($reading->user_id ?? 0))
+                ->when($this->hasColumn('shift_readings', 'period_from'), fn ($query) => $query->whereDate('originals.period_from', $reading->period_from))
+                ->when($this->hasColumn('shift_readings', 'period_to'), fn ($query) => $query->whereDate('originals.period_to', $reading->period_to ?: $reading->period_from))
+                ->lockForUpdate()
+                ->distinct()
+                ->pluck('liters_movement_corrections.replacement_shift_reading_id')
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->values();
+
+            if ($existingReplacementMatches->contains((int) $reading->id)) {
+                return ['action' => 'existing_replacement', 'correction_ids' => []];
+            }
+
+            if ($existingReplacementMatches->isNotEmpty()) {
+                throw new \RuntimeException('This generated Shift Reading already has a corrected replacement for the same staff member and settlement period.');
+            }
+
+            $pendingOriginalIds = DB::table('liters_movement_corrections')
+                ->where('liters_tracking_period_id', $activePeriodId)
+                ->where('entry_type', self::CORRECTION_REVERSAL)
+                ->where('status', self::CORRECTION_PENDING)
+                ->distinct()
+                ->pluck('original_shift_reading_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($pendingOriginalIds === []) {
+                return ['action' => 'normal_submission', 'correction_ids' => []];
+            }
+
+            $matches = DB::table('shift_readings')
+                ->whereIn('id', $pendingOriginalIds)
+                ->where('user_id', (int) ($reading->user_id ?? 0))
+                ->when($this->hasColumn('shift_readings', 'period_from'), fn ($query) => $query->whereDate('period_from', $reading->period_from))
+                ->when($this->hasColumn('shift_readings', 'period_to'), fn ($query) => $query->whereDate('period_to', $reading->period_to ?: $reading->period_from))
+                ->lockForUpdate()
+                ->orderBy('id')
+                ->get();
+
+            if ($matches->isEmpty()) {
+                return ['action' => 'normal_submission', 'correction_ids' => []];
+            }
+
+            if ($matches->count() > 1) {
+                throw new \RuntimeException('More than one pending generated-reading reversal matches this staff member and settlement period. The replacement was not attached automatically.');
+            }
+
+            $original = $matches->first();
+            $reversals = DB::table('liters_movement_corrections')
+                ->where('original_shift_reading_id', (int) $original->id)
+                ->where('entry_type', self::CORRECTION_REVERSAL)
+                ->where('status', self::CORRECTION_PENDING)
+                ->lockForUpdate()
+                ->orderBy('id')
+                ->get();
+
+            if ($reversals->isEmpty()) {
+                return ['action' => 'normal_submission', 'correction_ids' => []];
+            }
+
+            $existingReplacement = DB::table('liters_movement_corrections')
+                ->where('original_shift_reading_id', (int) $original->id)
+                ->where('entry_type', self::CORRECTION_REPLACEMENT)
+                ->where('status', '<>', self::CORRECTION_CANCELLED)
+                ->lockForUpdate()
+                ->exists();
+
+            if ($existingReplacement) {
+                throw new \RuntimeException("Shift Reading #{$original->id} already has a Liters Movement replacement.");
+            }
+
+            $breakdown = $this->replacementCorrectionBreakdown($reading);
+
+            if ($breakdown === []) {
+                throw new \RuntimeException('The corrected Shift Reading has no per-pump liters or amount to post as a replacement.');
+            }
+
+            $now = now();
+            $correctionIds = [];
+
+            foreach ($breakdown as $entry) {
+                $correctionIds[] = (int) DB::table('liters_movement_corrections')->insertGetId([
+                    'liters_tracking_period_id' => $activePeriodId,
+                    'generated_period_id' => (int) $reversals->first()->generated_period_id,
+                    'original_shift_reading_id' => (int) $original->id,
+                    'replacement_shift_reading_id' => (int) $reading->id,
+                    'entry_type' => self::CORRECTION_REPLACEMENT,
+                    'status' => self::CORRECTION_APPLIED,
+                    'pump_number' => (int) $entry['pump_number'],
+                    'fuel_type' => $entry['fuel_type'],
+                    'liters' => abs((float) $entry['liters']),
+                    'amount' => abs((float) $entry['amount']),
+                    'total_sales' => abs((float) $entry['total_sales']),
+                    'discounts' => abs((float) $entry['discounts']),
+                    'net_sales' => abs((float) $entry['net_sales']),
+                    'created_by' => $createdBy,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+
+            DB::table('liters_movement_corrections')
+                ->whereIn('id', $reversals->pluck('id')->all())
+                ->update([
+                    'status' => self::CORRECTION_MATCHED,
+                    'updated_at' => $now,
+                ]);
+
+            $this->touchPeriodAndReading($activePeriodId, (int) $reading->id, $now);
+
+            return [
+                'action' => 'replacement_created',
+                'original_shift_reading_id' => (int) $original->id,
+                'correction_ids' => $correctionIds,
+            ];
+        });
+    }
+
     public function deductPumpLiters(
         int $shiftReadingId,
         int $pumpNumber,
@@ -164,6 +453,10 @@ class LitersMovementTrackingService
 
             if (! $this->isIncludedReadingStatus($reading->status ?? null)) {
                 throw new \RuntimeException('Only pending or verified submissions can be adjusted.');
+            }
+
+            if ($this->isReplacementReading((int) $reading->id)) {
+                throw new \RuntimeException('Generated-reading replacements are calculated from their signed reversal and replacement entries and cannot receive manual liters deductions.');
             }
 
             $rawLiters = $this->rawPumpLiters($reading, $pumpNumber);
@@ -347,6 +640,8 @@ class LitersMovementTrackingService
 
             $this->attachUntrackedShiftReadingsToPeriod($period);
 
+            $this->assertNoPendingCorrections((int) $period->id);
+
             $readings = $this->summaryRowsForPeriod($period, null, true);
             $endedAt = now();
             $summary = $this->summaryFromRows($period, $readings, true);
@@ -373,6 +668,7 @@ class LitersMovementTrackingService
                 'staff_breakdown' => $summary['staff_breakdown'],
                 'reached_limits' => $summary['reached_limits'],
                 'shift_reading_ids' => $readingIds,
+                'liters_movement_correction_ids' => $this->correctionIdsForPeriod((int) $period->id),
                 'generated_by' => $generatedBy,
                 'generated_at' => $endedAt->toDateTimeString(),
             ];
@@ -467,9 +763,51 @@ class LitersMovementTrackingService
                     ->first();
             }
 
+            $cancelledCorrectionIds = [];
+            $restoredCorrectionIds = [];
+
+            if ($this->hasTable('liters_movement_corrections')) {
+                $cancelledCorrectionIds = DB::table('liters_movement_corrections')
+                    ->where('generated_period_id', (int) $period->id)
+                    ->where('status', '<>', self::CORRECTION_CANCELLED)
+                    ->lockForUpdate()
+                    ->orderBy('id')
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if ($cancelledCorrectionIds !== []) {
+                    DB::table('liters_movement_corrections')
+                        ->whereIn('id', $cancelledCorrectionIds)
+                        ->update([
+                            'status' => self::CORRECTION_CANCELLED,
+                            'updated_at' => now(),
+                        ]);
+                }
+
+                $restoredCorrectionIds = DB::table('liters_movement_corrections')
+                    ->where('liters_tracking_period_id', (int) $period->id)
+                    ->where('status', '<>', self::CORRECTION_CANCELLED)
+                    ->lockForUpdate()
+                    ->orderBy('id')
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if ($restoredCorrectionIds !== []) {
+                    DB::table('liters_movement_corrections')
+                        ->whereIn('id', $restoredCorrectionIds)
+                        ->update([
+                            'liters_tracking_period_id' => (int) $activePeriod->id,
+                            'updated_at' => now(),
+                        ]);
+                }
+            }
+
             $restoredIds = DB::table('shift_readings')
                 ->whereIn('id', $readingIds)
                 ->where('liters_tracking_period_id', $period->id)
+                ->lockForUpdate()
                 ->orderBy('id')
                 ->pluck('id')
                 ->map(fn ($id) => (int) $id)
@@ -497,6 +835,8 @@ class LitersMovementTrackingService
             $snapshot['voided_by'] = $voidedBy;
             $snapshot['reverted_to_period_id'] = (int) $activePeriod->id;
             $snapshot['reverted_shift_reading_ids'] = $restoredIds;
+            $snapshot['cancelled_correction_ids'] = $cancelledCorrectionIds;
+            $snapshot['reverted_correction_ids'] = $restoredCorrectionIds;
             $snapshot['reverted_liters'] = $restoredLiters;
 
             $updates = [
@@ -521,6 +861,8 @@ class LitersMovementTrackingService
                 'restored_shift_reading_ids' => $restoredIds,
                 'restored_count' => count($restoredIds),
                 'restored_liters' => $restoredLiters,
+                'cancelled_correction_ids' => $cancelledCorrectionIds,
+                'restored_correction_ids' => $restoredCorrectionIds,
             ];
         });
     }
@@ -702,7 +1044,7 @@ class LitersMovementTrackingService
             $query->lockForUpdate();
         }
 
-        return $query
+        $rows = $query
             ->select(
                 'shift_readings.*',
                 DB::raw("{$staffExpression} as staff_name")
@@ -710,6 +1052,19 @@ class LitersMovementTrackingService
             ->orderBy('shift_readings.created_at')
             ->orderBy('shift_readings.id')
             ->get();
+
+        $correctionRows = $this->correctionGroupsForPeriod($period, $staffId, $lock);
+        $replacementIds = $correctionRows
+            ->pluck('replacement_shift_reading_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique();
+
+        return $rows
+            ->reject(fn ($reading) => $replacementIds->contains((int) ($reading->id ?? 0)))
+            ->concat($correctionRows)
+            ->sortBy(fn ($reading) => sprintf('%s-%020d', (string) ($reading->created_at ?? ''), (int) ($reading->id ?? 0)))
+            ->values();
     }
 
     private function summaryFromRows(object $period, Collection $rows, bool $includeNetSales = false): array
@@ -724,7 +1079,13 @@ class LitersMovementTrackingService
         $totalAmount = 0.0;
         $pumpEntryCount = 0;
         $pumpNetSales = $this->defaultPumpNetSalesBreakdown();
-        $adjustmentsByReading = $this->adjustmentsForReadings($rows->pluck('id')->all(), true);
+        $adjustmentsByReading = $this->adjustmentsForReadings(
+            $rows
+                ->reject(fn ($reading) => (bool) ($reading->is_liters_movement_correction ?? false))
+                ->pluck('id')
+                ->all(),
+            true
+        );
 
         foreach ($rows as $reading) {
             $staffKey = (int) ($reading->user_id ?? 0);
@@ -826,6 +1187,11 @@ class LitersMovementTrackingService
                     'net_sales' => $netSales,
                     'sales_transaction_count' => $entry['sales_transaction_count'] ?? 0,
                     'adjustments' => $entry['adjustments'] ?? [],
+                    'is_liters_movement_correction' => (bool) ($reading->is_liters_movement_correction ?? false),
+                    'correction_entry_type' => $entry['correction_entry_type'] ?? null,
+                    'correction_status' => $entry['correction_status'] ?? null,
+                    'original_shift_reading_id' => $entry['original_shift_reading_id'] ?? null,
+                    'replacement_shift_reading_id' => $entry['replacement_shift_reading_id'] ?? null,
                 ];
 
                 $readingLiters = $this->liters($readingLiters + $liters);
@@ -890,24 +1256,13 @@ class LitersMovementTrackingService
 
     private function transactionsForPeriod(object $period, ?int $staffId, int $perPage, string $pageName, bool $includeNetSales = false): LengthAwarePaginator
     {
-        $query = $this->shiftReadingsQuery($period, $staffId);
-
-        if ($this->hasTable('users') && $this->hasColumn('users', 'id')) {
-            $query->leftJoin('users', 'shift_readings.user_id', '=', 'users.id');
-        }
-
-        $staffExpression = $this->hasTable('users') && $this->hasColumn('users', 'name')
-            ? "COALESCE(users.name, 'Staff')"
-            : "'Staff'";
-
-        $paginator = $query
-            ->select('shift_readings.*', DB::raw("{$staffExpression} as staff_name"))
-            ->orderByDesc('shift_readings.created_at')
-            ->orderByDesc('shift_readings.id')
-            ->paginate($perPage, ['*'], $pageName)
-            ->withQueryString();
-
-        $readingIds = $paginator->getCollection()
+        $rows = $this->summaryRowsForPeriod($period, $staffId)
+            ->sortByDesc(fn ($reading) => sprintf('%s-%020d', (string) ($reading->created_at ?? ''), (int) ($reading->id ?? 0)))
+            ->values();
+        $page = LengthAwarePaginator::resolveCurrentPage($pageName);
+        $pageRows = $rows->forPage($page, $perPage)->values();
+        $readingIds = $pageRows
+            ->reject(fn ($reading) => (bool) ($reading->is_liters_movement_correction ?? false))
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->filter(fn ($id) => $id > 0)
@@ -916,15 +1271,17 @@ class LitersMovementTrackingService
         $activeAdjustmentsByReading = $this->adjustmentsForReadings($readingIds, true);
         $allAdjustmentsByReading = $this->adjustmentsForReadings($readingIds, false);
 
-        $paginator->getCollection()->transform(function ($reading) use ($activeAdjustmentsByReading, $allAdjustmentsByReading, $includeNetSales) {
+        $pageRows->transform(function ($reading) use ($activeAdjustmentsByReading, $allAdjustmentsByReading, $includeNetSales) {
             $readingId = (int) ($reading->id ?? 0);
-            $activeAdjustments = $activeAdjustmentsByReading[$readingId] ?? [];
+            $isCorrection = (bool) ($reading->is_liters_movement_correction ?? false);
+            $activeAdjustments = $isCorrection ? [] : ($activeAdjustmentsByReading[$readingId] ?? []);
             $netSalesByPump = $includeNetSales
                 ? $this->netSalesByPumpForReading($reading, $activeAdjustments)
                 : $this->defaultPumpNetSalesBreakdown();
             $entries = $this->pumpEntriesForReading($reading, $activeAdjustments, $netSalesByPump);
             $reading->pump_entries = $entries;
-            $reading->liter_adjustments = $allAdjustmentsByReading[$readingId] ?? [];
+            $reading->liter_adjustments = $isCorrection ? [] : ($allAdjustmentsByReading[$readingId] ?? []);
+            $reading->can_adjust_liters = ! $isCorrection;
             $reading->total_liters = $this->liters(collect($entries)->sum('liters'));
             $reading->total_amount = $this->money(collect($entries)->sum('amount'));
             $reading->total_sales = $this->money(collect($netSalesByPump)->sum('total_sales'));
@@ -934,6 +1291,19 @@ class LitersMovementTrackingService
 
             return $reading;
         });
+
+        $paginator = new LengthAwarePaginator(
+            $pageRows,
+            $rows->count(),
+            $perPage,
+            $page,
+            [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => $pageName,
+            ]
+        );
+
+        $paginator->withQueryString();
 
         return $paginator;
     }
@@ -950,6 +1320,135 @@ class LitersMovementTrackingService
         }
 
         return $query;
+    }
+
+    private function correctionGroupsForPeriod(object $period, ?int $staffId, bool $lock = false): Collection
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return collect();
+        }
+
+        $query = DB::table('liters_movement_corrections')
+            ->where('liters_tracking_period_id', (int) $period->id)
+            ->whereIn('status', [
+                self::CORRECTION_PENDING,
+                self::CORRECTION_MATCHED,
+                self::CORRECTION_APPLIED,
+            ])
+            ->orderBy('original_shift_reading_id')
+            ->orderBy('entry_type')
+            ->orderBy('pump_number')
+            ->orderBy('id');
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        $corrections = $query->get();
+
+        if ($corrections->isEmpty()) {
+            return collect();
+        }
+
+        $readingIds = $corrections
+            ->flatMap(fn ($entry) => [
+                (int) ($entry->original_shift_reading_id ?? 0),
+                (int) ($entry->replacement_shift_reading_id ?? 0),
+            ])
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+        $readings = DB::table('shift_readings')
+            ->whereIn('id', $readingIds->all())
+            ->get()
+            ->keyBy(fn ($reading) => (int) $reading->id);
+        $userIds = $readings
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+        $userNames = $this->hasTable('users') && $this->hasColumn('users', 'name')
+            ? DB::table('users')->whereIn('id', $userIds->all())->pluck('name', 'id')
+            : collect();
+
+        return $corrections
+            ->groupBy(fn ($entry) => (int) $entry->original_shift_reading_id)
+            ->map(function (Collection $entries) use ($readings, $userNames, $staffId) {
+                $first = $entries->first();
+                $originalId = (int) ($first->original_shift_reading_id ?? 0);
+                $replacementId = (int) ($entries->pluck('replacement_shift_reading_id')->filter()->first() ?? 0);
+                $original = $readings->get($originalId);
+                $replacement = $replacementId > 0 ? $readings->get($replacementId) : null;
+                $reading = $replacement ?: $original;
+                $userId = (int) ($reading->user_id ?? 0);
+
+                if ($staffId !== null && $userId !== $staffId) {
+                    return null;
+                }
+
+                $pending = $entries->contains(fn ($entry) => ($entry->status ?? null) === self::CORRECTION_PENDING);
+                $pumpEntries = $entries
+                    ->map(fn ($entry) => $this->formatCorrectionPumpEntry($entry))
+                    ->values()
+                    ->all();
+                $createdAt = $entries->max('created_at') ?: ($reading->created_at ?? null);
+
+                return (object) [
+                    'id' => $replacementId > 0 ? $replacementId : $originalId,
+                    'user_id' => $userId,
+                    'staff_name' => trim((string) ($userNames[$userId] ?? 'Staff')) ?: 'Staff',
+                    'period_from' => $reading->period_from ?? null,
+                    'period_to' => $reading->period_to ?? null,
+                    'created_at' => $createdAt,
+                    'updated_at' => $createdAt,
+                    'status' => $pending ? 'Correction Pending' : 'Correction Applied',
+                    'is_liters_movement_correction' => true,
+                    'can_adjust_liters' => false,
+                    'original_shift_reading_id' => $originalId,
+                    'replacement_shift_reading_id' => $replacementId ?: null,
+                    'correction_ids' => $entries->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
+                    'correction_pump_entries' => $pumpEntries,
+                ];
+            })
+            ->filter()
+            ->values();
+    }
+
+    private function formatCorrectionPumpEntry(object $entry): array
+    {
+        $liters = $this->liters($entry->liters ?? 0);
+        $amount = $this->money($entry->amount ?? 0);
+        $fuelType = $this->normalizeFuelType(
+            $entry->fuel_type ?? (self::PUMP_FUEL_TYPES[(int) ($entry->pump_number ?? 0)] ?? 'N/A')
+        );
+        $price = abs($liters) > 0
+            ? abs($amount / $liters)
+            : $this->priceForFuel($fuelType);
+
+        return [
+            'pump_id' => (int) ($entry->pump_number ?? 0),
+            'fuel_type' => $fuelType,
+            'liters' => $liters,
+            'raw_liters' => $liters,
+            'deducted_liters' => 0.0,
+            'price_per_liter' => $this->money($price),
+            'amount' => $amount,
+            'raw_amount' => $amount,
+            'deducted_amount' => 0.0,
+            'total_sales' => $this->money($entry->total_sales ?? $amount),
+            'discounts' => $this->money($entry->discounts ?? 0),
+            'net_sales' => $this->money($entry->net_sales ?? $amount),
+            'sales_transaction_count' => 0,
+            'adjustments' => [],
+            'correction_id' => (int) ($entry->id ?? 0),
+            'correction_entry_type' => (string) ($entry->entry_type ?? ''),
+            'correction_status' => (string) ($entry->status ?? ''),
+            'original_shift_reading_id' => (int) ($entry->original_shift_reading_id ?? 0),
+            'replacement_shift_reading_id' => ! empty($entry->replacement_shift_reading_id)
+                ? (int) $entry->replacement_shift_reading_id
+                : null,
+        ];
     }
 
     private function scopeToIncludedShiftReadings($query): void
@@ -975,6 +1474,10 @@ class LitersMovementTrackingService
 
     private function pumpEntriesForReading(object $reading, array $activeAdjustments = [], array $netSalesByPump = []): array
     {
+        if ((bool) ($reading->is_liters_movement_correction ?? false)) {
+            return array_values((array) ($reading->correction_pump_entries ?? []));
+        }
+
         $entries = [];
 
         foreach (self::PUMP_FUEL_TYPES as $pumpId => $fuelType) {
@@ -1021,6 +1524,29 @@ class LitersMovementTrackingService
 
     private function netSalesByPumpForReading(object $reading, array $activeAdjustments = []): array
     {
+        if ((bool) ($reading->is_liters_movement_correction ?? false)) {
+            $rows = $this->defaultPumpNetSalesBreakdown();
+
+            foreach ((array) ($reading->correction_pump_entries ?? []) as $entry) {
+                $pumpId = (int) ($entry['pump_id'] ?? 0);
+
+                if ($pumpId <= 0) {
+                    continue;
+                }
+
+                $row = $rows[$pumpId] ?? $this->emptyPumpNetSalesRow(
+                    $pumpId,
+                    (string) ($entry['fuel_type'] ?? 'N/A')
+                );
+                $row['total_sales'] = $this->money($row['total_sales'] + (float) ($entry['total_sales'] ?? 0));
+                $row['discounts'] = $this->money($row['discounts'] + (float) ($entry['discounts'] ?? 0));
+                $row['net_sales'] = $this->money($row['net_sales'] + (float) ($entry['net_sales'] ?? 0));
+                $rows[$pumpId] = $row;
+            }
+
+            return $rows;
+        }
+
         $readingId = (int) ($reading->id ?? 0);
         $cacheKey = $readingId . ':' . md5(json_encode($activeAdjustments));
 
@@ -1940,6 +2466,163 @@ class LitersMovementTrackingService
             ->orderBy('shift_readings.created_at')
             ->orderBy('shift_readings.id')
             ->get();
+    }
+
+    private function lockedActivePeriodForCorrection(object $sourcePeriod): object
+    {
+        $activePeriod = DB::table('liters_tracking_periods')
+            ->where('status', self::ACTIVE_STATUS)
+            ->lockForUpdate()
+            ->orderByDesc('started_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($activePeriod) {
+            return $activePeriod;
+        }
+
+        $activePeriodId = $this->createPeriod(
+            (float) ($sourcePeriod->liters_limit ?? self::DEFAULT_LIMIT),
+            now(),
+            $this->storedTankLimitsForPeriod($sourcePeriod, $this->preparedTanks())
+        );
+
+        $activePeriod = DB::table('liters_tracking_periods')
+            ->where('id', $activePeriodId)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $activePeriod) {
+            throw new \RuntimeException('Unable to create an active Liters Movement period for the generated-reading reversal.');
+        }
+
+        return $activePeriod;
+    }
+
+    private function generatedCorrectionBreakdown(object $period, int $readingId): array
+    {
+        $snapshot = $this->decodeSnapshot($period->totals_snapshot ?? null);
+
+        return collect($snapshot['tank_breakdown'] ?? [])
+            ->flatMap(function ($tank) use ($readingId) {
+                $fuelType = $this->normalizeFuelType($tank['fuel_type'] ?? 'N/A');
+
+                return collect($tank['entries'] ?? [])
+                    ->filter(fn ($entry) => (int) ($entry['id'] ?? 0) === $readingId)
+                    ->map(function ($entry) use ($fuelType) {
+                        $totalSales = $this->money($entry['total_sales'] ?? $entry['amount'] ?? 0);
+                        $discounts = $this->money($entry['discounts'] ?? 0);
+
+                        return [
+                            'pump_number' => (int) ($entry['pump_id'] ?? 0),
+                            'fuel_type' => $fuelType,
+                            'liters' => $this->liters($entry['liters'] ?? 0),
+                            'amount' => $this->money($entry['amount'] ?? $totalSales),
+                            'total_sales' => $totalSales,
+                            'discounts' => $discounts,
+                            'net_sales' => $this->money($entry['net_sales'] ?? ($totalSales - $discounts)),
+                        ];
+                    });
+            })
+            ->filter(fn ($entry) => $entry['pump_number'] > 0 && ($entry['liters'] > 0 || $entry['amount'] > 0))
+            ->groupBy('pump_number')
+            ->map(function (Collection $entries) {
+                $first = $entries->first();
+
+                return [
+                    'pump_number' => (int) $first['pump_number'],
+                    'fuel_type' => (string) $first['fuel_type'],
+                    'liters' => $this->liters($entries->sum('liters')),
+                    'amount' => $this->money($entries->sum('amount')),
+                    'total_sales' => $this->money($entries->sum('total_sales')),
+                    'discounts' => $this->money($entries->sum('discounts')),
+                    'net_sales' => $this->money($entries->sum('net_sales')),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function replacementCorrectionBreakdown(object $reading): array
+    {
+        $salesByPump = $this->netSalesByPumpForReading($reading);
+
+        return collect(self::PUMP_FUEL_TYPES)
+            ->map(function (string $fuelType, int $pumpId) use ($reading, $salesByPump) {
+                $liters = $this->rawPumpLiters($reading, $pumpId);
+                $amount = $this->rawPumpAmount($reading, $pumpId);
+                $sales = $salesByPump[$pumpId] ?? $this->emptyPumpNetSalesRow($pumpId, $fuelType);
+
+                return [
+                    'pump_number' => $pumpId,
+                    'fuel_type' => $fuelType,
+                    'liters' => $liters,
+                    'amount' => $amount,
+                    'total_sales' => $this->money($sales['total_sales'] ?? $amount),
+                    'discounts' => $this->money($sales['discounts'] ?? 0),
+                    'net_sales' => $this->money($sales['net_sales'] ?? $amount),
+                ];
+            })
+            ->filter(fn ($entry) => $entry['liters'] > 0 || $entry['amount'] > 0)
+            ->values()
+            ->all();
+    }
+
+    private function isReplacementReading(int $readingId): bool
+    {
+        return $readingId > 0
+            && $this->hasTable('liters_movement_corrections')
+            && DB::table('liters_movement_corrections')
+                ->where('replacement_shift_reading_id', $readingId)
+                ->where('entry_type', self::CORRECTION_REPLACEMENT)
+                ->where('status', '<>', self::CORRECTION_CANCELLED)
+                ->exists();
+    }
+
+    private function assertNoPendingCorrections(int $periodId): void
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return;
+        }
+
+        $pendingOriginalIds = DB::table('liters_movement_corrections')
+            ->where('liters_tracking_period_id', $periodId)
+            ->where('entry_type', self::CORRECTION_REVERSAL)
+            ->where('status', self::CORRECTION_PENDING)
+            ->lockForUpdate()
+            ->distinct()
+            ->pluck('original_shift_reading_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if ($pendingOriginalIds !== []) {
+            throw new \RuntimeException(
+                'This Liters Movement period has ' . count($pendingOriginalIds)
+                . ' pending generated-reading reversal(s). Submit the corrected Shift Reading before generating the period.'
+            );
+        }
+    }
+
+    private function correctionIdsForPeriod(int $periodId): array
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return [];
+        }
+
+        return DB::table('liters_movement_corrections')
+            ->where('liters_tracking_period_id', $periodId)
+            ->where('status', '<>', self::CORRECTION_CANCELLED)
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    private function assertCorrectionReady(): void
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            throw new \RuntimeException('Liters Movement generated-reading corrections are not migrated yet. Run php artisan migrate.');
+        }
     }
 
     private function assertAdjustmentReady(): void

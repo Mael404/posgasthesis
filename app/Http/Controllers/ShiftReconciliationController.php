@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\HandlesVoidedSettlementDisplay;
+use App\Services\LitersMovementTrackingService;
 use App\Services\ShiftReadingInventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +26,8 @@ class ShiftReconciliationController extends Controller
     private array $columnPresence = [];
 
     public function __construct(
-        private readonly ShiftReadingInventoryService $shiftReadingInventory
+        private readonly ShiftReadingInventoryService $shiftReadingInventory,
+        private readonly LitersMovementTrackingService $litersMovementTracking
     ) {
     }
 
@@ -214,6 +216,10 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only pending settlements can be rejected.');
                 }
 
+                $this->litersMovementTracking->recordShiftReadingVoid(
+                    (int) $reading->id,
+                    (int) auth()->id()
+                );
                 $this->shiftReadingInventory->restore($reading);
                 $this->unlockSalesForReading($reading);
 
@@ -266,6 +272,10 @@ class ShiftReconciliationController extends Controller
                 $this->calculateReadingData($reading, true);
                 $snapshot = $this->settlementSnapshotPayload($reading);
 
+                $this->litersMovementTracking->recordShiftReadingVoid(
+                    (int) $reading->id,
+                    (int) auth()->id()
+                );
                 $this->shiftReadingInventory->restore($reading);
                 $reversedCollections = $this->reverseShiftApprovalCollections($reading);
                 $this->unlockSalesForReading($reading);

@@ -103,8 +103,9 @@ class StaffReadingController extends Controller
 
         try {
             $readingId = null;
+            $litersMovementAction = 'normal_submission';
 
-            DB::transaction(function () use ($request, $validated, &$readingId) {
+            DB::transaction(function () use ($request, $validated, &$readingId, &$litersMovementAction) {
                 $periodStart = Carbon::parse($validated['period_from'])->startOfDay();
                 $periodEnd = Carbon::parse($validated['period_to'])->endOfDay();
 
@@ -156,6 +157,11 @@ class StaffReadingController extends Controller
 
                 if ($reading) {
                     $this->lockSalesForReading($reading);
+                    $correction = $this->litersMovementTracking->registerShiftReadingReplacement(
+                        (int) $reading->id,
+                        (int) auth()->id()
+                    );
+                    $litersMovementAction = (string) ($correction['action'] ?? 'normal_submission');
                     $this->shiftReadingInventory->apply($reading);
                 }
 
@@ -172,7 +178,9 @@ class StaffReadingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Settlement submitted. Its meter-recorded fuel was added to the shared liters movement, deducted from the connected tanks, and is pending verification.',
+                'message' => $litersMovementAction === 'replacement_created'
+                    ? 'Corrected settlement submitted. Liters Movement recorded only its net change against the generated reading; tank inventory was deducted once for this submission.'
+                    : 'Settlement submitted. Its meter-recorded fuel was added to the shared liters movement, deducted from the connected tanks, and is pending verification.',
                 'id' => $readingId,
             ]);
         } catch (ValidationException $e) {
@@ -290,6 +298,10 @@ class StaffReadingController extends Controller
                 $this->calculateReadingData($settlement, true);
                 $snapshot = $this->settlementSnapshotPayload($settlement);
 
+                $this->litersMovementTracking->recordShiftReadingVoid(
+                    (int) $settlement->id,
+                    (int) auth()->id()
+                );
                 $this->shiftReadingInventory->restore($settlement);
                 $this->unlockSalesForReading($settlement);
                 $this->updateShiftReading((int) $settlement->id, array_merge(

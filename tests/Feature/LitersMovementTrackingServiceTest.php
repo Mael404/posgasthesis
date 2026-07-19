@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 beforeEach(function () {
+    Schema::dropIfExists('liters_movement_corrections');
     Schema::dropIfExists('liters_movement_adjustments');
     Schema::dropIfExists('sales');
     Schema::dropIfExists('shift_readings');
@@ -88,6 +89,28 @@ beforeEach(function () {
         $table->unsignedBigInteger('void_authorized_by')->nullable();
         $table->string('void_reason')->nullable();
         $table->timestamps();
+    });
+
+    Schema::create('liters_movement_corrections', function (Blueprint $table) {
+        $table->id();
+        $table->unsignedBigInteger('liters_tracking_period_id');
+        $table->unsignedBigInteger('generated_period_id');
+        $table->unsignedBigInteger('original_shift_reading_id');
+        $table->unsignedBigInteger('replacement_shift_reading_id')->nullable();
+        $table->string('entry_type', 16);
+        $table->string('status', 16)->default('pending');
+        $table->unsignedTinyInteger('pump_number');
+        $table->string('fuel_type', 32)->nullable();
+        $table->decimal('liters', 14, 2);
+        $table->decimal('amount', 14, 2);
+        $table->decimal('total_sales', 14, 2);
+        $table->decimal('discounts', 14, 2)->default(0);
+        $table->decimal('net_sales', 14, 2);
+        $table->unsignedBigInteger('created_by')->nullable();
+        $table->timestamps();
+
+        $table->unique(['original_shift_reading_id', 'entry_type', 'pump_number']);
+        $table->unique(['replacement_shift_reading_id', 'entry_type', 'pump_number']);
     });
 
     DB::table('tanks')->insert([
@@ -287,4 +310,128 @@ test('voiding a generated record restores its included shift readings to the act
         ->and(DB::table('shift_readings')->whereIn('id', [10, 11])->pluck('liters_tracking_period_id', 'id')->all())->toBe([10 => $activePeriodId, 11 => $activePeriodId])
         ->and($newState['summary']['total_liters'])->toBe(500.0)
         ->and($newState['summary']['submission_count'])->toBe(2);
+});
+
+test('void before generation detaches the reading without creating a correction', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $service->state();
+
+    $result = $service->recordShiftReadingVoid(10, 1);
+    DB::table('shift_readings')->where('id', 10)->update(['status' => 'Voided']);
+
+    expect($result['action'])->toBe('detached')
+        ->and(DB::table('shift_readings')->where('id', 10)->value('liters_tracking_period_id'))->toBeNull()
+        ->and(DB::table('liters_movement_corrections')->count())->toBe(0)
+        ->and($service->state()['summary']['total_liters'])->toBe(50.0);
+});
+
+test('void after generation and resubmission posts only the signed net correction', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $generatedPeriodId = (int) $generated['period']->id;
+    $activePeriodId = (int) $generated['new_period']->id;
+    $savedSnapshot = (string) DB::table('liters_tracking_periods')
+        ->where('id', $generatedPeriodId)
+        ->value('totals_snapshot');
+
+    $voidResult = $service->recordShiftReadingVoid(10, 88);
+    DB::table('shift_readings')->where('id', 10)->update(['status' => 'Voided']);
+
+    expect($voidResult['action'])->toBe('reversal_created')
+        ->and(DB::table('liters_movement_corrections')->where('entry_type', 'reversal')->sum('liters'))->toEqual(-450)
+        ->and((string) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('totals_snapshot'))->toBe($savedSnapshot);
+
+    expect(fn () => $service->generateAndReset(77))
+        ->toThrow(RuntimeException::class, 'pending generated-reading reversal');
+
+    $replacement = (array) DB::table('shift_readings')->where('id', 10)->first();
+    $replacement['id'] = 14;
+    $replacement['liters_tracking_period_id'] = $activePeriodId;
+    $replacement['status'] = 'Pending';
+    $replacement['pump5_liters_end'] = 1190;
+    $replacement['pump5_sales_end'] = 61400;
+    $replacement['pump6_liters_end'] = 1250;
+    $replacement['pump6_sales_end'] = 65000;
+    $replacement['created_at'] = now();
+    $replacement['updated_at'] = now();
+    DB::table('shift_readings')->insert($replacement);
+
+    $replacementResult = $service->registerShiftReadingReplacement(14, 1);
+    $state = $service->state(null, 20, 'page', true);
+    $transaction = $state['transactions']->getCollection()->first();
+
+    expect($replacementResult['action'])->toBe('replacement_created')
+        ->and(DB::table('liters_movement_corrections')->where('entry_type', 'reversal')->where('status', 'matched')->count())->toBe(2)
+        ->and(DB::table('liters_movement_corrections')->where('entry_type', 'replacement')->where('status', 'applied')->sum('liters'))->toEqual(440)
+        ->and($state['summary']['total_liters'])->toBe(-10.0)
+        ->and($state['summary']['total_amount'])->toBe(-600.0)
+        ->and($state['summary']['submission_count'])->toBe(1)
+        ->and($state['transactions']->total())->toBe(1)
+        ->and($transaction->status)->toBe('Correction Applied')
+        ->and($transaction->is_liters_movement_correction)->toBeTrue()
+        ->and($transaction->can_adjust_liters)->toBeFalse()
+        ->and(collect($transaction->pump_entries)->sum('liters'))->toBe(-10.0)
+        ->and(collect($transaction->pump_entries)->where('correction_entry_type', 'reversal'))->toHaveCount(2)
+        ->and(collect($transaction->pump_entries)->where('correction_entry_type', 'replacement'))->toHaveCount(2)
+        ->and((string) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('totals_snapshot'))->toBe($savedSnapshot);
+});
+
+test('generated reading correction methods are idempotent and reject a second replacement', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $activePeriodId = (int) $generated['new_period']->id;
+
+    $service->recordShiftReadingVoid(10, 88);
+    $secondVoid = $service->recordShiftReadingVoid(10, 88);
+    DB::table('shift_readings')->where('id', 10)->update(['status' => 'Voided']);
+
+    $replacement = (array) DB::table('shift_readings')->where('id', 10)->first();
+    $replacement['id'] = 14;
+    $replacement['liters_tracking_period_id'] = $activePeriodId;
+    $replacement['status'] = 'Pending';
+    $replacement['created_at'] = now();
+    $replacement['updated_at'] = now();
+    DB::table('shift_readings')->insert($replacement);
+
+    $service->registerShiftReadingReplacement(14, 1);
+    $sameReplacement = $service->registerShiftReadingReplacement(14, 1);
+
+    $duplicate = $replacement;
+    $duplicate['id'] = 15;
+    $duplicate['created_at'] = now()->addSecond();
+    $duplicate['updated_at'] = now()->addSecond();
+    DB::table('shift_readings')->insert($duplicate);
+
+    expect($secondVoid['action'])->toBe('existing_reversal')
+        ->and($sameReplacement['action'])->toBe('existing_replacement')
+        ->and(DB::table('liters_movement_corrections')->count())->toBe(4);
+
+    expect(fn () => $service->registerShiftReadingReplacement(15, 1))
+        ->toThrow(RuntimeException::class, 'already has a corrected replacement');
+});
+
+test('only voidGeneratedPeriod cancels corrections tied to the restored generated batch', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $activePeriodId = (int) $generated['new_period']->id;
+
+    $service->recordShiftReadingVoid(10, 88);
+    DB::table('shift_readings')->where('id', 10)->update(['status' => 'Voided']);
+
+    $replacement = (array) DB::table('shift_readings')->where('id', 10)->first();
+    $replacement['id'] = 14;
+    $replacement['liters_tracking_period_id'] = $activePeriodId;
+    $replacement['status'] = 'Pending';
+    $replacement['created_at'] = now();
+    $replacement['updated_at'] = now();
+    DB::table('shift_readings')->insert($replacement);
+    $service->registerShiftReadingReplacement(14, 1);
+
+    $result = $service->voidGeneratedPeriod((int) $generated['period']->id, 77);
+    $state = $service->state();
+
+    expect($result['cancelled_correction_ids'])->toHaveCount(4)
+        ->and(DB::table('liters_movement_corrections')->where('status', 'cancelled')->count())->toBe(4)
+        ->and($state['summary']['total_liters'])->toBe(500.0)
+        ->and($state['summary']['submission_count'])->toBe(2);
 });
