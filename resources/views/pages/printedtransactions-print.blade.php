@@ -175,6 +175,7 @@
             display: flex;
             flex-direction: column;
             min-height: 277mm;
+            position: relative;
         }
         .main-content { flex: 1; }
         .report-header {
@@ -218,6 +219,18 @@
             font-weight: 900;
             margin-top: 5px;
             text-align: right;
+        }
+        .status-stamp {
+            color: rgba(28, 200, 138, 0.15);
+            font-size: 60px;
+            font-weight: 900;
+            left: 50%;
+            pointer-events: none;
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%) rotate(-30deg);
+            white-space: nowrap;
+            z-index: 0;
         }
         .meta-container {
             align-items: flex-start;
@@ -398,6 +411,10 @@
 
     <main class="sheet">
         <div class="main-content">
+            @if ($isPaidInFullReceipt)
+                <div class="status-stamp">PAID IN FULL</div>
+            @endif
+
             <header class="report-header">
                 <table class="header-table">
                     <tr>
