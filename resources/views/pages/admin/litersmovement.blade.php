@@ -173,6 +173,25 @@
             $recordTotalSales = (float) ($snapshot['total_sales'] ?? collect($recordPumpNetSales)->sum('total_sales'));
             $recordTotalDiscounts = (float) ($snapshot['total_discounts'] ?? collect($recordPumpNetSales)->sum('discounts'));
             $recordTotalNetSales = (float) ($snapshot['total_net_sales'] ?? collect($recordPumpNetSales)->sum('net_sales'));
+            $removedSubmissions = collect($snapshot['removed_shift_readings'] ?? [])->map(function ($reading) use ($dateLabel) {
+                $periodFrom = $reading['period_from'] ?? null;
+                $periodTo = $reading['period_to'] ?? $periodFrom;
+
+                return [
+                    'id' => (int) ($reading['id'] ?? 0),
+                    'staff_name' => (string) ($reading['staff_name'] ?? 'Staff'),
+                    'current_status' => (string) ($reading['current_status'] ?? $reading['removal_status'] ?? 'Removed'),
+                    'period_label' => $periodFrom || $periodTo
+                        ? $dateLabel($periodFrom, 'M d, Y') . ' to ' . $dateLabel($periodTo, 'M d, Y')
+                        : 'N/A',
+                    'included_at_label' => $dateLabel($reading['included_at'] ?? null),
+                    'included_by' => (string) ($reading['included_by'] ?? ''),
+                    'removed_at_label' => $dateLabel($reading['removed_at'] ?? null),
+                    'removed_by' => (string) ($reading['removed_by'] ?? ''),
+                    'removal_status' => (string) ($reading['removal_status'] ?? 'Removed'),
+                    'removal_reason' => (string) ($reading['removal_reason'] ?? ''),
+                ];
+            })->values()->all();
 
             $tanks = collect($snapshot['tank_breakdown'] ?? [])->map(function ($tank) use ($dateLabel) {
                 $tankName = (string) ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank');
@@ -261,6 +280,7 @@
                 'pump_entry_count' => (int) ($snapshot['pump_entry_count'] ?? 0),
                 'pump_net_sales' => $recordPumpNetSales,
                 'tanks' => $tanks,
+                'removed_submissions' => $removedSubmissions,
             ]];
         })->all();
 
@@ -2121,6 +2141,34 @@
                             </div>
                         </div>
                     </div>
+
+                    <div x-show="historyRemovedSubmissions().length > 0" class="mt-6">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Removal Audit Trail</h4>
+                            <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-700 dark:bg-white/[0.06] dark:text-gray-300"><span x-text="historyRemovedSubmissions().length"></span> removed</span>
+                        </div>
+                        <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">These submissions were once associated with this generated record but are excluded from every displayed total.</p>
+                        <div class="mt-3 space-y-3">
+                            <template x-for="submission in historyRemovedSubmissions()" :key="`removed-${submission.id}`">
+                                <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="font-semibold text-gray-800 dark:text-white/90">Shift Reading #<span x-text="submission.id"></span></p>
+                                                <span class="inline-flex rounded-full bg-error-50 px-2.5 py-1 text-theme-xs font-medium text-error-700 dark:bg-error-500/15 dark:text-error-400" x-text="submission.removal_status || submission.current_status"></span>
+                                            </div>
+                                            <p class="mt-1 text-theme-sm text-gray-600 dark:text-gray-400"><span x-text="submission.staff_name"></span> &middot; <span x-text="submission.period_label"></span></p>
+                                            <p x-show="submission.removal_reason" class="mt-2 text-theme-sm text-gray-700 dark:text-gray-300" x-text="submission.removal_reason"></p>
+                                        </div>
+                                        <div class="shrink-0 text-theme-xs text-gray-500 dark:text-gray-400 sm:text-right">
+                                            <p>Included <span x-text="submission.included_at_label"></span><span x-show="submission.included_by"> by <span x-text="submission.included_by"></span></span></p>
+                                            <p class="mt-1">Removed <span x-text="submission.removed_at_label"></span><span x-show="submission.removed_by"> by <span x-text="submission.removed_by"></span></span></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
@@ -2470,6 +2518,9 @@
                 },
                 historyPumpSales() {
                     return this.historyDetails.record?.pump_net_sales || [];
+                },
+                historyRemovedSubmissions() {
+                    return this.historyDetails.record?.removed_submissions || [];
                 },
                 historySubmissions() {
                     const grouped = new Map();

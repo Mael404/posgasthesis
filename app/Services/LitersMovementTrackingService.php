@@ -16,12 +16,10 @@ class LitersMovementTrackingService
     private const ACTIVE_STATUS = 'active';
     private const GENERATED_STATUS = 'generated';
     private const VOIDED_STATUS = 'voided';
-    private const CORRECTION_REVERSAL = 'reversal';
     private const CORRECTION_REPLACEMENT = 'replacement';
-    private const CORRECTION_PENDING = 'pending';
-    private const CORRECTION_MATCHED = 'matched';
-    private const CORRECTION_APPLIED = 'applied';
     private const CORRECTION_CANCELLED = 'cancelled';
+    private const MEMBERSHIP_INCLUDED = 'included';
+    private const MEMBERSHIP_REMOVED = 'removed';
     private const DEFAULT_FUEL_TYPES = ['Unleaded', 'Premium', 'Diesel'];
     private const DEFAULT_FUEL_LIMITS = [
         'regular' => 4000.0,
@@ -107,13 +105,20 @@ class LitersMovementTrackingService
             && $this->hasColumn('liters_movement_adjustments', 'amount');
     }
 
-    public function recordShiftReadingVoid(int $shiftReadingId, ?int $createdBy = null): array
+    public function recordShiftReadingVoid(
+        int $shiftReadingId,
+        ?int $createdBy = null,
+        string $removalStatus = 'Voided',
+        ?string $removalReason = null
+    ): array
     {
         if (! $this->isReady()) {
             throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
         }
 
-        return DB::transaction(function () use ($shiftReadingId, $createdBy) {
+        $this->assertMembershipReady();
+
+        return DB::transaction(function () use ($shiftReadingId, $createdBy, $removalStatus, $removalReason) {
             $preliminaryReading = DB::table('shift_readings')
                 ->where('id', $shiftReadingId)
                 ->first();
@@ -125,7 +130,15 @@ class LitersMovementTrackingService
             $periodId = (int) ($preliminaryReading->liters_tracking_period_id ?? 0);
 
             if ($periodId <= 0) {
-                return ['action' => 'none', 'correction_ids' => []];
+                $periodId = (int) (DB::table('liters_movement_period_readings')
+                    ->where('shift_reading_id', $shiftReadingId)
+                    ->orderByRaw("CASE WHEN inclusion_status = 'included' THEN 0 ELSE 1 END")
+                    ->orderByDesc('id')
+                    ->value('liters_tracking_period_id') ?? 0);
+            }
+
+            if ($periodId <= 0) {
+                return ['action' => 'none', 'recalculated_period_id' => null];
             }
 
             $period = DB::table('liters_tracking_periods')
@@ -134,123 +147,257 @@ class LitersMovementTrackingService
                 ->first();
 
             if (! $period) {
-                return ['action' => 'none', 'correction_ids' => []];
+                return ['action' => 'none', 'recalculated_period_id' => null];
             }
 
             $periodStatus = strtolower(trim((string) ($period->status ?? '')));
-            $activePeriod = $periodStatus === self::GENERATED_STATUS
-                ? $this->lockedActivePeriodForCorrection($period)
-                : null;
             $reading = DB::table('shift_readings')
                 ->where('id', $shiftReadingId)
                 ->lockForUpdate()
                 ->first();
 
-            if (! $reading || (int) ($reading->liters_tracking_period_id ?? 0) !== (int) $period->id) {
-                throw new \RuntimeException('The Shift Reading changed Liters Movement periods while it was being voided. Please retry.');
+            if (! $reading) {
+                throw new \RuntimeException('Shift-reading submission was not found.');
             }
 
-            if ($periodStatus === self::ACTIVE_STATUS) {
-                DB::table('shift_readings')
-                    ->where('id', $reading->id)
-                    ->update(['liters_tracking_period_id' => null]);
-
-                DB::table('liters_tracking_periods')
-                    ->where('id', $period->id)
-                    ->update(['updated_at' => now()]);
-
-                return ['action' => 'detached', 'correction_ids' => []];
-            }
-
-            if ($periodStatus !== self::GENERATED_STATUS) {
-                return ['action' => 'none', 'correction_ids' => []];
-            }
-
-            $this->assertCorrectionReady();
-
-            $existingIds = DB::table('liters_movement_corrections')
-                ->where('original_shift_reading_id', (int) $reading->id)
-                ->where('entry_type', self::CORRECTION_REVERSAL)
-                ->where('status', '<>', self::CORRECTION_CANCELLED)
+            $membership = DB::table('liters_movement_period_readings')
+                ->where('liters_tracking_period_id', (int) $period->id)
+                ->where('shift_reading_id', (int) $reading->id)
                 ->lockForUpdate()
-                ->orderBy('id')
-                ->pluck('id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
+                ->first();
 
-            if ($existingIds !== []) {
-                return ['action' => 'existing_reversal', 'correction_ids' => $existingIds];
+            if (! $membership) {
+                $this->upsertPeriodMembership(
+                    (int) $period->id,
+                    (int) $reading->id,
+                    'legacy_period_assignment',
+                    $period->generated_by ?? $reading->user_id ?? null,
+                    $reading->created_at ?? $period->started_at ?? now()
+                );
+                $membership = DB::table('liters_movement_period_readings')
+                    ->where('liters_tracking_period_id', (int) $period->id)
+                    ->where('shift_reading_id', (int) $reading->id)
+                    ->lockForUpdate()
+                    ->first();
             }
 
-            $breakdown = $this->generatedCorrectionBreakdown($period, (int) $reading->id);
+            if (($membership->inclusion_status ?? null) === self::MEMBERSHIP_REMOVED) {
+                $this->cancelLegacyCorrectionsForReading((int) $reading->id);
 
-            if ($breakdown === []) {
-                throw new \RuntimeException(
-                    "Generated history for Shift Reading #{$reading->id} has no per-pump snapshot entries. The reading was not voided to avoid an inaccurate reversal."
-                );
+                return [
+                    'action' => 'existing_removal',
+                    'recalculated_period_id' => $periodStatus === self::GENERATED_STATUS ? (int) $period->id : null,
+                ];
             }
 
             $now = now();
-            $correctionIds = [];
-
-            foreach ($breakdown as $entry) {
-                $correctionIds[] = (int) DB::table('liters_movement_corrections')->insertGetId([
-                    'liters_tracking_period_id' => (int) $activePeriod->id,
-                    'generated_period_id' => (int) $period->id,
-                    'original_shift_reading_id' => (int) $reading->id,
-                    'replacement_shift_reading_id' => null,
-                    'entry_type' => self::CORRECTION_REVERSAL,
-                    'status' => self::CORRECTION_PENDING,
-                    'pump_number' => (int) $entry['pump_number'],
-                    'fuel_type' => $entry['fuel_type'],
-                    'liters' => -abs((float) $entry['liters']),
-                    'amount' => -abs((float) $entry['amount']),
-                    'total_sales' => -abs((float) $entry['total_sales']),
-                    'discounts' => -abs((float) $entry['discounts']),
-                    'net_sales' => -abs((float) $entry['net_sales']),
-                    'created_by' => $createdBy,
-                    'created_at' => $now,
+            DB::table('liters_movement_period_readings')
+                ->where('id', (int) $membership->id)
+                ->update([
+                    'inclusion_status' => self::MEMBERSHIP_REMOVED,
+                    'removed_at' => $now,
+                    'removed_by' => $createdBy ?: null,
+                    'removal_status' => trim($removalStatus) !== '' ? trim($removalStatus) : 'Removed',
+                    'removal_reason' => trim((string) $removalReason) !== ''
+                        ? Str::limit(trim((string) $removalReason), 2000, '')
+                        : null,
                     'updated_at' => $now,
                 ]);
+
+            DB::table('shift_readings')
+                ->where('id', (int) $reading->id)
+                ->where('liters_tracking_period_id', (int) $period->id)
+                ->update(['liters_tracking_period_id' => null]);
+
+            $this->cancelLegacyCorrectionsForReading((int) $reading->id);
+
+            if ($periodStatus === self::GENERATED_STATUS) {
+                $this->recalculateGeneratedPeriodLocked(
+                    $period,
+                    $createdBy,
+                    strtolower(trim($removalStatus)) . '_reading_removed'
+                );
+
+                return [
+                    'action' => 'generated_period_recalculated',
+                    'recalculated_period_id' => (int) $period->id,
+                ];
             }
 
             DB::table('liters_tracking_periods')
-                ->where('id', $activePeriod->id)
+                ->where('id', (int) $period->id)
                 ->update(['updated_at' => $now]);
 
-            return ['action' => 'reversal_created', 'correction_ids' => $correctionIds];
+            return ['action' => 'detached', 'recalculated_period_id' => null];
+        });
+    }
+
+    public function registerShiftReadingSubmission(int $shiftReadingId, ?int $createdBy = null): array
+    {
+        if (! $this->hasTable('liters_movement_period_readings')) {
+            return ['action' => 'normal_submission'];
+        }
+
+        return DB::transaction(function () use ($shiftReadingId, $createdBy) {
+            $reading = DB::table('shift_readings')
+                ->where('id', $shiftReadingId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reading || ! $this->isIncludedReadingStatus($reading->status ?? null)) {
+                return ['action' => 'normal_submission'];
+            }
+
+            $periodId = (int) ($reading->liters_tracking_period_id ?? 0);
+            $period = $periodId > 0
+                ? DB::table('liters_tracking_periods')
+                    ->where('id', $periodId)
+                    ->where('status', self::ACTIVE_STATUS)
+                    ->lockForUpdate()
+                    ->first()
+                : null;
+
+            if (! $period) {
+                return ['action' => 'normal_submission'];
+            }
+
+            $this->upsertPeriodMembership(
+                (int) $period->id,
+                (int) $reading->id,
+                'shift_reading_submission',
+                $createdBy,
+                $reading->created_at ?? now()
+            );
+
+            return ['action' => 'normal_submission'];
         });
     }
 
     public function registerShiftReadingReplacement(int $shiftReadingId, ?int $createdBy = null): array
     {
-        if (! $this->hasTable('liters_movement_corrections')) {
-            return ['action' => 'normal_submission', 'correction_ids' => []];
+        return $this->registerShiftReadingSubmission($shiftReadingId, $createdBy);
+    }
+
+    public function matchingGeneratedPeriodsForReading(int|object $reading): array
+    {
+        if (! $this->isReady()) {
+            return [];
         }
 
-        return DB::transaction(function () use ($shiftReadingId, $createdBy) {
+        if (is_int($reading)) {
+            $reading = DB::table('shift_readings')->where('id', $reading)->first();
+        }
+
+        if (! $reading) {
+            return [];
+        }
+
+        [$businessFrom, $businessTo] = $this->readingBusinessDateRange($reading);
+
+        return DB::table('liters_tracking_periods')
+            ->where('status', self::GENERATED_STATUS)
+            ->whereNotNull('started_at')
+            ->whereNotNull('ended_at')
+            ->whereDate('started_at', '<=', $businessTo)
+            ->whereDate('ended_at', '>=', $businessFrom)
+            ->orderBy('started_at')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($period) => [
+                'id' => (int) $period->id,
+                'period_code' => (string) ($period->period_code ?? ('Period #' . $period->id)),
+                'started_at' => $period->started_at,
+                'ended_at' => $period->ended_at,
+                'started_date' => Carbon::parse($period->started_at)->toDateString(),
+                'ended_date' => Carbon::parse($period->ended_at)->toDateString(),
+            ])
+            ->all();
+    }
+
+    public function matchingGeneratedPeriodsForReadings(iterable $readings): array
+    {
+        if (! $this->isReady()) {
+            return [];
+        }
+
+        $periods = DB::table('liters_tracking_periods')
+            ->where('status', self::GENERATED_STATUS)
+            ->whereNotNull('started_at')
+            ->whereNotNull('ended_at')
+            ->orderBy('started_at')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($period) => [
+                'id' => (int) $period->id,
+                'period_code' => (string) ($period->period_code ?? ('Period #' . $period->id)),
+                'started_at' => $period->started_at,
+                'ended_at' => $period->ended_at,
+                'started_date' => Carbon::parse($period->started_at)->toDateString(),
+                'ended_date' => Carbon::parse($period->ended_at)->toDateString(),
+            ]);
+
+        return collect($readings)
+            ->mapWithKeys(function ($reading) use ($periods) {
+                $readingId = (int) ($reading->id ?? 0);
+
+                if ($readingId <= 0) {
+                    return [];
+                }
+
+                [$businessFrom, $businessTo] = $this->readingBusinessDateRange($reading);
+
+                return [$readingId => $periods
+                    ->filter(fn ($period) => $period['started_date'] <= $businessTo && $period['ended_date'] >= $businessFrom)
+                    ->values()
+                    ->all()];
+            })
+            ->all();
+    }
+
+    public function insertApprovedReadingIntoGeneratedPeriod(
+        int $shiftReadingId,
+        int $generatedPeriodId,
+        ?int $includedBy = null
+    ): array {
+        if (! $this->isReady()) {
+            throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
+        }
+
+        $this->assertMembershipReady();
+
+        return DB::transaction(function () use ($shiftReadingId, $generatedPeriodId, $includedBy) {
             $preliminaryReading = DB::table('shift_readings')
                 ->where('id', $shiftReadingId)
                 ->first();
 
-            if (! $preliminaryReading || ! $this->isIncludedReadingStatus($preliminaryReading->status ?? null)) {
-                return ['action' => 'normal_submission', 'correction_ids' => []];
+            if (! $preliminaryReading) {
+                throw new \RuntimeException('Shift-reading submission was not found.');
             }
 
-            $activePeriodId = (int) ($preliminaryReading->liters_tracking_period_id ?? 0);
-
-            if ($activePeriodId <= 0) {
-                return ['action' => 'normal_submission', 'correction_ids' => []];
-            }
-
-            $activePeriod = DB::table('liters_tracking_periods')
-                ->where('id', $activePeriodId)
-                ->where('status', self::ACTIVE_STATUS)
+            $membershipPeriodIds = DB::table('liters_movement_period_readings')
+                ->where('shift_reading_id', $shiftReadingId)
+                ->where('inclusion_status', self::MEMBERSHIP_INCLUDED)
+                ->pluck('liters_tracking_period_id');
+            $periodIds = collect([
+                (int) ($preliminaryReading->liters_tracking_period_id ?? 0),
+                $generatedPeriodId,
+            ])->merge($membershipPeriodIds)
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
+            $periods = DB::table('liters_tracking_periods')
+                ->whereIn('id', $periodIds)
+                ->orderBy('id')
                 ->lockForUpdate()
-                ->first();
+                ->get()
+                ->keyBy(fn ($period) => (int) $period->id);
+            $generatedPeriod = $periods->get($generatedPeriodId);
 
-            if (! $activePeriod) {
-                throw new \RuntimeException('The replacement Shift Reading is not attached to the active Liters Movement period.');
+            if (! $generatedPeriod || strtolower((string) ($generatedPeriod->status ?? '')) !== self::GENERATED_STATUS) {
+                throw new \RuntimeException('The selected Liters Movement record is no longer an available generated period.');
             }
 
             $reading = DB::table('shift_readings')
@@ -258,136 +405,160 @@ class LitersMovementTrackingService
                 ->lockForUpdate()
                 ->first();
 
+            if (! $reading || ! $this->isIncludedReadingStatus($reading->status ?? null)) {
+                throw new \RuntimeException('Only an approved or pending valid Shift Reading can be inserted into generated history.');
+            }
+
+            $matchingIds = collect($this->matchingGeneratedPeriodsForReading($reading))->pluck('id')->all();
+
+            if (! in_array($generatedPeriodId, $matchingIds, true)) {
+                throw new \RuntimeException('The Shift Reading business-date range does not overlap the selected generated period.');
+            }
+
+            [$businessFrom, $businessTo] = $this->readingBusinessDateRange($reading);
+            $duplicate = DB::table('liters_movement_period_readings as memberships')
+                ->join('shift_readings as readings', 'memberships.shift_reading_id', '=', 'readings.id')
+                ->where('memberships.liters_tracking_period_id', $generatedPeriodId)
+                ->where('memberships.inclusion_status', self::MEMBERSHIP_INCLUDED)
+                ->where('readings.id', '<>', (int) $reading->id)
+                ->where('readings.user_id', (int) ($reading->user_id ?? 0))
+                ->whereIn(DB::raw('LOWER(TRIM(readings.status))'), $this->includedReadingStatuses())
+                ->whereDate('readings.period_from', '<=', $businessTo)
+                ->where(function ($query) use ($businessFrom) {
+                    $query->whereDate('readings.period_to', '>=', $businessFrom)
+                        ->orWhere(function ($nullPeriodTo) use ($businessFrom) {
+                            $nullPeriodTo->whereNull('readings.period_to')
+                                ->whereDate('readings.period_from', '>=', $businessFrom);
+                        });
+                })
+                ->lockForUpdate()
+                ->first(['readings.id']);
+
+            if ($duplicate) {
+                throw new \RuntimeException(
+                    "Generated period {$generatedPeriod->period_code} already includes valid Shift Reading #{$duplicate->id} for this staff member and business-date range."
+                );
+            }
+
+            $existingMembership = DB::table('liters_movement_period_readings')
+                ->where('liters_tracking_period_id', $generatedPeriodId)
+                ->where('shift_reading_id', (int) $reading->id)
+                ->lockForUpdate()
+                ->first();
+
             if (
-                ! $reading
-                || ! $this->isIncludedReadingStatus($reading->status ?? null)
-                || (int) ($reading->liters_tracking_period_id ?? 0) !== $activePeriodId
+                $existingMembership
+                && ($existingMembership->inclusion_status ?? null) === self::MEMBERSHIP_INCLUDED
+                && (int) ($reading->liters_tracking_period_id ?? 0) === $generatedPeriodId
             ) {
-                throw new \RuntimeException('The replacement Shift Reading changed while its Liters Movement correction was being recorded. Please retry.');
-            }
-
-            $existingReplacementMatches = DB::table('liters_movement_corrections')
-                ->join('shift_readings as originals', 'liters_movement_corrections.original_shift_reading_id', '=', 'originals.id')
-                ->where('liters_movement_corrections.liters_tracking_period_id', $activePeriodId)
-                ->where('liters_movement_corrections.entry_type', self::CORRECTION_REPLACEMENT)
-                ->where('liters_movement_corrections.status', self::CORRECTION_APPLIED)
-                ->where('originals.user_id', (int) ($reading->user_id ?? 0))
-                ->when($this->hasColumn('shift_readings', 'period_from'), fn ($query) => $query->whereDate('originals.period_from', $reading->period_from))
-                ->when($this->hasColumn('shift_readings', 'period_to'), fn ($query) => $query->whereDate('originals.period_to', $reading->period_to ?: $reading->period_from))
-                ->lockForUpdate()
-                ->distinct()
-                ->pluck('liters_movement_corrections.replacement_shift_reading_id')
-                ->map(fn ($id) => (int) $id)
-                ->filter(fn ($id) => $id > 0)
-                ->values();
-
-            if ($existingReplacementMatches->contains((int) $reading->id)) {
-                return ['action' => 'existing_replacement', 'correction_ids' => []];
-            }
-
-            if ($existingReplacementMatches->isNotEmpty()) {
-                throw new \RuntimeException('This generated Shift Reading already has a corrected replacement for the same staff member and settlement period.');
-            }
-
-            $pendingOriginalIds = DB::table('liters_movement_corrections')
-                ->where('liters_tracking_period_id', $activePeriodId)
-                ->where('entry_type', self::CORRECTION_REVERSAL)
-                ->where('status', self::CORRECTION_PENDING)
-                ->distinct()
-                ->pluck('original_shift_reading_id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
-
-            if ($pendingOriginalIds === []) {
-                return ['action' => 'normal_submission', 'correction_ids' => []];
-            }
-
-            $matches = DB::table('shift_readings')
-                ->whereIn('id', $pendingOriginalIds)
-                ->where('user_id', (int) ($reading->user_id ?? 0))
-                ->when($this->hasColumn('shift_readings', 'period_from'), fn ($query) => $query->whereDate('period_from', $reading->period_from))
-                ->when($this->hasColumn('shift_readings', 'period_to'), fn ($query) => $query->whereDate('period_to', $reading->period_to ?: $reading->period_from))
-                ->lockForUpdate()
-                ->orderBy('id')
-                ->get();
-
-            if ($matches->isEmpty()) {
-                return ['action' => 'normal_submission', 'correction_ids' => []];
-            }
-
-            if ($matches->count() > 1) {
-                throw new \RuntimeException('More than one pending generated-reading reversal matches this staff member and settlement period. The replacement was not attached automatically.');
-            }
-
-            $original = $matches->first();
-            $reversals = DB::table('liters_movement_corrections')
-                ->where('original_shift_reading_id', (int) $original->id)
-                ->where('entry_type', self::CORRECTION_REVERSAL)
-                ->where('status', self::CORRECTION_PENDING)
-                ->lockForUpdate()
-                ->orderBy('id')
-                ->get();
-
-            if ($reversals->isEmpty()) {
-                return ['action' => 'normal_submission', 'correction_ids' => []];
-            }
-
-            $existingReplacement = DB::table('liters_movement_corrections')
-                ->where('original_shift_reading_id', (int) $original->id)
-                ->where('entry_type', self::CORRECTION_REPLACEMENT)
-                ->where('status', '<>', self::CORRECTION_CANCELLED)
-                ->lockForUpdate()
-                ->exists();
-
-            if ($existingReplacement) {
-                throw new \RuntimeException("Shift Reading #{$original->id} already has a Liters Movement replacement.");
-            }
-
-            $breakdown = $this->replacementCorrectionBreakdown($reading);
-
-            if ($breakdown === []) {
-                throw new \RuntimeException('The corrected Shift Reading has no per-pump liters or amount to post as a replacement.');
+                return [
+                    'action' => 'already_included',
+                    'period' => $generatedPeriod,
+                    'summary' => $this->decodeSnapshot($generatedPeriod->totals_snapshot ?? null),
+                    'recalculated_period_ids' => [],
+                ];
             }
 
             $now = now();
-            $correctionIds = [];
-
-            foreach ($breakdown as $entry) {
-                $correctionIds[] = (int) DB::table('liters_movement_corrections')->insertGetId([
-                    'liters_tracking_period_id' => $activePeriodId,
-                    'generated_period_id' => (int) $reversals->first()->generated_period_id,
-                    'original_shift_reading_id' => (int) $original->id,
-                    'replacement_shift_reading_id' => (int) $reading->id,
-                    'entry_type' => self::CORRECTION_REPLACEMENT,
-                    'status' => self::CORRECTION_APPLIED,
-                    'pump_number' => (int) $entry['pump_number'],
-                    'fuel_type' => $entry['fuel_type'],
-                    'liters' => abs((float) $entry['liters']),
-                    'amount' => abs((float) $entry['amount']),
-                    'total_sales' => abs((float) $entry['total_sales']),
-                    'discounts' => abs((float) $entry['discounts']),
-                    'net_sales' => abs((float) $entry['net_sales']),
-                    'created_by' => $createdBy,
-                    'created_at' => $now,
+            DB::table('liters_movement_period_readings')
+                ->where('shift_reading_id', (int) $reading->id)
+                ->where('liters_tracking_period_id', '<>', $generatedPeriodId)
+                ->where('inclusion_status', self::MEMBERSHIP_INCLUDED)
+                ->update([
+                    'inclusion_status' => self::MEMBERSHIP_REMOVED,
+                    'removed_at' => $now,
+                    'removed_by' => $includedBy ?: null,
+                    'removal_status' => 'Moved',
+                    'removal_reason' => "Inserted into generated period {$generatedPeriod->period_code} after approval.",
                     'updated_at' => $now,
                 ]);
+
+            $this->upsertPeriodMembership(
+                $generatedPeriodId,
+                (int) $reading->id,
+                'approved_historical_insert',
+                $includedBy,
+                $now
+            );
+
+            DB::table('shift_readings')
+                ->where('id', (int) $reading->id)
+                ->update([
+                    'liters_tracking_period_id' => $generatedPeriodId,
+                    'updated_at' => $now,
+                ]);
+
+            $this->cancelLegacyCorrectionsForReading((int) $reading->id);
+            $summary = $this->recalculateGeneratedPeriodLocked(
+                $generatedPeriod,
+                $includedBy,
+                'approved_reading_inserted'
+            );
+            $recalculatedPeriodIds = [$generatedPeriodId];
+
+            foreach ($periodIds as $periodId) {
+                if ($periodId === $generatedPeriodId) {
+                    continue;
+                }
+
+                $affectedPeriod = $periods->get($periodId);
+
+                if (strtolower((string) ($affectedPeriod->status ?? '')) === self::GENERATED_STATUS) {
+                    $this->cancelLegacyCorrectionsForPeriod($periodId);
+                    $this->recalculateGeneratedPeriodLocked(
+                        $affectedPeriod,
+                        $includedBy,
+                        'approved_reading_moved_to_another_generated_period'
+                    );
+                    $recalculatedPeriodIds[] = $periodId;
+                } else {
+                    DB::table('liters_tracking_periods')->where('id', $periodId)->update(['updated_at' => $now]);
+                }
             }
 
-            DB::table('liters_movement_corrections')
-                ->whereIn('id', $reversals->pluck('id')->all())
-                ->update([
-                    'status' => self::CORRECTION_MATCHED,
-                    'updated_at' => $now,
-                ]);
-
-            $this->touchPeriodAndReading($activePeriodId, (int) $reading->id, $now);
-
             return [
-                'action' => 'replacement_created',
-                'original_shift_reading_id' => (int) $original->id,
-                'correction_ids' => $correctionIds,
+                'action' => 'inserted',
+                'period' => DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->first(),
+                'summary' => $summary,
+                'recalculated_period_ids' => collect($recalculatedPeriodIds)->unique()->sort()->values()->all(),
             ];
         });
+    }
+
+    public function recalculateAllGeneratedPeriods(?int $actorId = null, string $reason = 'manual_recalculation'): array
+    {
+        if (! $this->isReady() || ! $this->hasTable('liters_movement_period_readings')) {
+            return [];
+        }
+
+        return DB::table('liters_tracking_periods')
+            ->where('status', self::GENERATED_STATUS)
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(function ($periodId) use ($actorId, $reason) {
+                return DB::transaction(function () use ($periodId, $actorId, $reason) {
+                    $period = DB::table('liters_tracking_periods')
+                        ->where('id', (int) $periodId)
+                        ->where('status', self::GENERATED_STATUS)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $period) {
+                        return null;
+                    }
+
+                    $this->backfillMembershipsForPeriod($period);
+                    $this->cancelLegacyCorrectionsForPeriod((int) $period->id);
+
+                    return [
+                        'period_id' => (int) $period->id,
+                        'summary' => $this->recalculateGeneratedPeriodLocked($period, $actorId, $reason),
+                    ];
+                });
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 
     public function deductPumpLiters(
@@ -640,15 +811,28 @@ class LitersMovementTrackingService
 
             $this->attachUntrackedShiftReadingsToPeriod($period);
 
-            $this->assertNoPendingCorrections((int) $period->id);
-
             $readings = $this->summaryRowsForPeriod($period, null, true);
             $endedAt = now();
             $summary = $this->summaryFromRows($period, $readings, true);
             $readingIds = $readings->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+
+            if ($this->hasTable('liters_movement_period_readings')) {
+                foreach ($readings as $reading) {
+                    $this->upsertPeriodMembership(
+                        (int) $period->id,
+                        (int) $reading->id,
+                        'generated_with_period',
+                        $generatedBy,
+                        $reading->created_at ?? $period->started_at ?? now()
+                    );
+                }
+            }
+
+            $this->cancelLegacyCorrectionsForPeriod((int) $period->id);
             $tankLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
             $snapshot = [
                 'source' => 'shift_readings',
+                'snapshot_version' => 2,
                 'period_code' => $period->period_code,
                 'started_at' => $period->started_at,
                 'ended_at' => $endedAt->toDateTimeString(),
@@ -668,9 +852,13 @@ class LitersMovementTrackingService
                 'staff_breakdown' => $summary['staff_breakdown'],
                 'reached_limits' => $summary['reached_limits'],
                 'shift_reading_ids' => $readingIds,
-                'liters_movement_correction_ids' => $this->correctionIdsForPeriod((int) $period->id),
+                'liters_movement_correction_ids' => [],
+                'removed_shift_readings' => $this->removedMembershipAudit((int) $period->id),
                 'generated_by' => $generatedBy,
                 'generated_at' => $endedAt->toDateTimeString(),
+                'last_recalculated_at' => $endedAt->toDateTimeString(),
+                'last_recalculated_by' => $generatedBy,
+                'last_recalculation_reason' => 'generated',
             ];
 
             if ($readingIds !== []) {
@@ -820,6 +1008,18 @@ class LitersMovementTrackingService
             DB::table('shift_readings')
                 ->whereIn('id', $restoredIds)
                 ->update(['liters_tracking_period_id' => $activePeriod->id]);
+
+            if ($this->hasTable('liters_movement_period_readings')) {
+                foreach ($restoredIds as $restoredId) {
+                    $this->upsertPeriodMembership(
+                        (int) $activePeriod->id,
+                        (int) $restoredId,
+                        'generated_period_restored',
+                        $voidedBy,
+                        now()
+                    );
+                }
+            }
 
             $voidedAt = now();
             $restoredLiters = $this->liters(collect($snapshot['tank_breakdown'] ?? [])
@@ -1010,6 +1210,34 @@ class LitersMovementTrackingService
             ->where('liters_tracking_period_id', (int) $period->id);
 
         $this->scopeToExcludedShiftReadings($excludedFromActivePeriod);
+
+        if ($this->hasTable('liters_movement_period_readings')) {
+            $excludedFromActivePeriod->clone()
+                ->get()
+                ->each(function ($reading) use ($period) {
+                    $this->upsertPeriodMembership(
+                        (int) $period->id,
+                        (int) $reading->id,
+                        'active_period_assignment',
+                        $reading->user_id ?? null,
+                        $reading->created_at ?? $period->started_at ?? now()
+                    );
+
+                    DB::table('liters_movement_period_readings')
+                        ->where('liters_tracking_period_id', (int) $period->id)
+                        ->where('shift_reading_id', (int) $reading->id)
+                        ->where('inclusion_status', self::MEMBERSHIP_INCLUDED)
+                        ->update([
+                            'inclusion_status' => self::MEMBERSHIP_REMOVED,
+                            'removed_at' => $reading->voided_at ?? $reading->updated_at ?? now(),
+                            'removed_by' => $reading->voided_by ?? null,
+                            'removal_status' => $reading->status ?? 'Removed',
+                            'removal_reason' => $reading->rejection_reason ?? $reading->void_reason ?? null,
+                            'updated_at' => now(),
+                        ]);
+                });
+        }
+
         $excludedFromActivePeriod->update(['liters_tracking_period_id' => null]);
 
         $query = DB::table('shift_readings')
@@ -1021,6 +1249,19 @@ class LitersMovementTrackingService
 
         $this->scopeToIncludedShiftReadings($query);
         $query->update(['liters_tracking_period_id' => $period->id]);
+
+        if ($this->hasTable('liters_movement_period_readings')) {
+            DB::table('shift_readings')
+                ->where('liters_tracking_period_id', (int) $period->id)
+                ->get()
+                ->each(fn ($reading) => $this->upsertPeriodMembership(
+                    (int) $period->id,
+                    (int) $reading->id,
+                    'active_period_assignment',
+                    $reading->user_id ?? null,
+                    $reading->created_at ?? $period->started_at ?? now()
+                ));
+        }
     }
 
     private function summaryForPeriod(object $period, ?int $staffId, bool $includeNetSales = false): array
@@ -1053,18 +1294,7 @@ class LitersMovementTrackingService
             ->orderBy('shift_readings.id')
             ->get();
 
-        $correctionRows = $this->correctionGroupsForPeriod($period, $staffId, $lock);
-        $replacementIds = $correctionRows
-            ->pluck('replacement_shift_reading_id')
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $id > 0)
-            ->unique();
-
-        return $rows
-            ->reject(fn ($reading) => $replacementIds->contains((int) ($reading->id ?? 0)))
-            ->concat($correctionRows)
-            ->sortBy(fn ($reading) => sprintf('%s-%020d', (string) ($reading->created_at ?? ''), (int) ($reading->id ?? 0)))
-            ->values();
+        return $rows->values();
     }
 
     private function summaryFromRows(object $period, Collection $rows, bool $includeNetSales = false): array
@@ -1310,8 +1540,23 @@ class LitersMovementTrackingService
 
     private function shiftReadingsQuery(object $period, ?int $staffId)
     {
-        $query = DB::table('shift_readings')
-            ->where('shift_readings.liters_tracking_period_id', (int) $period->id);
+        $query = DB::table('shift_readings');
+
+        if (
+            strtolower((string) ($period->status ?? '')) === self::GENERATED_STATUS
+            && $this->hasTable('liters_movement_period_readings')
+        ) {
+            $query->join(
+                'liters_movement_period_readings as period_memberships',
+                'shift_readings.id',
+                '=',
+                'period_memberships.shift_reading_id'
+            )
+                ->where('period_memberships.liters_tracking_period_id', (int) $period->id)
+                ->where('period_memberships.inclusion_status', self::MEMBERSHIP_INCLUDED);
+        } else {
+            $query->where('shift_readings.liters_tracking_period_id', (int) $period->id);
+        }
 
         $this->scopeToIncludedShiftReadings($query);
 
@@ -1320,135 +1565,6 @@ class LitersMovementTrackingService
         }
 
         return $query;
-    }
-
-    private function correctionGroupsForPeriod(object $period, ?int $staffId, bool $lock = false): Collection
-    {
-        if (! $this->hasTable('liters_movement_corrections')) {
-            return collect();
-        }
-
-        $query = DB::table('liters_movement_corrections')
-            ->where('liters_tracking_period_id', (int) $period->id)
-            ->whereIn('status', [
-                self::CORRECTION_PENDING,
-                self::CORRECTION_MATCHED,
-                self::CORRECTION_APPLIED,
-            ])
-            ->orderBy('original_shift_reading_id')
-            ->orderBy('entry_type')
-            ->orderBy('pump_number')
-            ->orderBy('id');
-
-        if ($lock) {
-            $query->lockForUpdate();
-        }
-
-        $corrections = $query->get();
-
-        if ($corrections->isEmpty()) {
-            return collect();
-        }
-
-        $readingIds = $corrections
-            ->flatMap(fn ($entry) => [
-                (int) ($entry->original_shift_reading_id ?? 0),
-                (int) ($entry->replacement_shift_reading_id ?? 0),
-            ])
-            ->filter(fn ($id) => $id > 0)
-            ->unique()
-            ->values();
-        $readings = DB::table('shift_readings')
-            ->whereIn('id', $readingIds->all())
-            ->get()
-            ->keyBy(fn ($reading) => (int) $reading->id);
-        $userIds = $readings
-            ->pluck('user_id')
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $id > 0)
-            ->unique()
-            ->values();
-        $userNames = $this->hasTable('users') && $this->hasColumn('users', 'name')
-            ? DB::table('users')->whereIn('id', $userIds->all())->pluck('name', 'id')
-            : collect();
-
-        return $corrections
-            ->groupBy(fn ($entry) => (int) $entry->original_shift_reading_id)
-            ->map(function (Collection $entries) use ($readings, $userNames, $staffId) {
-                $first = $entries->first();
-                $originalId = (int) ($first->original_shift_reading_id ?? 0);
-                $replacementId = (int) ($entries->pluck('replacement_shift_reading_id')->filter()->first() ?? 0);
-                $original = $readings->get($originalId);
-                $replacement = $replacementId > 0 ? $readings->get($replacementId) : null;
-                $reading = $replacement ?: $original;
-                $userId = (int) ($reading->user_id ?? 0);
-
-                if ($staffId !== null && $userId !== $staffId) {
-                    return null;
-                }
-
-                $pending = $entries->contains(fn ($entry) => ($entry->status ?? null) === self::CORRECTION_PENDING);
-                $pumpEntries = $entries
-                    ->map(fn ($entry) => $this->formatCorrectionPumpEntry($entry))
-                    ->values()
-                    ->all();
-                $createdAt = $entries->max('created_at') ?: ($reading->created_at ?? null);
-
-                return (object) [
-                    'id' => $replacementId > 0 ? $replacementId : $originalId,
-                    'user_id' => $userId,
-                    'staff_name' => trim((string) ($userNames[$userId] ?? 'Staff')) ?: 'Staff',
-                    'period_from' => $reading->period_from ?? null,
-                    'period_to' => $reading->period_to ?? null,
-                    'created_at' => $createdAt,
-                    'updated_at' => $createdAt,
-                    'status' => $pending ? 'Correction Pending' : 'Correction Applied',
-                    'is_liters_movement_correction' => true,
-                    'can_adjust_liters' => false,
-                    'original_shift_reading_id' => $originalId,
-                    'replacement_shift_reading_id' => $replacementId ?: null,
-                    'correction_ids' => $entries->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
-                    'correction_pump_entries' => $pumpEntries,
-                ];
-            })
-            ->filter()
-            ->values();
-    }
-
-    private function formatCorrectionPumpEntry(object $entry): array
-    {
-        $liters = $this->liters($entry->liters ?? 0);
-        $amount = $this->money($entry->amount ?? 0);
-        $fuelType = $this->normalizeFuelType(
-            $entry->fuel_type ?? (self::PUMP_FUEL_TYPES[(int) ($entry->pump_number ?? 0)] ?? 'N/A')
-        );
-        $price = abs($liters) > 0
-            ? abs($amount / $liters)
-            : $this->priceForFuel($fuelType);
-
-        return [
-            'pump_id' => (int) ($entry->pump_number ?? 0),
-            'fuel_type' => $fuelType,
-            'liters' => $liters,
-            'raw_liters' => $liters,
-            'deducted_liters' => 0.0,
-            'price_per_liter' => $this->money($price),
-            'amount' => $amount,
-            'raw_amount' => $amount,
-            'deducted_amount' => 0.0,
-            'total_sales' => $this->money($entry->total_sales ?? $amount),
-            'discounts' => $this->money($entry->discounts ?? 0),
-            'net_sales' => $this->money($entry->net_sales ?? $amount),
-            'sales_transaction_count' => 0,
-            'adjustments' => [],
-            'correction_id' => (int) ($entry->id ?? 0),
-            'correction_entry_type' => (string) ($entry->entry_type ?? ''),
-            'correction_status' => (string) ($entry->status ?? ''),
-            'original_shift_reading_id' => (int) ($entry->original_shift_reading_id ?? 0),
-            'replacement_shift_reading_id' => ! empty($entry->replacement_shift_reading_id)
-                ? (int) $entry->replacement_shift_reading_id
-                : null,
-        ];
     }
 
     private function scopeToIncludedShiftReadings($query): void
@@ -2468,104 +2584,305 @@ class LitersMovementTrackingService
             ->get();
     }
 
-    private function lockedActivePeriodForCorrection(object $sourcePeriod): object
+    private function assertMembershipReady(): void
     {
-        $activePeriod = DB::table('liters_tracking_periods')
-            ->where('status', self::ACTIVE_STATUS)
-            ->lockForUpdate()
-            ->orderByDesc('started_at')
-            ->orderByDesc('id')
-            ->first();
-
-        if ($activePeriod) {
-            return $activePeriod;
+        if (! $this->hasTable('liters_movement_period_readings')) {
+            throw new \RuntimeException(
+                'Liters Movement period membership is not migrated yet. Run php artisan migrate before changing Shift Reading status.'
+            );
         }
-
-        $activePeriodId = $this->createPeriod(
-            (float) ($sourcePeriod->liters_limit ?? self::DEFAULT_LIMIT),
-            now(),
-            $this->storedTankLimitsForPeriod($sourcePeriod, $this->preparedTanks())
-        );
-
-        $activePeriod = DB::table('liters_tracking_periods')
-            ->where('id', $activePeriodId)
-            ->lockForUpdate()
-            ->first();
-
-        if (! $activePeriod) {
-            throw new \RuntimeException('Unable to create an active Liters Movement period for the generated-reading reversal.');
-        }
-
-        return $activePeriod;
     }
 
-    private function generatedCorrectionBreakdown(object $period, int $readingId): array
+    private function readingBusinessDateRange(object $reading): array
     {
+        try {
+            $from = Carbon::parse($reading->period_from ?? $reading->created_at ?? now())->startOfDay();
+            $to = Carbon::parse($reading->period_to ?? $reading->period_from ?? $reading->created_at ?? now())->endOfDay();
+        } catch (\Throwable) {
+            throw new \RuntimeException('The Shift Reading has an invalid business-date range.');
+        }
+
+        if ($to->lt($from)) {
+            throw new \RuntimeException('The Shift Reading business-date range ends before it starts.');
+        }
+
+        return [$from->toDateString(), $to->toDateString()];
+    }
+
+    private function upsertPeriodMembership(
+        int $periodId,
+        int $readingId,
+        string $source,
+        ?int $includedBy,
+        $includedAt
+    ): void {
+        if (! $this->hasTable('liters_movement_period_readings')) {
+            return;
+        }
+
+        $existing = DB::table('liters_movement_period_readings')
+            ->where('liters_tracking_period_id', $periodId)
+            ->where('shift_reading_id', $readingId)
+            ->first();
+        $now = now();
+
+        if ($existing) {
+            if (($existing->inclusion_status ?? null) !== self::MEMBERSHIP_INCLUDED) {
+                DB::table('liters_movement_period_readings')
+                    ->where('id', (int) $existing->id)
+                    ->update([
+                        'inclusion_status' => self::MEMBERSHIP_INCLUDED,
+                        'inclusion_source' => $source,
+                        'included_at' => $includedAt ?: $now,
+                        'included_by' => $includedBy ?: null,
+                        'removed_at' => null,
+                        'removed_by' => null,
+                        'removal_status' => null,
+                        'removal_reason' => null,
+                        'updated_at' => $now,
+                    ]);
+            }
+
+            return;
+        }
+
+        DB::table('liters_movement_period_readings')->insertOrIgnore([
+            'liters_tracking_period_id' => $periodId,
+            'shift_reading_id' => $readingId,
+            'inclusion_status' => self::MEMBERSHIP_INCLUDED,
+            'inclusion_source' => $source,
+            'included_at' => $includedAt ?: $now,
+            'included_by' => $includedBy ?: null,
+            'removed_at' => null,
+            'removed_by' => null,
+            'removal_status' => null,
+            'removal_reason' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    private function backfillMembershipsForPeriod(object $period): void
+    {
+        if (! $this->hasTable('liters_movement_period_readings')) {
+            return;
+        }
+
         $snapshot = $this->decodeSnapshot($period->totals_snapshot ?? null);
+        $readingIds = collect($snapshot['shift_reading_ids'] ?? [])
+            ->merge(
+                DB::table('shift_readings')
+                    ->where('liters_tracking_period_id', (int) $period->id)
+                    ->pluck('id')
+            )
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
 
-        return collect($snapshot['tank_breakdown'] ?? [])
-            ->flatMap(function ($tank) use ($readingId) {
-                $fuelType = $this->normalizeFuelType($tank['fuel_type'] ?? 'N/A');
+        DB::table('shift_readings')
+            ->whereIn('id', $readingIds->all())
+            ->orderBy('id')
+            ->get()
+            ->each(function ($reading) use ($period) {
+                $existing = DB::table('liters_movement_period_readings')
+                    ->where('liters_tracking_period_id', (int) $period->id)
+                    ->where('shift_reading_id', (int) $reading->id)
+                    ->exists();
 
-                return collect($tank['entries'] ?? [])
-                    ->filter(fn ($entry) => (int) ($entry['id'] ?? 0) === $readingId)
-                    ->map(function ($entry) use ($fuelType) {
-                        $totalSales = $this->money($entry['total_sales'] ?? $entry['amount'] ?? 0);
-                        $discounts = $this->money($entry['discounts'] ?? 0);
+                if ($existing) {
+                    return;
+                }
 
-                        return [
-                            'pump_number' => (int) ($entry['pump_id'] ?? 0),
-                            'fuel_type' => $fuelType,
-                            'liters' => $this->liters($entry['liters'] ?? 0),
-                            'amount' => $this->money($entry['amount'] ?? $totalSales),
-                            'total_sales' => $totalSales,
-                            'discounts' => $discounts,
-                            'net_sales' => $this->money($entry['net_sales'] ?? ($totalSales - $discounts)),
-                        ];
-                    });
-            })
-            ->filter(fn ($entry) => $entry['pump_number'] > 0 && ($entry['liters'] > 0 || $entry['amount'] > 0))
-            ->groupBy('pump_number')
-            ->map(function (Collection $entries) {
-                $first = $entries->first();
+                $this->upsertPeriodMembership(
+                    (int) $period->id,
+                    (int) $reading->id,
+                    'snapshot_backfill',
+                    $period->generated_by ?? $reading->user_id ?? null,
+                    $reading->created_at ?? $period->started_at ?? now()
+                );
 
-                return [
-                    'pump_number' => (int) $first['pump_number'],
-                    'fuel_type' => (string) $first['fuel_type'],
-                    'liters' => $this->liters($entries->sum('liters')),
-                    'amount' => $this->money($entries->sum('amount')),
-                    'total_sales' => $this->money($entries->sum('total_sales')),
-                    'discounts' => $this->money($entries->sum('discounts')),
-                    'net_sales' => $this->money($entries->sum('net_sales')),
-                ];
-            })
+                if (! $this->isIncludedReadingStatus($reading->status ?? null)) {
+                    DB::table('liters_movement_period_readings')
+                        ->where('liters_tracking_period_id', (int) $period->id)
+                        ->where('shift_reading_id', (int) $reading->id)
+                        ->update([
+                            'inclusion_status' => self::MEMBERSHIP_REMOVED,
+                            'removed_at' => $reading->voided_at ?? $reading->updated_at ?? now(),
+                            'removed_by' => $reading->voided_by ?? null,
+                            'removal_status' => $reading->status ?? 'Removed',
+                            'removal_reason' => $reading->rejection_reason ?? $reading->void_reason ?? null,
+                            'updated_at' => now(),
+                        ]);
+                }
+            });
+    }
+
+    private function recalculateGeneratedPeriodLocked(
+        object $period,
+        ?int $actorId,
+        string $reason
+    ): array {
+        if (strtolower((string) ($period->status ?? '')) !== self::GENERATED_STATUS) {
+            throw new \RuntimeException('Only generated Liters Movement records can be recalculated.');
+        }
+
+        $rows = $this->summaryRowsForPeriod($period, null);
+        $summary = $this->summaryFromRows($period, $rows, true);
+        $readingIds = $rows->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $existing = $this->decodeSnapshot($period->totals_snapshot ?? null);
+        $recalculatedAt = now();
+        $history = collect($existing['recalculation_history'] ?? [])
+            ->push([
+                'recalculated_at' => $recalculatedAt->toDateTimeString(),
+                'recalculated_by' => $actorId,
+                'reason' => $reason,
+                'previous_total_liters' => $this->liters($existing['total_liters'] ?? 0),
+                'new_total_liters' => $summary['total_liters'],
+                'previous_total_sales' => $this->money($existing['total_sales'] ?? $existing['total_amount'] ?? 0),
+                'new_total_sales' => $summary['total_sales'],
+                'previous_submission_count' => (int) ($existing['submission_count'] ?? $existing['transaction_count'] ?? 0),
+                'new_submission_count' => $summary['submission_count'],
+            ])
+            ->take(-50)
             ->values()
+            ->all();
+        $legacyCorrectionIds = $this->hasTable('liters_movement_corrections')
+            ? DB::table('liters_movement_corrections')
+                ->where(function ($query) use ($period) {
+                    $query->where('generated_period_id', (int) $period->id)
+                        ->orWhere('liters_tracking_period_id', (int) $period->id);
+                })
+                ->orderBy('id')
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all()
+            : [];
+        $snapshot = array_merge($existing, [
+            'source' => 'shift_readings',
+            'snapshot_version' => 2,
+            'period_code' => $period->period_code,
+            'started_at' => $period->started_at,
+            'ended_at' => $period->ended_at,
+            'liters_limit' => $summary['limit'],
+            'tank_limits' => $this->storedTankLimitsForPeriod($period, $this->preparedTanks()),
+            'total_liters' => $summary['total_liters'],
+            'total_amount' => $summary['total_amount'],
+            'total_sales' => $summary['total_sales'],
+            'total_discounts' => $summary['total_discounts'],
+            'total_net_sales' => $summary['total_net_sales'],
+            'transaction_count' => $summary['transaction_count'],
+            'submission_count' => $summary['submission_count'],
+            'pump_entry_count' => $summary['pump_entry_count'],
+            'pump_net_sales' => $summary['pump_net_sales'],
+            'fuel_breakdown' => $summary['fuel_breakdown'],
+            'tank_breakdown' => $summary['tank_breakdown'],
+            'staff_breakdown' => $summary['staff_breakdown'],
+            'reached_limits' => $summary['reached_limits'],
+            'shift_reading_ids' => $readingIds,
+            'liters_movement_correction_ids' => [],
+            'legacy_cancelled_correction_ids' => $legacyCorrectionIds,
+            'removed_shift_readings' => $this->removedMembershipAudit((int) $period->id),
+            'last_recalculated_at' => $recalculatedAt->toDateTimeString(),
+            'last_recalculated_by' => $actorId,
+            'last_recalculation_reason' => $reason,
+            'recalculation_history' => $history,
+        ]);
+
+        DB::table('liters_tracking_periods')
+            ->where('id', (int) $period->id)
+            ->update([
+                'totals_snapshot' => json_encode($snapshot),
+                'updated_at' => $recalculatedAt,
+            ]);
+
+        return $summary;
+    }
+
+    private function removedMembershipAudit(int $periodId): array
+    {
+        if (! $this->hasTable('liters_movement_period_readings')) {
+            return [];
+        }
+
+        $query = DB::table('liters_movement_period_readings as memberships')
+            ->join('shift_readings as readings', 'memberships.shift_reading_id', '=', 'readings.id')
+            ->where('memberships.liters_tracking_period_id', $periodId)
+            ->where('memberships.inclusion_status', self::MEMBERSHIP_REMOVED);
+        $staffExpression = "'Staff'";
+        $includedByExpression = 'NULL';
+        $removedByExpression = 'NULL';
+
+        if ($this->hasTable('users') && $this->hasColumn('users', 'name')) {
+            $query->leftJoin('users as staff_users', 'readings.user_id', '=', 'staff_users.id')
+                ->leftJoin('users as included_users', 'memberships.included_by', '=', 'included_users.id')
+                ->leftJoin('users as removed_users', 'memberships.removed_by', '=', 'removed_users.id');
+            $staffExpression = "COALESCE(staff_users.name, 'Staff')";
+            $includedByExpression = 'included_users.name';
+            $removedByExpression = 'removed_users.name';
+        }
+
+        return $query
+            ->select(
+                'memberships.*',
+                'readings.user_id',
+                'readings.period_from',
+                'readings.period_to',
+                'readings.status as current_reading_status',
+                DB::raw("{$staffExpression} as staff_name"),
+                DB::raw("{$includedByExpression} as included_by_name"),
+                DB::raw("{$removedByExpression} as removed_by_name")
+            )
+            ->orderBy('memberships.removed_at')
+            ->orderBy('memberships.id')
+            ->get()
+            ->map(fn ($membership) => [
+                'id' => (int) $membership->shift_reading_id,
+                'staff_id' => (int) ($membership->user_id ?? 0) ?: null,
+                'staff_name' => (string) ($membership->staff_name ?? 'Staff'),
+                'period_from' => $membership->period_from,
+                'period_to' => $membership->period_to ?: $membership->period_from,
+                'original_status' => 'Included',
+                'current_status' => (string) ($membership->removal_status ?? $membership->current_reading_status ?? 'Removed'),
+                'inclusion_source' => (string) ($membership->inclusion_source ?? 'period_assignment'),
+                'included_at' => $membership->included_at,
+                'included_by' => $membership->included_by_name ?? null,
+                'removed_at' => $membership->removed_at,
+                'removed_by' => $membership->removed_by_name ?? null,
+                'removal_status' => (string) ($membership->removal_status ?? 'Removed'),
+                'removal_reason' => $membership->removal_reason,
+            ])
             ->all();
     }
 
-    private function replacementCorrectionBreakdown(object $reading): array
+    private function cancelLegacyCorrectionsForReading(int $readingId): void
     {
-        $salesByPump = $this->netSalesByPumpForReading($reading);
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return;
+        }
 
-        return collect(self::PUMP_FUEL_TYPES)
-            ->map(function (string $fuelType, int $pumpId) use ($reading, $salesByPump) {
-                $liters = $this->rawPumpLiters($reading, $pumpId);
-                $amount = $this->rawPumpAmount($reading, $pumpId);
-                $sales = $salesByPump[$pumpId] ?? $this->emptyPumpNetSalesRow($pumpId, $fuelType);
-
-                return [
-                    'pump_number' => $pumpId,
-                    'fuel_type' => $fuelType,
-                    'liters' => $liters,
-                    'amount' => $amount,
-                    'total_sales' => $this->money($sales['total_sales'] ?? $amount),
-                    'discounts' => $this->money($sales['discounts'] ?? 0),
-                    'net_sales' => $this->money($sales['net_sales'] ?? $amount),
-                ];
+        DB::table('liters_movement_corrections')
+            ->where(function ($query) use ($readingId) {
+                $query->where('original_shift_reading_id', $readingId)
+                    ->orWhere('replacement_shift_reading_id', $readingId);
             })
-            ->filter(fn ($entry) => $entry['liters'] > 0 || $entry['amount'] > 0)
-            ->values()
-            ->all();
+            ->where('status', '<>', self::CORRECTION_CANCELLED)
+            ->update(['status' => self::CORRECTION_CANCELLED, 'updated_at' => now()]);
+    }
+
+    private function cancelLegacyCorrectionsForPeriod(int $periodId): void
+    {
+        if (! $this->hasTable('liters_movement_corrections')) {
+            return;
+        }
+
+        DB::table('liters_movement_corrections')
+            ->where(function ($query) use ($periodId) {
+                $query->where('generated_period_id', $periodId)
+                    ->orWhere('liters_tracking_period_id', $periodId);
+            })
+            ->where('status', '<>', self::CORRECTION_CANCELLED)
+            ->update(['status' => self::CORRECTION_CANCELLED, 'updated_at' => now()]);
     }
 
     private function isReplacementReading(int $readingId): bool
@@ -2577,52 +2894,6 @@ class LitersMovementTrackingService
                 ->where('entry_type', self::CORRECTION_REPLACEMENT)
                 ->where('status', '<>', self::CORRECTION_CANCELLED)
                 ->exists();
-    }
-
-    private function assertNoPendingCorrections(int $periodId): void
-    {
-        if (! $this->hasTable('liters_movement_corrections')) {
-            return;
-        }
-
-        $pendingOriginalIds = DB::table('liters_movement_corrections')
-            ->where('liters_tracking_period_id', $periodId)
-            ->where('entry_type', self::CORRECTION_REVERSAL)
-            ->where('status', self::CORRECTION_PENDING)
-            ->lockForUpdate()
-            ->distinct()
-            ->pluck('original_shift_reading_id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
-
-        if ($pendingOriginalIds !== []) {
-            throw new \RuntimeException(
-                'This Liters Movement period has ' . count($pendingOriginalIds)
-                . ' pending generated-reading reversal(s). Submit the corrected Shift Reading before generating the period.'
-            );
-        }
-    }
-
-    private function correctionIdsForPeriod(int $periodId): array
-    {
-        if (! $this->hasTable('liters_movement_corrections')) {
-            return [];
-        }
-
-        return DB::table('liters_movement_corrections')
-            ->where('liters_tracking_period_id', $periodId)
-            ->where('status', '<>', self::CORRECTION_CANCELLED)
-            ->orderBy('id')
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
-    }
-
-    private function assertCorrectionReady(): void
-    {
-        if (! $this->hasTable('liters_movement_corrections')) {
-            throw new \RuntimeException('Liters Movement generated-reading corrections are not migrated yet. Run php artisan migrate.');
-        }
     }
 
     private function assertAdjustmentReady(): void
@@ -2685,6 +2956,7 @@ class LitersMovementTrackingService
             ! $this->hasTable('liters_tracking_periods')
             || ! $this->hasTable('shift_readings')
             || ! $this->hasTable('tanks')
+            || ! $this->hasTable('liters_movement_period_readings')
             || ! $this->hasColumn('shift_readings', 'liters_tracking_period_id')
             || ! $this->hasColumn('shift_readings', 'id')
             || ! $this->hasColumn('shift_readings', 'user_id')
@@ -2712,7 +2984,7 @@ class LitersMovementTrackingService
     {
         $missing = [];
 
-        foreach (['liters_tracking_periods', 'shift_readings', 'tanks'] as $table) {
+        foreach (['liters_tracking_periods', 'shift_readings', 'tanks', 'liters_movement_period_readings'] as $table) {
             if (! $this->hasTable($table)) {
                 $missing[] = $table;
             }

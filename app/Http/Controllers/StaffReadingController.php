@@ -103,9 +103,8 @@ class StaffReadingController extends Controller
 
         try {
             $readingId = null;
-            $litersMovementAction = 'normal_submission';
 
-            DB::transaction(function () use ($request, $validated, &$readingId, &$litersMovementAction) {
+            DB::transaction(function () use ($request, $validated, &$readingId) {
                 $periodStart = Carbon::parse($validated['period_from'])->startOfDay();
                 $periodEnd = Carbon::parse($validated['period_to'])->endOfDay();
 
@@ -157,11 +156,10 @@ class StaffReadingController extends Controller
 
                 if ($reading) {
                     $this->lockSalesForReading($reading);
-                    $correction = $this->litersMovementTracking->registerShiftReadingReplacement(
+                    $this->litersMovementTracking->registerShiftReadingSubmission(
                         (int) $reading->id,
                         (int) auth()->id()
                     );
-                    $litersMovementAction = (string) ($correction['action'] ?? 'normal_submission');
                     $this->shiftReadingInventory->apply($reading);
                 }
 
@@ -178,9 +176,7 @@ class StaffReadingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => $litersMovementAction === 'replacement_created'
-                    ? 'Corrected settlement submitted. Liters Movement recorded only its net change against the generated reading; tank inventory was deducted once for this submission.'
-                    : 'Settlement submitted. Its meter-recorded fuel was added to the shared liters movement, deducted from the connected tanks, and is pending verification.',
+                'message' => 'Settlement submitted. Its meter-recorded fuel was added to the active liters movement, deducted from the connected tanks, and is pending verification. If its business dates overlap generated history, the admin will choose whether to insert it when approving.',
                 'id' => $readingId,
             ]);
         } catch (ValidationException $e) {
@@ -300,7 +296,9 @@ class StaffReadingController extends Controller
 
                 $this->litersMovementTracking->recordShiftReadingVoid(
                     (int) $settlement->id,
-                    (int) auth()->id()
+                    (int) auth()->id(),
+                    'Voided',
+                    trim((string) ($validated['void_reason'] ?? '')) ?: null
                 );
                 $this->shiftReadingInventory->restore($settlement);
                 $this->unlockSalesForReading($settlement);
@@ -312,7 +310,7 @@ class StaffReadingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Settlement voided. Its tank inventory was restored and locked transactions are available for correction again.',
+                'message' => 'Settlement voided. Its tank inventory was restored, locked transactions are available for correction again, and any affected Liters Movement record was recalculated.',
             ]);
         } catch (\Throwable $e) {
             return $this->jsonError($e->getMessage(), 500);

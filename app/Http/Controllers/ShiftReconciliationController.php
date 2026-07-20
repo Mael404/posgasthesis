@@ -86,6 +86,9 @@ class ShiftReconciliationController extends Controller
             $summary = $this->summaryStats($filters);
         }
 
+        $matchingGeneratedPeriods = $this->litersMovementTracking
+            ->matchingGeneratedPeriodsForReadings($readings->items());
+
         return view('pages.admin.shiftreconciliation', [
             'title' => 'Shift Reconciliation',
             'readings' => $readings,
@@ -95,6 +98,7 @@ class ShiftReconciliationController extends Controller
             'staffOptions' => $staffOptions,
             'perPage' => $perPage,
             'perPageOptions' => $perPageOptions,
+            'matchingGeneratedPeriods' => $matchingGeneratedPeriods,
         ]);
     }
 
@@ -164,10 +168,14 @@ class ShiftReconciliationController extends Controller
     {
         $validated = $request->validate([
             'id' => ['required', 'integer'],
+            'liters_movement_decision' => ['nullable', 'string', 'in:insert,skip'],
+            'generated_period_id' => ['nullable', 'integer'],
         ]);
 
         try {
-            DB::transaction(function () use ($validated) {
+            $litersMovementInsertion = null;
+
+            DB::transaction(function () use ($validated, &$litersMovementInsertion) {
                 $reading = $this->findReadingForAction((int) $validated['id'], true);
 
                 if (! $reading) {
@@ -178,16 +186,50 @@ class ShiftReconciliationController extends Controller
                     throw new \RuntimeException('Only pending settlements can be approved.');
                 }
 
+                $matchingPeriods = collect(
+                    $this->litersMovementTracking->matchingGeneratedPeriodsForReading($reading)
+                );
+                $decision = (string) ($validated['liters_movement_decision'] ?? '');
+
+                if ($matchingPeriods->isNotEmpty() && ! in_array($decision, ['insert', 'skip'], true)) {
+                    throw new \RuntimeException(
+                        'Choose whether this Shift Reading should be inserted into an overlapping generated Liters Movement record.'
+                    );
+                }
+
+                if ($decision === 'insert') {
+                    $selectedPeriodId = (int) ($validated['generated_period_id'] ?? 0);
+
+                    if (! $matchingPeriods->pluck('id')->contains($selectedPeriodId)) {
+                        throw new \RuntimeException('Choose one of the generated Liters Movement periods that overlaps the Shift Reading business-date range.');
+                    }
+                } elseif ($matchingPeriods->isEmpty() && $decision !== '') {
+                    $decision = 'skip';
+                }
+
                 [, $periodStart, $periodEnd] = $this->getReadingPeriodContext($reading);
                 $this->shiftReadingInventory->apply($reading);
                 $this->applyPendingCollections($reading, $periodStart, $periodEnd);
                 $this->lockSalesForReading($reading);
                 $this->updateReadingStatus((int) $validated['id'], 'Verified');
+
+                if ($decision === 'insert') {
+                    $litersMovementInsertion = $this->litersMovementTracking
+                        ->insertApprovedReadingIntoGeneratedPeriod(
+                            (int) $reading->id,
+                            (int) $validated['generated_period_id'],
+                            (int) auth()->id()
+                        );
+                }
             });
+
+            $insertedPeriodCode = $litersMovementInsertion['period']->period_code ?? null;
 
             return response()->json([
                 'success' => true,
-                'message' => 'Shift verified. The inventory deducted on submission remains applied, and pending payments were posted.',
+                'message' => $insertedPeriodCode
+                    ? "Shift verified and inserted into generated Liters Movement record {$insertedPeriodCode}; that record was recalculated from valid source readings."
+                    : 'Shift verified. The inventory deducted on submission remains applied, pending payments were posted, and no historical Liters Movement record was changed.',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -218,7 +260,9 @@ class ShiftReconciliationController extends Controller
 
                 $this->litersMovementTracking->recordShiftReadingVoid(
                     (int) $reading->id,
-                    (int) auth()->id()
+                    (int) auth()->id(),
+                    'Rejected',
+                    trim($validated['rejection_reason'])
                 );
                 $this->shiftReadingInventory->restore($reading);
                 $this->unlockSalesForReading($reading);
@@ -238,7 +282,7 @@ class ShiftReconciliationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Shift rejected. Its deducted tank inventory was restored and its transactions were unlocked.',
+                'message' => 'Shift rejected. Its deducted tank inventory was restored, its transactions were unlocked, and any affected Liters Movement record was recalculated.',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -274,7 +318,9 @@ class ShiftReconciliationController extends Controller
 
                 $this->litersMovementTracking->recordShiftReadingVoid(
                     (int) $reading->id,
-                    (int) auth()->id()
+                    (int) auth()->id(),
+                    'Voided',
+                    trim($validated['void_reason'])
                 );
                 $this->shiftReadingInventory->restore($reading);
                 $reversedCollections = $this->reverseShiftApprovalCollections($reading);
@@ -287,7 +333,7 @@ class ShiftReconciliationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => "Approval undone. Inventory was restored, {$reversedCollections} collection payment(s) were reset, and the settlement transactions were unlocked.",
+                'message' => "Approval undone. Inventory was restored, {$reversedCollections} collection payment(s) were reset, transactions were unlocked, and any affected Liters Movement record was recalculated.",
             ]);
         } catch (\Throwable $e) {
             return response()->json([

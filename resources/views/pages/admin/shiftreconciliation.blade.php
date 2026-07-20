@@ -40,6 +40,7 @@
         $readingTotal = method_exists($readings, 'total') ? $readings->total() : collect($readings ?? [])->count();
         $readingFirstItem = method_exists($readings, 'firstItem') ? $readings->firstItem() : ($readingTotal > 0 ? 1 : null);
         $readingLastItem = method_exists($readings, 'lastItem') ? $readings->lastItem() : $readingTotal;
+        $matchingGeneratedPeriods = $matchingGeneratedPeriods ?? [];
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -204,7 +205,24 @@
             ];
         };
 
-        $rowPayloads = collect($readings->items())->map(function ($reading) use ($periodLabel, $statusMeta) {
+        $rowPayloads = collect($readings->items())->map(function ($reading) use ($periodLabel, $statusMeta, $matchingGeneratedPeriods) {
+            $periodMatches = collect($matchingGeneratedPeriods[(int) ($reading->id ?? 0)] ?? [])
+                ->map(function ($period) {
+                    try {
+                        $from = \Carbon\Carbon::parse($period['started_at'])->format('M d, Y h:i A');
+                        $to = \Carbon\Carbon::parse($period['ended_at'])->format('M d, Y h:i A');
+                    } catch (\Throwable) {
+                        $from = (string) ($period['started_at'] ?? 'N/A');
+                        $to = (string) ($period['ended_at'] ?? 'N/A');
+                    }
+
+                    return array_merge($period, [
+                        'label' => (string) ($period['period_code'] ?? 'Generated Period') . " ({$from} to {$to})",
+                    ]);
+                })
+                ->values()
+                ->all();
+
             return [
                 'id' => (int) ($reading->id ?? 0),
                 'staff' => ucwords(strtolower((string) ($reading->staff_name ?? 'Staff'))),
@@ -213,6 +231,7 @@
                 'statusLabel' => $statusMeta($reading->status ?? 'Pending')['label'],
                 'admin_remarks' => (string) ($reading->admin_remarks ?? ''),
                 'rejection_reason' => (string) ($reading->rejection_reason ?? ''),
+                'matching_generated_periods' => $periodMatches,
             ];
         })->keyBy('id')->all();
     @endphp
@@ -635,8 +654,37 @@
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Approve Settlement?</h2>
                     <p id="approveSettlementMeta" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400"></p>
                 </div>
-                <div class="p-5">
+                <div class="space-y-4 p-5">
                     <p class="text-theme-sm text-gray-600 dark:text-gray-400">The meter-recorded liters were already deducted when the staff submitted this reading. Approval will finalize the variance, apply pending collections to customer ledgers, and mark the settlement as verified.</p>
+                    <div id="approveGeneratedPeriodDecision" class="hidden rounded-xl border border-warning-200 bg-warning-50 p-4 dark:border-warning-500/25 dark:bg-warning-500/10">
+                        <p class="text-theme-sm font-semibold text-warning-800 dark:text-warning-300">This reading's business-date range overlaps generated Liters Movement history.</p>
+                        <p class="mt-1 text-theme-xs leading-5 text-warning-700 dark:text-warning-400">Choose whether approval should insert it into a matching historical record. Matching uses the reading dates and each record's actual start/end dates.</p>
+
+                        <div class="mt-4 space-y-3">
+                            <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-200 bg-white p-3 dark:border-warning-500/25 dark:bg-gray-900">
+                                <input type="radio" name="approve_liters_movement_decision" value="insert" class="mt-0.5 size-4 border-gray-300 text-brand-500 focus:ring-brand-500">
+                                <span>
+                                    <span class="block text-theme-sm font-medium text-gray-800 dark:text-white/90">Insert into generated record</span>
+                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">Move this approved reading out of the active period and recalculate the selected history record.</span>
+                                </span>
+                            </label>
+
+                            <label class="block">
+                                <span class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Matching generated period</span>
+                                <select id="approveGeneratedPeriodId" class="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"></select>
+                            </label>
+
+                            <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-200 bg-white p-3 dark:border-warning-500/25 dark:bg-gray-900">
+                                <input type="radio" name="approve_liters_movement_decision" value="skip" class="mt-0.5 size-4 border-gray-300 text-brand-500 focus:ring-brand-500">
+                                <span>
+                                    <span class="block text-theme-sm font-medium text-gray-800 dark:text-white/90">Do not insert</span>
+                                    <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">Approve normally and leave this reading in the active Liters Movement period.</span>
+                                </span>
+                            </label>
+                        </div>
+
+                        <p id="approveGeneratedPeriodError" class="mt-3 hidden text-theme-xs font-medium text-error-600 dark:text-error-400">Choose whether to insert this reading into generated history.</p>
+                    </div>
                 </div>
                 <div class="flex flex-col-reverse gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end">
                     <button type="button" class="{{ $buttonClass }} h-11 text-theme-sm" data-close-modal="#approveModal">Cancel</button>
@@ -1535,6 +1583,26 @@
         function openApproveModal(id) {
             document.getElementById('approveReadingId').value = id;
             document.getElementById('approveSettlementMeta').textContent = settlementMeta(id);
+            const matches = reconciliationRows[id]?.matching_generated_periods || [];
+            const decisionBox = document.getElementById('approveGeneratedPeriodDecision');
+            const periodSelect = document.getElementById('approveGeneratedPeriodId');
+            const decisionError = document.getElementById('approveGeneratedPeriodError');
+
+            document.querySelectorAll('[name="approve_liters_movement_decision"]').forEach((radio) => {
+                radio.checked = false;
+            });
+            decisionError?.classList.add('hidden');
+            periodSelect.replaceChildren();
+
+            matches.forEach((period) => {
+                const option = document.createElement('option');
+                option.value = String(period.id);
+                option.textContent = period.label || period.period_code || `Generated Period #${period.id}`;
+                periodSelect.appendChild(option);
+            });
+
+            periodSelect.disabled = true;
+            decisionBox.classList.toggle('hidden', matches.length === 0);
             openModal('#approveModal');
         }
 
@@ -1577,6 +1645,13 @@
                 button.addEventListener('click', () => closeModal(button.dataset.closeModal));
             });
 
+            document.querySelectorAll('[name="approve_liters_movement_decision"]').forEach((radio) => {
+                radio.addEventListener('change', function() {
+                    document.getElementById('approveGeneratedPeriodId').disabled = this.value !== 'insert';
+                    document.getElementById('approveGeneratedPeriodError')?.classList.add('hidden');
+                });
+            });
+
             document.getElementById('remarksForm')?.addEventListener('submit', function(event) {
                 event.preventDefault();
                 const id = Number(document.getElementById('remarksReadingId').value);
@@ -1599,8 +1674,20 @@
             document.getElementById('approveForm')?.addEventListener('submit', function(event) {
                 event.preventDefault();
                 const id = Number(document.getElementById('approveReadingId').value);
+                const matches = reconciliationRows[id]?.matching_generated_periods || [];
+                const decision = document.querySelector('[name="approve_liters_movement_decision"]:checked')?.value || '';
+                const generatedPeriodId = Number(document.getElementById('approveGeneratedPeriodId').value || 0);
 
-                submitAction(approveUrl, { id }, document.getElementById('btnApprove'), 'Approving')
+                if (matches.length > 0 && !decision) {
+                    document.getElementById('approveGeneratedPeriodError')?.classList.remove('hidden');
+                    return;
+                }
+
+                submitAction(approveUrl, {
+                    id,
+                    liters_movement_decision: decision || null,
+                    generated_period_id: decision === 'insert' ? generatedPeriodId : null
+                }, document.getElementById('btnApprove'), 'Approving')
                     .then((data) => {
                         closeModal('#approveModal');
                         showToast(data.message || 'Settlement approved.');
