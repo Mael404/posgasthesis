@@ -3,6 +3,7 @@
 use App\Helpers\MenuHelper;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\AdminInventoryReportController;
 use App\Http\Controllers\AdminPriceManagementController;
 use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\AdminStockInController;
@@ -155,6 +156,8 @@ Route::middleware('auth')->group(function () {
         })->name('admin.shift-readings.notifications');
 
         Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
+        Route::get('/inventory/report', [AdminInventoryReportController::class, 'index'])->name('inventory.reports.index');
+        Route::post('/inventory/report', [AdminInventoryReportController::class, 'store'])->name('inventory.reports.store');
         Route::get('/inventory/tank-management', [AdminTankManagementController::class, 'index'])->name('inventory.tanks.index');
         Route::get('/inventory/stock-in', [AdminStockInController::class, 'index'])->name('inventory.stock.index');
         Route::post('/inventory/stock-in', [AdminStockInController::class, 'store'])->name('inventory.stockIn');

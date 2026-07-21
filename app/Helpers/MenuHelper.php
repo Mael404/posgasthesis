@@ -217,6 +217,11 @@ class MenuHelper
                 'name' => 'Inventory & Tanks',
                 'subItems' => [
                     [
+                        'name' => 'Inventory Report',
+                        'path' => self::routePath('inventory.reports.index', '/inventory/report'),
+                        'activePatterns' => ['/inventory/report'],
+                    ],
+                    [
                         'name' => 'Tank Management',
                         'path' => self::routePath('inventory.tanks.index', '/inventory/tank-management'),
                         'activePatterns' => ['/inventory/tank-management'],

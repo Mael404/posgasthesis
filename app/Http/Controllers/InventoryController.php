@@ -155,10 +155,14 @@ class InventoryController extends Controller
         $validated = $request->validate([
             'prices' => 'required|array',
             'prices.*' => 'required|numeric|min:1',
+            'bulk_prices' => 'nullable|array',
+            'bulk_prices.*' => 'nullable|numeric|min:0',
         ]);
 
         try {
             DB::transaction(function () use ($validated) {
+                $bulkPrices = collect($validated['bulk_prices'] ?? []);
+
                 foreach ($validated['prices'] as $fuelType => $price) {
                     $fuelType = trim((string) $fuelType);
 
@@ -169,6 +173,16 @@ class InventoryController extends Controller
                     $values = [
                         'price_per_liter' => (float) $price,
                     ];
+
+                    if ($this->hasColumn('fuel_prices', 'bulk_price_per_liter')) {
+                        $bulkPrice = $bulkPrices->first(
+                            fn ($value, $key) => strtolower(trim((string) $key)) === strtolower($fuelType)
+                        );
+
+                        if ($bulkPrice !== null && $bulkPrice !== '') {
+                            $values['bulk_price_per_liter'] = (float) $bulkPrice;
+                        }
+                    }
 
                     if ($this->hasColumn('fuel_prices', 'updated_at')) {
                         $values['updated_at'] = now();
@@ -249,6 +263,7 @@ class InventoryController extends Controller
                 return (object) [
                     'fuel_type' => $fuelType,
                     'price_per_liter' => (float) ($price->price_per_liter ?? 0),
+                    'bulk_price_per_liter' => (float) ($price->bulk_price_per_liter ?? 0),
                     'updated_at' => $price->updated_at ?? null,
                 ];
             })

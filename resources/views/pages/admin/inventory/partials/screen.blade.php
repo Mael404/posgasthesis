@@ -1164,7 +1164,7 @@
                 <div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Price Management</h2>
-                        <p class="mt-1 {{ $captionClass }}">Current fuel prices used by future pump transactions.</p>
+                        <p class="mt-1 {{ $captionClass }}">Current pump and bulk prices used by the price guide and future transactions.</p>
                     </div>
                     <button type="button" x-on:click="updateAllPrices" class="{{ $primaryButtonClass }}" :disabled="savingPrices">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1176,16 +1176,18 @@
 
                 <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                     <div class="max-w-full overflow-x-auto">
-                        <table class="min-w-[720px] w-full table-fixed">
+                        <table class="min-w-[860px] w-full table-fixed">
                             <colgroup>
-                                <col class="w-[34%]">
-                                <col class="w-[33%]">
-                                <col class="w-[33%]">
+                                <col class="w-[25%]">
+                                <col class="w-[25%]">
+                                <col class="w-[25%]">
+                                <col class="w-[25%]">
                             </colgroup>
                             <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
                                 <tr>
                                     <th class="{{ $thClass }}">Fuel Type</th>
-                                    <th class="{{ $thClass }}">Current Price/Liter</th>
+                                    <th class="{{ $thClass }}">Pump Price/Liter</th>
+                                    <th class="{{ $thClass }}">Bulk Price/Liter</th>
                                     <th class="{{ $thClass }}">Last Updated</th>
                                 </tr>
                             </thead>
@@ -1207,11 +1209,17 @@
                                                 <input type="number" min="1" step="0.01" class="fuel-price-input h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-right text-theme-sm font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" data-fuel="{{ $price->fuel_type }}" value="{{ number_format((float) $price->price_per_liter, 2, '.', '') }}">
                                             </div>
                                         </td>
+                                        <td class="{{ $tdClass }}">
+                                            <div class="flex max-w-[220px] rounded-lg shadow-theme-xs">
+                                                <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                                <input type="number" min="0" step="0.01" class="fuel-bulk-price-input h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-right text-theme-sm font-semibold text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" data-fuel="{{ $price->fuel_type }}" value="{{ number_format((float) ($price->bulk_price_per_liter ?? 0), 2, '.', '') }}">
+                                            </div>
+                                        </td>
                                         <td class="{{ $tdClass }}">{{ $price->updated_at ? \Carbon\Carbon::parse($price->updated_at)->format('F d, Y h:i A') : 'Not set' }}</td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="3" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No fuel prices found.</td>
+                                        <td colspan="4" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No fuel prices found.</td>
                                     </tr>
                                 @endforelse
                             </tbody>
@@ -1714,9 +1722,14 @@
                 },
                 async updateAllPrices() {
                     const prices = {};
+                    const bulkPrices = {};
 
                     document.querySelectorAll('.fuel-price-input').forEach(function(input) {
                         prices[input.dataset.fuel] = input.value;
+                    });
+
+                    document.querySelectorAll('.fuel-bulk-price-input').forEach(function(input) {
+                        bulkPrices[input.dataset.fuel] = input.value;
                     });
 
                     if (Object.keys(prices).length === 0) {
@@ -1745,7 +1758,7 @@
                                 'X-CSRF-TOKEN': config.csrfToken,
                                 'Accept': 'application/json'
                             },
-                            body: JSON.stringify({ prices })
+                            body: JSON.stringify({ prices, bulk_prices: bulkPrices })
                         });
                         const data = await response.json();
 
