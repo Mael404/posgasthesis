@@ -74,16 +74,23 @@
 
         @unless ($viewingSavedReport)
             <form method="GET" action="{{ route('inventory.reports.index') }}" class="{{ $card }} p-5 md:p-6 print:hidden">
+                @unless ($reportPeriodAvailable)
+                    <div class="mb-5 rounded-xl border border-brand-200 bg-brand-50 p-4 text-theme-sm text-brand-800 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                        The latest inventory report already covers activity through {{ \Carbon\Carbon::parse($latestReport->period_end)->format('M d, Y') }}.
+                        The next report period becomes available on {{ \Carbon\Carbon::parse($expectedStart)->format('M d, Y') }}.
+                    </div>
+                @endunless
+
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
                     <label class="block">
                         <span class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Report start</span>
-                        <input type="date" name="start_date" value="{{ old('start_date', $startDate) }}" class="mt-1.5 {{ $input }}" required>
+                        <input id="inventory-report-start-date" type="date" name="start_date" value="{{ old('start_date', $startDate) }}" max="{{ now()->toDateString() }}" class="mt-1.5 {{ $input }}" required {{ $reportPeriodAvailable ? '' : 'disabled' }}>
                     </label>
                     <label class="block">
                         <span class="text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Report end</span>
-                        <input type="date" name="end_date" value="{{ old('end_date', $endDate) }}" max="{{ now()->toDateString() }}" class="mt-1.5 {{ $input }}" required>
+                        <input id="inventory-report-end-date" type="date" name="end_date" value="{{ old('end_date', $endDate) }}" min="{{ $startDate }}" max="{{ now()->toDateString() }}" class="mt-1.5 {{ $input }}" required {{ $reportPeriodAvailable ? '' : 'disabled' }}>
                     </label>
-                    <button type="submit" class="{{ $primary }}">Refresh preview</button>
+                    <button type="submit" class="{{ $primary }}" {{ $reportPeriodAvailable ? '' : 'disabled' }}>Refresh preview</button>
                 </div>
 
                 @if (! $latestReport)
@@ -278,3 +285,20 @@
         @endif
     </div>
 @endsection
+
+@push('scripts')
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const startDate = document.getElementById('inventory-report-start-date');
+            const endDate = document.getElementById('inventory-report-end-date');
+
+            startDate?.addEventListener('change', () => {
+                endDate.min = startDate.value;
+
+                if (endDate.value < startDate.value) {
+                    endDate.value = startDate.value;
+                }
+            });
+        });
+    </script>
+@endpush

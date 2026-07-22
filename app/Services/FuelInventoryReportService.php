@@ -12,11 +12,11 @@ class FuelInventoryReportService
 {
     public const PRODUCTS = [
         'Premium' => [
-            'product_name' => 'Premium95',
+            'product_name' => 'Premium',
             'pumps' => [1, 3],
         ],
         'Unleaded' => [
-            'product_name' => 'Regular91',
+            'product_name' => 'Regular',
             'pumps' => [2, 4],
         ],
         'Diesel' => [

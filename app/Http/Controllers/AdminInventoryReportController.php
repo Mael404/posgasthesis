@@ -16,8 +16,8 @@ class AdminInventoryReportController extends Controller
     {
         $validated = $request->validate([
             'report_id' => ['nullable', 'integer'],
-            'start_date' => ['nullable', 'date'],
-            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+            'start_date' => ['nullable', 'date', 'before_or_equal:today'],
+            'end_date' => ['nullable', 'date', 'after_or_equal:start_date', 'before_or_equal:today'],
             'opening' => ['nullable', 'array'],
             'opening.*.liters' => ['nullable', 'numeric', 'min:0'],
             'opening.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
@@ -43,15 +43,18 @@ class AdminInventoryReportController extends Controller
             abort(404);
         }
 
+        $today = now()->toDateString();
         $expectedStart = $latest
             ? Carbon::parse($latest->period_end)->addDay()->toDateString()
             : now()->startOfMonth()->toDateString();
         $startDate = (string) ($validated['start_date'] ?? $expectedStart);
-        $endDate = (string) ($validated['end_date'] ?? now()->toDateString());
+        $endDate = (string) ($validated['end_date'] ?? (Carbon::parse($expectedStart)->gt($today) ? $expectedStart : $today));
+        $reportPeriodAvailable = Carbon::parse($startDate)->lte($endDate)
+            && Carbon::parse($endDate)->lte($today);
         $manualOpening = $this->manualOpening($validated['opening'] ?? []);
         $opening = $latest ? $reports->openingFromReport($latest) : $manualOpening;
 
-        if (! $viewingSavedReport && empty($missingTables)) {
+        if (! $viewingSavedReport && $reportPeriodAvailable && empty($missingTables)) {
             $calculation = $reports->calculate($startDate, $endDate, $opening);
 
             if ($latest && $startDate !== $expectedStart) {
@@ -68,6 +71,7 @@ class AdminInventoryReportController extends Controller
             'startDate' => $startDate,
             'endDate' => $endDate,
             'expectedStart' => $expectedStart,
+            'reportPeriodAvailable' => $reportPeriodAvailable,
             'manualOpening' => $manualOpening,
             'openingFromLastReport' => $latest ? $opening : null,
             'products' => FuelInventoryReportService::PRODUCTS,
