@@ -59,7 +59,7 @@
                         @endif
                     </div>
                     <p class="mt-2 max-w-3xl text-theme-sm leading-6 text-gray-500 dark:text-gray-400">
-                        Previous ending stock plus verified deliveries, less verified meter dispensing. Costs are assigned chronologically using moving weighted average, so later deliveries do not change earlier gross profit.
+                        Previous ending stock plus logged deliveries, less verified meter dispensing. Costs are assigned chronologically using moving weighted average, so later deliveries do not change earlier gross profit.
                     </p>
                 </div>
 
@@ -156,8 +156,8 @@
 
                 <section class="{{ $card }} overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
-                        <h2 class="font-semibold text-gray-800 dark:text-white/90">Verified Placed Orders</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Only admin-verified Tank Delivery Records are included.</p>
+                        <h2 class="font-semibold text-gray-800 dark:text-white/90">Logged Deliveries</h2>
+                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Admin delivery logs are included by delivery date.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="min-w-[760px] w-full">
@@ -166,7 +166,7 @@
                                 @forelse ($deliveries as $delivery)
                                     <tr><td class="{{ $td }}">{{ \Carbon\Carbon::parse($delivery['delivery_date'])->format('M d, Y') }}</td><td class="{{ $td }}">{{ $delivery['delivery_code'] ?: '#' . $delivery['id'] }}</td><td class="{{ $td }}">{{ $delivery['product_name'] }}</td><td class="{{ $td }}">{{ $delivery['supplier'] }}</td><td class="{{ $tdNumber }}">{{ $number($delivery['liters']) }}</td><td class="{{ $tdNumber }}">{{ $money($delivery['unit_cost']) }}</td><td class="{{ $tdNumber }} font-semibold">{{ $money($delivery['total_cost']) }}</td></tr>
                                 @empty
-                                    <tr><td colspan="7" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No verified deliveries in this report period.</td></tr>
+                                    <tr><td colspan="7" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No logged deliveries in this report period.</td></tr>
                                 @endforelse
                             </tbody>
                             <tfoot class="bg-gray-50 font-semibold dark:bg-white/[0.02]"><tr><td colspan="6" class="{{ $tdNumber }}">Total</td><td class="{{ $tdNumber }}">{{ $money($totals['purchase_value'] ?? 0) }}</td></tr></tfoot>
@@ -178,7 +178,7 @@
             <section class="{{ $card }} overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <h2 class="font-semibold text-gray-800 dark:text-white/90">Total Available Stock Before Dispensing</h2>
-                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">The worksheet's “Current Stock”: opening stock plus verified deliveries before liters are deducted.</p>
+                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">The worksheet's “Current Stock”: opening stock plus logged deliveries before liters are deducted.</p>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-[720px] w-full">

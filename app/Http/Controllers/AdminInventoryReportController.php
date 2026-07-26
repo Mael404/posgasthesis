@@ -27,7 +27,6 @@ class AdminInventoryReportController extends Controller
             'fuel_inventory_reports',
             'fuel_inventory_report_lines',
             'inventory_logs',
-            'tank_delivery_records',
             'tanks',
             'shift_readings',
             'fuel_prices',

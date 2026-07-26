@@ -324,12 +324,6 @@ class MenuHelper
                 'activePatterns' => ['/staff/shift-readings', '/staff/shift-readings/*', '/staff/readings', '/staff/readings/*'],
             ],
             [
-                'icon' => 'task',
-                'name' => 'Tank Delivery Record',
-                'path' => self::routePath('staff.tank-delivery-records.index', '/staff/tank-delivery-records'),
-                'activePatterns' => ['/staff/tank-delivery-records', '/staff/tank-delivery-records/*'],
-            ],
-            [
                 'icon' => 'tables',
                 'name' => 'Transaction History',
                 'path' => self::routePath('staff.sales.history', '/staff/sales-history'),

@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\InventoryLog;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -34,7 +33,7 @@ class FuelInventoryReportService
             throw new RuntimeException('The report end date must be on or after its start date.');
         }
 
-        $deliveries = $this->verifiedDeliveries($start, $end);
+        $deliveries = $this->deliveryLogs($start, $end);
         $readings = $this->verifiedShiftReadings($start, $end);
         $adjustmentsByReading = $this->activeAdjustmentsByReading($readings->pluck('id')->map(fn ($id) => (int) $id)->all());
         $prices = $this->pricesByFuel();
@@ -430,17 +429,15 @@ class FuelInventoryReportService
         });
     }
 
-    private function verifiedDeliveries(Carbon $start, Carbon $end)
+    private function deliveryLogs(Carbon $start, Carbon $end)
     {
         if (! Schema::hasTable('inventory_logs')
-            || ! Schema::hasTable('tanks')
-            || ! Schema::hasTable('tank_delivery_records')) {
+            || ! Schema::hasTable('tanks')) {
             return collect();
         }
 
         $query = DB::table('inventory_logs as logs')
-            ->join('tanks', 'logs.tank_id', '=', 'tanks.id')
-            ->leftJoin('tank_delivery_records as records', 'logs.id', '=', 'records.inventory_log_id');
+            ->join('tanks', 'logs.tank_id', '=', 'tanks.id');
 
         if (Schema::hasTable('suppliers')) {
             $query->leftJoin('suppliers', 'logs.supplier_id', '=', 'suppliers.id');
@@ -450,11 +447,10 @@ class FuelInventoryReportService
             'logs.id',
             'logs.delivery_code',
             'logs.delivery_date',
+            Schema::hasColumn('inventory_logs', 'created_at') ? 'logs.created_at' : DB::raw('null as created_at'),
             'logs.liters_delivered',
             'logs.total_cost',
             'tanks.fuel_type',
-            'records.record_date',
-            'records.record_time',
         ];
         $select[] = Schema::hasTable('suppliers')
             ? 'suppliers.name as supplier_name'
@@ -463,9 +459,9 @@ class FuelInventoryReportService
         return $query
             ->whereDate('logs.delivery_date', '>=', $start->toDateString())
             ->whereDate('logs.delivery_date', '<=', $end->toDateString())
-            ->whereRaw('LOWER(TRIM(logs.delivery_status)) = ?', [strtolower(InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED)])
             ->select($select)
             ->orderBy('logs.delivery_date')
+            ->orderBy('logs.created_at')
             ->orderBy('logs.id')
             ->get();
     }
@@ -531,8 +527,10 @@ class FuelInventoryReportService
 
     private function deliveryOccurredAt(object $delivery): Carbon
     {
-        $date = $delivery->record_date ?: $delivery->delivery_date;
-        $time = $delivery->record_time ?: '00:00:00';
+        $date = Carbon::parse($delivery->delivery_date)->toDateString();
+        $time = ! empty($delivery->created_at)
+            ? Carbon::parse($delivery->created_at)->format('H:i:s')
+            : '00:00:00';
 
         return Carbon::parse(trim("{$date} {$time}"));
     }

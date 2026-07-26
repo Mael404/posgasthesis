@@ -7,7 +7,6 @@ use App\Http\Controllers\AdminInventoryReportController;
 use App\Http\Controllers\AdminPriceManagementController;
 use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\AdminStockInController;
-use App\Http\Controllers\AdminTankDeliveryRecordVerificationController;
 use App\Http\Controllers\AdminTankManagementController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\BillingController;
@@ -19,7 +18,6 @@ use App\Http\Controllers\PrintedTransactionController;
 use App\Http\Controllers\ShiftReconciliationController;
 use App\Http\Controllers\StaffAnnouncementController;
 use App\Http\Controllers\StaffController;
-use App\Http\Controllers\StaffTankDeliveryRecordController;
 use App\Http\Controllers\StaffPumpController;
 use App\Http\Controllers\StaffReadingController;
 use App\Http\Controllers\StaffSalesController;
@@ -161,12 +159,6 @@ Route::middleware('auth')->group(function () {
         Route::get('/inventory/tank-management', [AdminTankManagementController::class, 'index'])->name('inventory.tanks.index');
         Route::get('/inventory/stock-in', [AdminStockInController::class, 'index'])->name('inventory.stock.index');
         Route::post('/inventory/stock-in', [AdminStockInController::class, 'store'])->name('inventory.stockIn');
-        Route::post('/inventory/tank-delivery-records/{record}/verify', [AdminTankDeliveryRecordVerificationController::class, 'verify'])
-            ->whereNumber('record')
-            ->name('inventory.tank-delivery-records.verify');
-        Route::post('/inventory/tank-delivery-records/{record}/reject', [AdminTankDeliveryRecordVerificationController::class, 'reject'])
-            ->whereNumber('record')
-            ->name('inventory.tank-delivery-records.reject');
         Route::get('/inventory/price-management', [AdminPriceManagementController::class, 'index'])->name('inventory.prices.index');
         Route::post('/inventory/prices', [AdminPriceManagementController::class, 'update'])->name('inventory.updatePrice');
 
@@ -251,17 +243,6 @@ Route::middleware('auth')->group(function () {
         Route::get('/readings/{id}/details', [StaffReadingController::class, 'getDetails'])->name('readings.details');
 
         Route::post('/shift-readings/{reading}/void', [StaffReadingController::class, 'voidReading'])->name('readings.void');
-
-        Route::prefix('tank-delivery-records')->name('tank-delivery-records.')->group(function () {
-            Route::get('/', [StaffTankDeliveryRecordController::class, 'index'])->name('index');
-            Route::post('/', [StaffTankDeliveryRecordController::class, 'store'])->name('store');
-            Route::put('/{record}', [StaffTankDeliveryRecordController::class, 'update'])
-                ->whereNumber('record')
-                ->name('update');
-            Route::delete('/{record}', [StaffTankDeliveryRecordController::class, 'destroy'])
-                ->whereNumber('record')
-                ->name('destroy');
-        });
 
         Route::get('/sales-history', [StaffSalesController::class, 'index'])->name('sales.history');
 

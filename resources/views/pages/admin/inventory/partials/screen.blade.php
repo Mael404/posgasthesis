@@ -15,14 +15,6 @@
         $missingInventoryTables = $missingInventoryTables ?? [];
         $canManagePrices = $canManagePrices ?? false;
         $viewErrors = $errors ?? new \Illuminate\Support\ViewErrorBag();
-        $fuelTypes = \App\Models\TankDeliveryRecord::FUEL_TYPES;
-        $checklistItems = [
-            'security_seals_passed' => 'Security Seals',
-            'product_level_passed' => 'Product Level',
-            'ethanol_blend_passed' => 'Ethanol Blend',
-            'free_of_water_passed' => 'Free of Water',
-            'fully_drained_compartment_passed' => 'Fully Drained Compartment',
-        ];
         $inventoryPage = $inventoryPage ?? null;
         $activeTab = in_array($inventoryPage, ['tanks', 'stock', 'pricing'], true)
             ? $inventoryPage
@@ -80,8 +72,6 @@
         $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
-        $iconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
-        $viewIconButtonClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-theme-xs transition hover:border-brand-300 hover:bg-brand-100 dark:border-brand-500/25 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/15 disabled:cursor-not-allowed disabled:opacity-45';
         $thClass = 'px-5 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'px-5 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $tdClass = 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300';
@@ -93,89 +83,6 @@
         $tankTransactionTdPrimaryClass = 'px-3 py-4 align-middle text-theme-sm font-medium leading-6 text-gray-800 dark:text-white/90';
         $tankTransactionTdNumberClass = 'whitespace-nowrap px-3 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $dateIcon = '<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" class="size-6"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 2C8.41421 2 8.75 2.33579 8.75 2.75V3.75H15.25V2.75C15.25 2.33579 15.5858 2 16 2C16.4142 2 16.75 2.33579 16.75 2.75V3.75H18.5C19.7426 3.75 20.75 4.75736 20.75 6V9V19C20.75 20.2426 19.7426 21.25 18.5 21.25H5.5C4.25736 21.25 3.25 20.2426 3.25 19V9V6C3.25 4.75736 4.25736 3.75 5.5 3.75H7.25V2.75C7.25 2.33579 7.58579 2 8 2ZM8 5.25H5.5C5.08579 5.25 4.75 5.58579 4.75 6V8.25H19.25V6C19.25 5.58579 18.9142 5.25 18.5 5.25H16H8ZM19.25 9.75H4.75V19C4.75 19.4142 5.08579 19.75 5.5 19.75H18.5C18.9142 19.75 19.25 19.4142 19.25 19V9.75Z" fill="currentColor"></path></svg></span>';
-
-        $dateLabel = function ($value, $format = 'M d, Y') {
-            if (empty($value)) {
-                return 'N/A';
-            }
-
-            try {
-                return \Carbon\Carbon::parse($value)->format($format);
-            } catch (\Throwable) {
-                return (string) $value;
-            }
-        };
-
-        $timeLabel = function ($value) {
-            if (empty($value)) {
-                return 'N/A';
-            }
-
-            try {
-                return \Carbon\Carbon::parse($value)->format('h:i A');
-            } catch (\Throwable) {
-                return (string) $value;
-            }
-        };
-
-        $numberLabel = function ($value, $suffix = '') {
-            if ($value === null || $value === '') {
-                return 'N/A';
-            }
-
-            return number_format((float) $value, 2) . $suffix;
-        };
-
-        $statusMeta = function ($status) {
-            $status = trim((string) $status);
-
-            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED) {
-                return [
-                    'label' => 'Verified',
-                    'class' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
-                    'can_review' => false,
-                ];
-            }
-
-            if ($status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_REJECTED) {
-                return [
-                    'label' => 'Rejected',
-                    'class' => 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400',
-                    'can_review' => false,
-                ];
-            }
-
-            if ($status === \App\Models\InventoryLog::STATUS_PENDING_ADMIN_VERIFICATION
-                || $status === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_COMPLETED) {
-                return [
-                    'label' => 'Pending Admin Verification',
-                    'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
-                    'can_review' => true,
-                ];
-            }
-
-            if ($status === \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD || $status === '') {
-                return [
-                    'label' => 'Pending Tank Delivery Record',
-                    'class' => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
-                    'can_review' => false,
-                ];
-            }
-
-            return [
-                'label' => $status,
-                'class' => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
-                'can_review' => false,
-            ];
-        };
-
-        $statusLabel = function ($status) use ($statusMeta) {
-            return $statusMeta($status)['label'];
-        };
-
-        $statusClass = function ($status) use ($statusMeta) {
-            return $statusMeta($status)['class'];
-        };
 
         $fuelStyle = function ($fuel) {
             $fuel = strtolower((string) $fuel);
@@ -215,45 +122,6 @@
             ];
         };
 
-        $checklistLabelForFuel = function ($field, $label, $fuelType) {
-            $fuelType = strtolower((string) $fuelType);
-
-            if ($field === 'ethanol_blend_passed' && str_contains($fuelType, 'diesel')) {
-                return 'Visual Appearance';
-            }
-
-            return $label;
-        };
-
-        $fuelKeyForFuelType = function ($fuelType) use ($fuelTypes) {
-            $fuelType = strtolower(trim((string) $fuelType));
-
-            if ($fuelType === '') {
-                return null;
-            }
-
-            if (str_contains($fuelType, 'regular')) {
-                return 'unleaded';
-            }
-
-            foreach ($fuelTypes as $fuel => $label) {
-                $fuelLabel = strtolower((string) $label);
-
-                if ($fuelType === $fuel || $fuelType === $fuelLabel || str_contains($fuelType, $fuel) || str_contains($fuelType, $fuelLabel)) {
-                    return $fuel;
-                }
-            }
-
-            return null;
-        };
-
-        $fuelTypesForDelivery = function ($delivery) use ($fuelTypes, $fuelKeyForFuelType) {
-            $fuel = $fuelKeyForFuelType($delivery->fuel_type ?? null);
-
-            return $fuel && array_key_exists($fuel, $fuelTypes)
-                ? [$fuel => $fuelTypes[$fuel]]
-                : $fuelTypes;
-        };
     @endphp
 
     <x-common.page-breadcrumb pageTitle="{{ $inventoryTitle }}" />
@@ -275,7 +143,7 @@
             ])->values())
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', deliveryModalOpen || deliveryDetailsModal !== null || rejectDialog.open || confirmation.open || messageDialog.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', deliveryModalOpen || confirmation.open || messageDialog.open)"
         class="space-y-6">
         <style>
             [x-cloak] { display: none !important; }
@@ -699,17 +567,15 @@
 
                 <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                     <div class="max-h-[620px] max-w-full overflow-auto custom-scrollbar">
-                        <table class="min-w-[1120px] w-full table-fixed">
+                        <table class="min-w-[940px] w-full table-fixed">
                             <colgroup>
-                                <col class="w-[16%]">
-                                <col class="w-[10%]">
-                                <col class="w-[13%]">
-                                <col class="w-[14%]">
-                                <col class="w-[10%]">
-                                <col class="w-[9%]">
-                                <col class="w-[11%]">
-                                <col class="w-[10%]">
-                                <col class="w-[7%]">
+                                <col class="w-[18%]">
+                                <col class="w-[12%]">
+                                <col class="w-[17%]">
+                                <col class="w-[17%]">
+                                <col class="w-[12%]">
+                                <col class="w-[12%]">
+                                <col class="w-[12%]">
                             </colgroup>
                             <thead class="sticky top-0 z-1 border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
                                 <tr>
@@ -719,9 +585,7 @@
                                     <th class="{{ $thClass }}">Tank / Fuel</th>
                                     <th class="{{ $thNumberClass }}">Volume Added</th>
                                     <th class="{{ $thNumberClass }}">Total Cost</th>
-                                    <th class="{{ $thClass }}">Status</th>
                                     <th class="{{ $thClass }}">Logged At</th>
-                                    <th class="{{ $thClass }}">Details</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -729,10 +593,6 @@
                                     @php
                                         $style = $fuelStyle($log->fuel_type);
                                         $deliveryCode = trim((string) ($log->delivery_code ?? ''));
-                                        $deliveryStatus = trim((string) ($log->delivery_status ?? '')) ?: \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
-                                        $deliveryStatusMeta = $statusMeta($deliveryStatus);
-                                        $deliveryDetailsId = 'delivery-details-' . $log->id;
-                                        $hasDeliveryDetails = ! empty($log->tank_delivery_record_id);
                                     @endphp
                                     <tr>
                                         <td class="{{ $tdPrimaryClass }}">
@@ -753,30 +613,11 @@
                                         </td>
                                         <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">+{{ number_format((float) $log->liters_delivered, 2) }} L</td>
                                         <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $log->total_cost, 2) }}</td>
-                                        <td class="{{ $tdClass }}">
-                                            <span class="inline-flex max-w-[170px] whitespace-normal rounded-full px-2.5 py-1 text-theme-xs font-medium leading-5 {{ $deliveryStatusMeta['class'] }}">
-                                                {{ $deliveryStatusMeta['label'] }}
-                                            </span>
-                                        </td>
                                         <td class="{{ $tdClass }}">{{ $log->created_at ? \Carbon\Carbon::parse($log->created_at)->format('M d, h:i A') : 'N/A' }}</td>
-                                        <td class="{{ $tdClass }}">
-                                            @if ($hasDeliveryDetails)
-                                                <button type="button" class="{{ $viewIconButtonClass }}" x-on:click="openDeliveryDetails(@js($deliveryDetailsId))" title="View delivery details" aria-label="View delivery details for {{ $deliveryCode ?: 'delivery log ' . $log->id }}">
-                                                    <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                        <path d="M2.25 12s3.5-6.75 9.75-6.75S21.75 12 21.75 12s-3.5 6.75-9.75 6.75S2.25 12 2.25 12Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-                                                        <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke="currentColor" stroke-width="1.7" />
-                                                    </svg>
-                                                </button>
-                                            @elseif ($deliveryStatusMeta['can_review'])
-                                                <span class="text-theme-xs text-error-500 dark:text-error-400">Missing</span>
-                                            @else
-                                                <span class="text-theme-xs text-gray-400 dark:text-gray-500">-</span>
-                                            @endif
-                                        </td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="9" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No delivery records found.</td>
+                                        <td colspan="7" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">No delivery records found.</td>
                                     </tr>
                                 @endforelse
                             </tbody>
@@ -784,257 +625,6 @@
                     </div>
                 </div>
             </section>
-
-            @foreach ($deliveryLogs as $log)
-                @if (! empty($log->tank_delivery_record_id))
-                    @php
-                        $deliveryDetailsId = 'delivery-details-' . $log->id;
-                        $deliveryStatus = trim((string) ($log->delivery_status ?? '')) ?: \App\Models\InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD;
-                        $deliveryStatusMeta = $statusMeta($deliveryStatus);
-                        $verifyFormId = 'verify-tdr-' . $log->tank_delivery_record_id;
-                        $rejectFormId = 'reject-tdr-' . $log->tank_delivery_record_id;
-                    @endphp
-
-                    <template x-teleport="body">
-                        <div
-                            x-cloak
-                            x-show="deliveryDetailsModal === @js($deliveryDetailsId)"
-                            x-transition.opacity
-                            class="fixed inset-0 flex items-center justify-center overflow-y-auto bg-gray-900/55 p-4 backdrop-blur-sm"
-                            style="z-index: 2147483647;"
-                            x-on:keydown.escape.window="closeDeliveryDetails()">
-                            <div class="absolute inset-0" x-on:click="closeDeliveryDetails()"></div>
-
-                            <div
-                                x-show="deliveryDetailsModal === @js($deliveryDetailsId)"
-                                x-transition
-                                class="relative mx-auto flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950">
-                                <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 dark:border-gray-800 sm:px-6">
-                                    <div class="min-w-0">
-                                        <p class="{{ $labelClass }}">Delivery Details</p>
-                                        <h2 class="mt-1 truncate text-lg font-semibold text-gray-800 dark:text-white/90">{{ $log->delivery_code ?: 'Delivery Log #' . $log->id }}</h2>
-                                    </div>
-                                    <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeDeliveryDetails()" aria-label="Close delivery details">
-                                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                                        </svg>
-                                    </button>
-                                </div>
-
-                                <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar sm:p-6">
-                                    <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Status</p>
-                                            <span class="mt-2 inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $deliveryStatusMeta['class'] }}">{{ $deliveryStatusMeta['label'] }}</span>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Record Date</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->record_date) }}</p>
-                                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $timeLabel($log->record_time) }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Plate Number</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->plate_number ?: 'N/A' }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Submitted By</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->staff_name ?? 'Staff' }}</p>
-                                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $dateLabel($log->tank_delivery_record_created_at ?? null, 'M d, h:i A') }}</p>
-                                        </div>
-                                    </div>
-
-                                    <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-5">
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Supplier</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->supplier_name }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Tank / Fuel</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->tank_name }} - {{ $log->fuel_type }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Admin Delivery Log</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->delivery_date) }}</p>
-                                            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $dateLabel($log->created_at, 'M d, h:i A') }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Volume Added</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-success-600 dark:text-success-500">+{{ $numberLabel($log->liters_delivered, ' L') }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                            <p class="{{ $labelClass }}">Total Cost</p>
-                                            <p class="mt-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">&#8369;{{ $numberLabel($log->total_cost) }}</p>
-                                        </div>
-                                    </div>
-
-                                    <section class="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                                            <div>
-                                                <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Verification Status</h3>
-                                                <p class="mt-1 {{ $captionClass }}">Admin review for this tank line inspection.</p>
-                                            </div>
-                                            <span class="inline-flex w-fit rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $deliveryStatusMeta['class'] }}">{{ $deliveryStatusMeta['label'] }}</span>
-                                        </div>
-
-                                        @if ($deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_VERIFIED)
-                                            <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Verified By</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->verified_by_name ?? 'Admin' }}</p>
-                                                </div>
-                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Verified At</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->verified_at ?? null, 'M d, Y h:i A') }}</p>
-                                                </div>
-                                            </div>
-                                        @elseif ($deliveryStatus === \App\Models\InventoryLog::STATUS_TANK_DELIVERY_RECORD_REJECTED)
-                                            <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Rejected By</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $log->rejected_by_name ?? 'Admin' }}</p>
-                                                </div>
-                                                <div class="rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
-                                                    <p class="{{ $labelClass }}">Rejected At</p>
-                                                    <p class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $dateLabel($log->rejected_at ?? null, 'M d, Y h:i A') }}</p>
-                                                </div>
-                                            </div>
-                                            <div class="mt-3 rounded-lg border border-error-100 bg-error-50 p-3 dark:border-error-500/20 dark:bg-error-500/10">
-                                                <p class="{{ $labelClass }} text-error-700 dark:text-error-400">Rejection Reason</p>
-                                                <p class="mt-1 text-theme-sm leading-6 text-error-700 dark:text-error-300">{{ $log->rejection_reason ?: 'No reason recorded.' }}</p>
-                                            </div>
-                                        @else
-                                            <p class="mt-4 text-theme-sm text-gray-600 dark:text-gray-400">
-                                                {{ $deliveryStatusMeta['can_review'] ? 'This record is ready for admin verification.' : 'No admin verification action is available for this status.' }}
-                                            </p>
-                                        @endif
-                                    </section>
-
-                                    <section class="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Inspection Checklist</h3>
-                                        <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                                            @foreach ($checklistItems as $field => $label)
-                                                @php
-                                                    $displayLabel = $checklistLabelForFuel($field, $label, $log->fuel_type);
-                                                    $passed = (bool) ($log->{$field} ?? false);
-                                                @endphp
-                                                <div class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
-                                                    <span class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">{{ $displayLabel }}</span>
-                                                    <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $passed ? 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500' : 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400' }}">
-                                                        {{ $passed ? 'Passed' : 'Not Passed' }}
-                                                    </span>
-                                                </div>
-                                            @endforeach
-                                        </div>
-                                    </section>
-
-                                    <section class="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                                        <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Fuel Dipstick Summary</h3>
-                                        <div class="mt-3 max-w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-                                            <table class="min-w-[920px] w-full table-fixed">
-                                                <colgroup>
-                                                    <col class="w-[14%]">
-                                                    <col class="w-[17%]">
-                                                    <col class="w-[17%]">
-                                                    <col class="w-[19%]">
-                                                    <col class="w-[16%]">
-                                                    <col class="w-[17%]">
-                                                </colgroup>
-                                                <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
-                                                    <tr>
-                                                        <th class="{{ $thClass }}">Fuel</th>
-                                                        <th class="{{ $thClass }} text-right">Before</th>
-                                                        <th class="{{ $thClass }} text-right">After</th>
-                                                        <th class="{{ $thClass }} text-right">Dispensed</th>
-                                                        <th class="{{ $thClass }} text-right">After - Before</th>
-                                                        <th class="{{ $thClass }} text-right">Summary</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                                                    @foreach ($fuelTypesForDelivery($log) as $fuel => $label)
-                                                        @php
-                                                            $beforeField = "before_unloading_dipstick_{$fuel}";
-                                                            $afterField = "after_unloading_dipstick_{$fuel}";
-                                                            $dispensedField = "total_dispensed_{$fuel}";
-                                                            $totalField = "after_before_total_{$fuel}";
-                                                            $summaryValue = $log->{$dispensedField} !== null && $log->{$totalField} !== null
-                                                                ? (float) $log->{$dispensedField} + (float) $log->{$totalField}
-                                                                : null;
-                                                        @endphp
-                                                        <tr>
-                                                            <td class="{{ $tdPrimaryClass }}">{{ $label }}</td>
-                                                            <td class="{{ $tdNumberClass }}">{{ $numberLabel($log->{$beforeField}) }}</td>
-                                                            <td class="{{ $tdNumberClass }}">{{ $numberLabel($log->{$afterField}) }}</td>
-                                                            <td class="{{ $tdNumberClass }}">{{ $numberLabel($log->{$dispensedField}) }}</td>
-                                                            <td class="{{ $tdNumberClass }} font-semibold">{{ $numberLabel($log->{$totalField}) }}</td>
-                                                            <td class="{{ $tdNumberClass }} font-semibold">{{ $numberLabel($summaryValue) }}</td>
-                                                        </tr>
-                                                    @endforeach
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </section>
-                                </div>
-
-                                <div class="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 sm:flex-row sm:justify-end sm:px-6">
-                                    @if ($deliveryStatusMeta['can_review'])
-                                        <form id="{{ $verifyFormId }}" method="POST" action="{{ route('inventory.tank-delivery-records.verify', $log->tank_delivery_record_id) }}" class="hidden">
-                                            @csrf
-                                        </form>
-                                        <button type="button" class="{{ $secondaryButtonClass }} border-error-200 text-error-600 hover:bg-error-50 hover:text-error-700 dark:border-error-500/25 dark:text-error-400 dark:hover:bg-error-500/10" x-on:click="openRejectDialog(@js($deliveryDetailsId), @js($rejectFormId))">
-                                            Reject Record
-                                        </button>
-                                        <button type="button" class="{{ $primaryButtonClass }} bg-success-500 hover:bg-success-600" x-on:click="confirmVerifyRecord(@js($verifyFormId))">
-                                            Verify Record
-                                        </button>
-                                    @endif
-                                    <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeDeliveryDetails()">Close</button>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
-
-                    @if ($deliveryStatusMeta['can_review'])
-                        <template x-teleport="body">
-                            <div
-                                x-cloak
-                                x-show="rejectDialog.open && rejectDialog.deliveryId === @js($deliveryDetailsId)"
-                                x-transition.opacity
-                                class="fixed inset-0 flex items-center justify-center bg-gray-900/55 p-4 backdrop-blur-sm"
-                                style="z-index: 2147483647;"
-                                x-on:keydown.escape.window="closeRejectDialog()">
-                                <div class="absolute inset-0" x-on:click="closeRejectDialog()"></div>
-
-                                <form id="{{ $rejectFormId }}" method="POST" action="{{ route('inventory.tank-delivery-records.reject', $log->tank_delivery_record_id) }}" class="relative w-full max-w-lg rounded-2xl border border-white/70 bg-white p-5 shadow-2xl dark:border-gray-800 dark:bg-gray-950 sm:p-6">
-                                    @csrf
-                                    <div class="flex items-start justify-between gap-4">
-                                        <div>
-                                            <p class="{{ $labelClass }}">Reject Record</p>
-                                            <h3 class="mt-1 text-lg font-semibold text-gray-800 dark:text-white/90">{{ $log->delivery_code ?: 'Delivery Log #' . $log->id }}</h3>
-                                        </div>
-                                        <button type="button" class="{{ $iconButtonClass }}" x-on:click="closeRejectDialog()" aria-label="Close rejection dialog">
-                                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                                            </svg>
-                                        </button>
-                                    </div>
-
-                                    <label class="mt-5 block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                                        <span>Rejection Reason</span>
-                                        <textarea name="rejection_reason" rows="5" class="mt-1.5 min-h-[140px] w-full rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800" required maxlength="2000" placeholder="Explain what staff should correct before resubmitting."></textarea>
-                                    </label>
-
-                                    <div class="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                                        <button type="button" class="{{ $secondaryButtonClass }}" x-on:click="closeRejectDialog()">Cancel</button>
-                                        <button type="button" class="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-error-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-error-600" x-on:click="submitRejectRecord(@js($rejectFormId))">
-                                            Submit Rejection
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </template>
-                    @endif
-                @endif
-            @endforeach
 
             <template x-teleport="body">
                 <div
@@ -1334,8 +924,6 @@
                 maxDeliveryRows: Math.min(3, Math.max(1, (config.tanks || []).length)),
                 deliveryRows: [],
                 deliveryModalOpen: false,
-                deliveryDetailsModal: null,
-                rejectDialog: { open: false, deliveryId: null, formId: null },
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
                 confirmation: {
@@ -1490,51 +1078,6 @@
 
                     this.deliveryModalOpen = false;
                 },
-                openDeliveryDetails(id) {
-                    this.deliveryDetailsModal = id;
-                },
-                closeDeliveryDetails() {
-                    if (this.rejectDialog.open) {
-                        return;
-                    }
-
-                    this.deliveryDetailsModal = null;
-                },
-                openRejectDialog(deliveryId, formId) {
-                    this.rejectDialog = { open: true, deliveryId, formId };
-
-                    window.setTimeout(() => {
-                        const form = document.getElementById(formId);
-                        form?.querySelector('[name="rejection_reason"]')?.focus({ preventScroll: true });
-                    }, 50);
-                },
-                closeRejectDialog() {
-                    this.rejectDialog = { open: false, deliveryId: null, formId: null };
-                },
-                async confirmVerifyRecord(formId) {
-                    const confirmed = await this.askConfirmation({
-                        title: 'Verify Record',
-                        message: 'Verify this Tank Delivery Record inspection?',
-                        details: 'This approves the staff inspection record only. Tank volume will not be changed.',
-                        confirmText: 'Verify Record',
-                        tone: 'success'
-                    });
-
-                    if (!confirmed) {
-                        return;
-                    }
-
-                    document.getElementById(formId)?.submit();
-                },
-                submitRejectRecord(formId) {
-                    const form = document.getElementById(formId);
-
-                    if (!form || !form.reportValidity()) {
-                        return;
-                    }
-
-                    form.submit();
-                },
                 responseMessage(data, fallback) {
                     const firstError = data && data.errors ? Object.values(data.errors).flat()[0] : '';
 
@@ -1682,7 +1225,7 @@
                     const confirmed = await this.askConfirmation({
                         title: 'Save Delivery',
                         message: 'Save ' + this.deliveryRows.length + ' ' + entryLabel + ' totaling ' + totalLiters.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' liters under one delivery code?',
-                        details: 'A delivery code will be generated for the staff Tank Delivery Record module.',
+                        details: 'This saves a normal admin delivery log and updates the selected tank volume.',
                         confirmText: 'Save Delivery',
                         tone: 'success'
                     });

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\InventoryLog;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -285,128 +284,17 @@ class InventoryController extends Controller
             return collect();
         }
 
-        $hasTankDeliveryRecords = $this->hasTable('tank_delivery_records');
-        $hasUsersTable = $this->hasTable('users');
-        $recordColumns = [
-            'tank_delivery_record_id',
-            'staff_id',
-            'record_date',
-            'record_time',
-            'plate_number',
-            'security_seals_passed',
-            'product_level_passed',
-            'ethanol_blend_passed',
-            'free_of_water_passed',
-            'fully_drained_compartment_passed',
-            'before_unloading_dipstick_premium',
-            'after_unloading_dipstick_premium',
-            'total_dispensed_premium',
-            'after_before_total_premium',
-            'delivery_summary_premium',
-            'before_unloading_dipstick_unleaded',
-            'after_unloading_dipstick_unleaded',
-            'total_dispensed_unleaded',
-            'after_before_total_unleaded',
-            'delivery_summary_unleaded',
-            'before_unloading_dipstick_diesel',
-            'after_unloading_dipstick_diesel',
-            'total_dispensed_diesel',
-            'after_before_total_diesel',
-            'delivery_summary_diesel',
-            'staff_name',
-            'tank_delivery_record_created_at',
-            'verified_by',
-            'verified_at',
-            'verified_by_name',
-            'rejected_by',
-            'rejected_at',
-            'rejected_by_name',
-            'rejection_reason',
-        ];
-        $selectColumns = [
-            'inventory_logs.*',
-            'tanks.name as tank_name',
-            'tanks.fuel_type',
-            'suppliers.name as supplier_name',
-        ];
-
-        if ($hasTankDeliveryRecords) {
-            $recordColumn = fn (string $column, ?string $alias = null) => $this->hasColumn('tank_delivery_records', $column)
-                ? 'tank_delivery_records.' . $column . ($alias ? ' as ' . $alias : '')
-                : DB::raw('null as ' . ($alias ?: $column));
-
-            $selectColumns = array_merge($selectColumns, [
-                'tank_delivery_records.id as tank_delivery_record_id',
-                'tank_delivery_records.staff_id',
-                'tank_delivery_records.record_date',
-                'tank_delivery_records.record_time',
-                'tank_delivery_records.plate_number',
-                'tank_delivery_records.security_seals_passed',
-                'tank_delivery_records.product_level_passed',
-                'tank_delivery_records.ethanol_blend_passed',
-                'tank_delivery_records.free_of_water_passed',
-                'tank_delivery_records.fully_drained_compartment_passed',
-                'tank_delivery_records.before_unloading_dipstick_premium',
-                'tank_delivery_records.after_unloading_dipstick_premium',
-                'tank_delivery_records.total_dispensed_premium',
-                'tank_delivery_records.after_before_total_premium',
-                'tank_delivery_records.delivery_summary_premium',
-                'tank_delivery_records.before_unloading_dipstick_unleaded',
-                'tank_delivery_records.after_unloading_dipstick_unleaded',
-                'tank_delivery_records.total_dispensed_unleaded',
-                'tank_delivery_records.after_before_total_unleaded',
-                'tank_delivery_records.delivery_summary_unleaded',
-                'tank_delivery_records.before_unloading_dipstick_diesel',
-                'tank_delivery_records.after_unloading_dipstick_diesel',
-                'tank_delivery_records.total_dispensed_diesel',
-                'tank_delivery_records.after_before_total_diesel',
-                'tank_delivery_records.delivery_summary_diesel',
-                $recordColumn('created_at', 'tank_delivery_record_created_at'),
-                $recordColumn('verified_by'),
-                $recordColumn('verified_at'),
-                $recordColumn('rejected_by'),
-                $recordColumn('rejected_at'),
-                $recordColumn('rejection_reason'),
-            ]);
-
-            $selectColumns[] = $hasUsersTable
-                ? 'users.name as staff_name'
-                : DB::raw('null as staff_name');
-            $selectColumns[] = $hasUsersTable && $this->hasColumn('tank_delivery_records', 'verified_by')
-                ? 'verified_users.name as verified_by_name'
-                : DB::raw('null as verified_by_name');
-            $selectColumns[] = $hasUsersTable && $this->hasColumn('tank_delivery_records', 'rejected_by')
-                ? 'rejected_users.name as rejected_by_name'
-                : DB::raw('null as rejected_by_name');
-        } else {
-            $selectColumns = array_merge(
-                $selectColumns,
-                array_map(fn ($column) => DB::raw('null as ' . $column), $recordColumns)
-            );
-        }
-
         $query = DB::table('inventory_logs')
             ->join('tanks', 'inventory_logs.tank_id', '=', 'tanks.id')
             ->join('suppliers', 'inventory_logs.supplier_id', '=', 'suppliers.id')
-            ->select($selectColumns)
+            ->select(
+                'inventory_logs.*',
+                'tanks.name as tank_name',
+                'tanks.fuel_type',
+                'suppliers.name as supplier_name'
+            )
             ->orderByDesc('inventory_logs.delivery_date')
             ->orderByDesc('inventory_logs.created_at');
-
-        if ($hasTankDeliveryRecords) {
-            $query->leftJoin('tank_delivery_records', 'inventory_logs.id', '=', 'tank_delivery_records.inventory_log_id');
-
-            if ($hasUsersTable) {
-                $query->leftJoin('users', 'tank_delivery_records.staff_id', '=', 'users.id');
-
-                if ($this->hasColumn('tank_delivery_records', 'verified_by')) {
-                    $query->leftJoin('users as verified_users', 'tank_delivery_records.verified_by', '=', 'verified_users.id');
-                }
-
-                if ($this->hasColumn('tank_delivery_records', 'rejected_by')) {
-                    $query->leftJoin('users as rejected_users', 'tank_delivery_records.rejected_by', '=', 'rejected_users.id');
-                }
-            }
-        }
 
         $this->applyDateRange($query, 'inventory_logs.delivery_date', $dateRange, true);
 
@@ -792,7 +680,6 @@ class InventoryController extends Controller
 
                         DB::table('inventory_logs')->insert([
                             'delivery_code' => $deliveryCode,
-                            'delivery_status' => InventoryLog::STATUS_PENDING_TANK_DELIVERY_RECORD,
                             'tank_id' => $delivery['tank_id'],
                             'supplier_id' => $supplierId,
                             'liters_delivered' => $liters,
