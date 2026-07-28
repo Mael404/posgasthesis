@@ -68,26 +68,32 @@
     <title>{{ $batchNo }} - {{ $documentTitle }}</title>
     @include('layouts.browser-icon')
     <style>
-        @page { margin: 1cm; size: A4 portrait; }
+        :root {
+            --a6-paper-width: 105mm;
+            --a6-paper-height: 148mm;
+            --a6-page-margin: 4mm;
+            --a6-print-height: 140mm;
+        }
+        @page { margin: 4mm; size: 105mm 148mm; }
         body {
             margin: 0;
             color: #222;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 11px;
-            line-height: 1.35;
+            font-size: 8.5px;
+            line-height: 1.24;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
         p { margin: 0; }
         @media screen {
-            body { background: #eef1f5; padding: 40px; }
+            body { background: #eef1f5; padding: 24px; }
             .sheet {
                 background: #fff;
                 box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
                 margin: 0 auto;
-                max-width: 210mm;
-                min-height: 277mm;
-                padding: 1cm;
+                max-width: var(--a6-paper-width);
+                min-height: var(--a6-paper-height);
+                padding: var(--a6-page-margin);
             }
             .no-print {
                 position: fixed;
@@ -99,7 +105,14 @@
         }
         @media print {
             body { background: #fff; }
-            .sheet { box-shadow: none; margin: 0; max-width: none; min-height: 100vh; padding: 0; }
+            .sheet {
+                box-shadow: none;
+                margin: 0;
+                max-width: none;
+                min-height: var(--a6-print-height);
+                padding: 0;
+                width: 100%;
+            }
             .no-print { display: none !important; }
         }
         .toolbar {
@@ -174,19 +187,20 @@
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            min-height: 277mm;
+            min-height: var(--a6-print-height);
             position: relative;
         }
         .main-content { flex: 1; }
         .report-header {
-            border-bottom: 3px solid #465fff;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
+            border-bottom: 1.5px solid #465fff;
+            margin-bottom: 3mm;
+            padding-bottom: 2mm;
         }
         .header-table, .meta-table, .data-table, .summary-table {
             border-collapse: collapse;
             width: 100%;
         }
+        .data-table { table-layout: fixed; }
         .header-table td {
             border: 0;
             padding: 0;
@@ -194,35 +208,36 @@
         }
         .logo {
             height: auto;
-            max-width: 130px;
+            max-width: 21mm;
         }
         .company-name {
             color: #465fff;
-            font-size: 22px;
+            font-size: 11px;
             font-weight: 900;
             margin: 0;
         }
         .company-details {
             color: #475467;
+            font-size: 7px;
             margin: 2px 0 0;
         }
         .statement-title {
             color: #98a2b3;
-            font-size: 18px;
+            font-size: 10px;
             font-weight: 900;
             text-align: right;
             text-transform: uppercase;
         }
         .statement-number {
             color: #d92d20;
-            font-size: 14px;
+            font-size: 8.5px;
             font-weight: 900;
-            margin-top: 5px;
+            margin-top: 1mm;
             text-align: right;
         }
         .status-stamp {
             color: rgba(28, 200, 138, 0.15);
-            font-size: 60px;
+            font-size: 30px;
             font-weight: 900;
             left: 50%;
             pointer-events: none;
@@ -236,25 +251,27 @@
             align-items: flex-start;
             background: #f8f9fc;
             border: 1px solid #e4e7ec;
-            border-radius: 8px;
+            border-radius: 4px;
             display: flex;
+            gap: 3mm;
             justify-content: space-between;
-            margin-bottom: 15px;
-            padding: 12px 15px;
+            margin-bottom: 3mm;
+            padding: 2mm 2.5mm;
         }
+        .bill-to { min-width: 0; }
         .bill-to-label {
             color: #667085;
             display: block;
-            font-size: 10px;
+            font-size: 7px;
             font-weight: 700;
             margin-bottom: 2px;
             text-transform: uppercase;
         }
         .bill-to h3 {
             color: #101828;
-            font-size: 15px;
+            font-size: 9px;
             font-weight: 900;
-            margin: 0 0 3px;
+            margin: 0 0 1mm;
             text-transform: uppercase;
         }
         .bill-to p {
@@ -263,8 +280,8 @@
         }
         .meta-table td {
             border: 0;
-            font-size: 11px;
-            padding: 2px 8px;
+            font-size: 7.5px;
+            padding: 0.6mm 1.2mm;
         }
         .meta-table td:first-child {
             color: #667085;
@@ -278,20 +295,22 @@
         }
         .table-title {
             color: #465fff;
-            font-size: 12px;
+            font-size: 8px;
             font-weight: 800;
-            margin-bottom: 5px;
+            margin-bottom: 1.5mm;
             text-transform: uppercase;
         }
         .data-table th, .data-table td {
             border: 1px solid #d0d5dd;
-            padding: 6px 8px;
+            overflow-wrap: anywhere;
+            padding: 1.1mm 1.2mm;
             vertical-align: top;
         }
+        .data-table tr { page-break-inside: avoid; }
         .data-table th {
             background: #f2f4f7;
             color: #344054;
-            font-size: 10px;
+            font-size: 7px;
             font-weight: 800;
             text-align: left;
             text-transform: uppercase;
@@ -305,15 +324,15 @@
         .summary-box {
             display: flex;
             justify-content: flex-end;
-            margin-top: 15px;
+            margin-top: 3mm;
             page-break-inside: avoid;
         }
-        .summary-table { width: 340px; }
+        .summary-table { width: 58mm; }
         .summary-table td {
             border: 0;
             border-bottom: 1px solid #e4e7ec;
-            font-size: 11px;
-            padding: 5px 8px;
+            font-size: 8px;
+            padding: 1mm 1.2mm;
         }
         .summary-table td:first-child {
             color: #475467;
@@ -323,61 +342,61 @@
         .grand-total td {
             border: 0 !important;
             color: #fff !important;
-            font-size: 13px !important;
+            font-size: 9px !important;
             font-weight: 900 !important;
-            padding: 8px !important;
+            padding: 1.4mm !important;
         }
         .bottom-section {
             margin-top: auto;
-            padding-top: 28px;
+            padding-top: 4mm;
             page-break-inside: avoid;
         }
         .instructions {
             background: #f8f9fc;
-            border-left: 4px solid #465fff;
+            border-left: 2px solid #465fff;
             color: #475467;
-            font-size: 10px;
-            margin-bottom: 28px;
-            padding: 10px 15px;
+            font-size: 7px;
+            margin-bottom: 4mm;
+            padding: 1.5mm 2mm;
         }
-        .instructions p { margin: 4px 0; }
+        .instructions p { margin: 1mm 0; }
         .signatures {
             display: flex;
             justify-content: space-between;
-            margin-top: 30px;
+            margin-top: 5mm;
         }
         .signature-box {
             text-align: center;
-            width: 40%;
+            width: 44%;
         }
         .sig-line {
             align-items: flex-end;
             border-bottom: 1px solid #101828;
             box-sizing: border-box;
             display: flex;
-            height: 25px;
+            height: 6mm;
             justify-content: center;
-            margin-bottom: 5px;
-            padding: 0 4px 3px;
+            margin-bottom: 1.2mm;
+            padding: 0 1mm 0.8mm;
         }
         .signature-name {
             display: block;
-            font-size: 11px;
+            font-size: 8px;
             font-weight: 700;
             line-height: 1.2;
             overflow-wrap: anywhere;
         }
         .sig-label {
             color: #344054;
-            font-size: 11px;
+            font-size: 7.5px;
             font-weight: 700;
         }
         .footer {
             border-top: 1px solid #e4e7ec;
             color: #98a2b3;
-            font-size: 9px;
-            margin-top: 24px;
-            padding-top: 10px;
+            font-size: 6.8px;
+            margin-top: 4mm;
+            padding-top: 1.5mm;
             text-align: center;
         }
     </style>
