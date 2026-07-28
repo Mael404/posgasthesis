@@ -63,6 +63,52 @@
             'sold_liters' => 0,
             'sold_amount' => 0,
         ];
+        $deliveryLogGroups = $deliveryLogs
+            ->groupBy(function ($log, $index) {
+                $deliveryCode = trim((string) ($log->delivery_code ?? ''));
+
+                return $deliveryCode !== '' ? 'code:' . $deliveryCode : 'log:' . ($log->id ?? $index);
+            })
+            ->map(function ($logs, $groupKey) {
+                $logs = collect($logs)->values();
+                $primaryLog = $logs->first();
+                $deliveryCode = trim((string) ($primaryLog->delivery_code ?? ''));
+                $supplierNames = $logs
+                    ->map(fn ($log) => trim((string) ($log->supplier_name ?? '')))
+                    ->filter()
+                    ->unique()
+                    ->values();
+                $fuelTypes = $logs
+                    ->map(fn ($log) => trim((string) ($log->fuel_type ?? '')) ?: 'N/A')
+                    ->unique()
+                    ->values();
+                $deliveryDates = $logs
+                    ->map(fn ($log) => $log->delivery_date ?? null)
+                    ->filter()
+                    ->unique()
+                    ->values();
+                $latestCreatedAt = $logs
+                    ->map(fn ($log) => $log->created_at ?? null)
+                    ->filter()
+                    ->sortDesc()
+                    ->first();
+
+                return (object) [
+                    'key' => (string) $groupKey,
+                    'code' => $deliveryCode,
+                    'logs' => $logs,
+                    'primary_log' => $primaryLog,
+                    'supplier_names' => $supplierNames,
+                    'fuel_types' => $fuelTypes,
+                    'delivery_dates' => $deliveryDates,
+                    'delivery_date' => $deliveryDates->first(),
+                    'created_at' => $latestCreatedAt,
+                    'line_count' => $logs->count(),
+                    'liters_delivered' => (float) $logs->sum('liters_delivered'),
+                    'total_cost' => (float) $logs->sum('total_cost'),
+                ];
+            })
+            ->values();
 
         $cardClass = 'rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -589,31 +635,125 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                                @forelse ($deliveryLogs as $log)
+                                @forelse ($deliveryLogGroups as $deliveryGroup)
                                     @php
-                                        $style = $fuelStyle($log->fuel_type);
-                                        $deliveryCode = trim((string) ($log->delivery_code ?? ''));
+                                        $primaryLog = $deliveryGroup->primary_log;
+                                        $lineCount = $deliveryGroup->line_count;
+                                        $deliveryCode = $deliveryGroup->code;
+                                        $groupKey = $deliveryGroup->key;
+                                        $groupDomId = 'delivery-group-' . md5($groupKey);
+                                        $primaryStyle = $fuelStyle($primaryLog->fuel_type ?? '');
                                     @endphp
-                                    <tr>
+                                    <tr class="bg-white dark:bg-transparent">
                                         <td class="{{ $tdPrimaryClass }}">
-                                            @if ($deliveryCode !== '')
-                                                <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $deliveryCode }}</span>
+                                            <div class="flex min-w-0 flex-col gap-2">
+                                                @if ($deliveryCode !== '')
+                                                    <span class="inline-flex max-w-full rounded-full bg-brand-50 px-2.5 py-1 text-theme-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">{{ $deliveryCode }}</span>
+                                                @else
+                                                    <span class="text-theme-xs text-gray-400 dark:text-gray-500">Not assigned</span>
+                                                @endif
+                                                <button
+                                                    type="button"
+                                                    class="inline-flex h-8 w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-theme-xs font-medium text-gray-600 shadow-theme-xs transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                                                    x-on:click="toggleDeliveryGroup(@js($groupKey))"
+                                                    x-bind:aria-expanded="isDeliveryGroupOpen(@js($groupKey)).toString()"
+                                                    aria-controls="{{ $groupDomId }}"
+                                                    aria-label="Toggle delivery items for {{ $deliveryCode !== '' ? $deliveryCode : 'unassigned delivery' }}">
+                                                    <svg class="size-3.5 transition-transform" x-bind:class="isDeliveryGroupOpen(@js($groupKey)) ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                                        <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                                                    </svg>
+                                                    {{ $lineCount }} item{{ $lineCount === 1 ? '' : 's' }}
+                                                </button>
+                                            </div>
+                                        </td>
+                                        <td class="{{ $tdClass }}">
+                                            @if ($deliveryGroup->delivery_date)
+                                                {{ \Carbon\Carbon::parse($deliveryGroup->delivery_date)->format('M d, Y') }}
+                                                @if ($deliveryGroup->delivery_dates->count() > 1)
+                                                    <span class="mt-1 block text-theme-xs text-gray-500 dark:text-gray-400">{{ $deliveryGroup->delivery_dates->count() }} dates</span>
+                                                @endif
                                             @else
-                                                <span class="text-theme-xs text-gray-400 dark:text-gray-500">Not assigned</span>
+                                                N/A
                                             @endif
                                         </td>
-                                        <td class="{{ $tdClass }}">{{ \Carbon\Carbon::parse($log->delivery_date)->format('M d, Y') }}</td>
-                                        <td class="{{ $tdPrimaryClass }}">{{ $log->supplier_name }}</td>
-                                        <td class="{{ $tdClass }}">
-                                            <div class="font-medium text-gray-800 dark:text-white/90">{{ $log->tank_name }}</div>
-                                            <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs {{ $style['badge'] }}">
-                                                <span class="h-1.5 w-1.5 rounded-full {{ $style['dot'] }}"></span>
-                                                {{ $log->fuel_type }}
-                                            </span>
+                                        <td class="{{ $tdPrimaryClass }}">
+                                            @if ($deliveryGroup->supplier_names->count() <= 1)
+                                                {{ $deliveryGroup->supplier_names->first() ?: 'N/A' }}
+                                            @else
+                                                <div>Multiple suppliers</div>
+                                                <span class="mt-1 block text-theme-xs font-normal text-gray-500 dark:text-gray-400">{{ $deliveryGroup->supplier_names->implode(', ') }}</span>
+                                            @endif
                                         </td>
-                                        <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">+{{ number_format((float) $log->liters_delivered, 2) }} L</td>
-                                        <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $log->total_cost, 2) }}</td>
-                                        <td class="{{ $tdClass }}">{{ $log->created_at ? \Carbon\Carbon::parse($log->created_at)->format('M d, h:i A') : 'N/A' }}</td>
+                                        <td class="{{ $tdClass }}">
+                                            @if ($lineCount === 1)
+                                                <div class="font-medium text-gray-800 dark:text-white/90">{{ $primaryLog->tank_name ?? 'N/A' }}</div>
+                                                <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs {{ $primaryStyle['badge'] }}">
+                                                    <span class="h-1.5 w-1.5 rounded-full {{ $primaryStyle['dot'] }}"></span>
+                                                    {{ $primaryLog->fuel_type ?? 'N/A' }}
+                                                </span>
+                                            @else
+                                                <div class="font-medium text-gray-800 dark:text-white/90">{{ $lineCount }} tank entries</div>
+                                                <div class="mt-2 flex flex-wrap gap-1.5">
+                                                    @foreach ($deliveryGroup->fuel_types as $fuelType)
+                                                        @php $fuelTypeStyle = $fuelStyle($fuelType); @endphp
+                                                        <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs {{ $fuelTypeStyle['badge'] }}">
+                                                            <span class="h-1.5 w-1.5 rounded-full {{ $fuelTypeStyle['dot'] }}"></span>
+                                                            {{ $fuelType }}
+                                                        </span>
+                                                    @endforeach
+                                                </div>
+                                            @endif
+                                        </td>
+                                        <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">+{{ number_format($deliveryGroup->liters_delivered, 2) }} L</td>
+                                        <td class="{{ $tdNumberClass }}">&#8369;{{ number_format($deliveryGroup->total_cost, 2) }}</td>
+                                        <td class="{{ $tdClass }}">{{ $deliveryGroup->created_at ? \Carbon\Carbon::parse($deliveryGroup->created_at)->format('M d, h:i A') : 'N/A' }}</td>
+                                    </tr>
+                                    <tr
+                                        id="{{ $groupDomId }}"
+                                        x-cloak
+                                        x-show="isDeliveryGroupOpen(@js($groupKey))"
+                                        class="bg-gray-50/70 dark:bg-white/[0.02]">
+                                        <td colspan="7" class="px-5 py-4">
+                                            <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+                                                <div class="flex flex-col gap-1 border-b border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+                                                    <p class="text-theme-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Logged Delivery Items</p>
+                                                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">{{ $lineCount }} item{{ $lineCount === 1 ? '' : 's' }} under {{ $deliveryCode !== '' ? $deliveryCode : 'an unassigned delivery code' }}</p>
+                                                </div>
+                                                <div class="max-w-full overflow-auto custom-scrollbar">
+                                                    <table class="min-w-[760px] w-full">
+                                                        <thead class="bg-gray-50 dark:bg-gray-900">
+                                                            <tr>
+                                                                <th class="px-4 py-2.5 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Delivery Date</th>
+                                                                <th class="px-4 py-2.5 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Supplier</th>
+                                                                <th class="px-4 py-2.5 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Tank / Fuel</th>
+                                                                <th class="px-4 py-2.5 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Volume Added</th>
+                                                                <th class="px-4 py-2.5 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Total Cost</th>
+                                                                <th class="px-4 py-2.5 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">Logged At</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                                            @foreach ($deliveryGroup->logs as $itemLog)
+                                                                @php $itemStyle = $fuelStyle($itemLog->fuel_type ?? ''); @endphp
+                                                                <tr>
+                                                                    <td class="px-4 py-3 text-theme-sm text-gray-700 dark:text-gray-300">{{ $itemLog->delivery_date ? \Carbon\Carbon::parse($itemLog->delivery_date)->format('M d, Y') : 'N/A' }}</td>
+                                                                    <td class="px-4 py-3 text-theme-sm font-medium text-gray-800 dark:text-white/90">{{ $itemLog->supplier_name ?? 'N/A' }}</td>
+                                                                    <td class="px-4 py-3 text-theme-sm text-gray-700 dark:text-gray-300">
+                                                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $itemLog->tank_name ?? 'N/A' }}</div>
+                                                                        <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-theme-xs {{ $itemStyle['badge'] }}">
+                                                                            <span class="h-1.5 w-1.5 rounded-full {{ $itemStyle['dot'] }}"></span>
+                                                                            {{ $itemLog->fuel_type ?? 'N/A' }}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td class="px-4 py-3 text-right text-theme-sm font-semibold tabular-nums text-success-600 dark:text-success-500">+{{ number_format((float) $itemLog->liters_delivered, 2) }} L</td>
+                                                                    <td class="px-4 py-3 text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300">&#8369;{{ number_format((float) $itemLog->total_cost, 2) }}</td>
+                                                                    <td class="px-4 py-3 text-theme-sm text-gray-700 dark:text-gray-300">{{ $itemLog->created_at ? \Carbon\Carbon::parse($itemLog->created_at)->format('M d, h:i A') : 'N/A' }}</td>
+                                                                </tr>
+                                                            @endforeach
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </td>
                                     </tr>
                                 @empty
                                     <tr>
@@ -924,6 +1064,7 @@
                 maxDeliveryRows: Math.min(3, Math.max(1, (config.tanks || []).length)),
                 deliveryRows: [],
                 deliveryModalOpen: false,
+                expandedDeliveryGroups: {},
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
                 confirmation: {
@@ -1062,6 +1203,15 @@
                     const selected = this.deliveryRows.map((row) => row.tank_id).filter(Boolean);
 
                     return selected.length !== new Set(selected).size;
+                },
+                toggleDeliveryGroup(key) {
+                    this.expandedDeliveryGroups = {
+                        ...this.expandedDeliveryGroups,
+                        [key]: !this.expandedDeliveryGroups[key]
+                    };
+                },
+                isDeliveryGroupOpen(key) {
+                    return !!this.expandedDeliveryGroups[key];
                 },
                 openDeliveryModal() {
                     this.deliveryModalOpen = true;

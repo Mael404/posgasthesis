@@ -401,21 +401,24 @@ class CustomerController extends Controller
         $start = Carbon::parse($validated['start_date'])->toDateString();
         $end = Carbon::parse($validated['end_date'])->toDateString();
 
-        $transactions = DB::table('customer_ledgers')
+        $ledger = DB::table('customer_ledgers')
             ->where('customer_id', $validated['customer_id'])
-            ->whereBetween('transaction_date', [$start, $end])
             ->orderBy('transaction_date')
             ->orderBy('id')
             ->get()
             ->map(fn ($entry) => $this->normalizeDiscountOnLedgerEntry($entry));
 
-        $previousTotals = DB::table('customer_ledgers')
-            ->where('customer_id', $validated['customer_id'])
-            ->where('transaction_date', '<', $start)
-            ->selectRaw('COALESCE(SUM(debit), 0) as debit, COALESCE(SUM(credit), 0) as credit')
-            ->first();
+        $activeLedger = $this->ledgerRowsWithoutReversedCharges($ledger);
+        $transactions = $activeLedger
+            ->filter(fn ($entry) => Carbon::parse($entry->transaction_date)->betweenIncluded(
+                Carbon::parse($start),
+                Carbon::parse($end)
+            ))
+            ->values();
 
-        $previousBalance = round((float) ($previousTotals->debit ?? 0) - (float) ($previousTotals->credit ?? 0), 2);
+        $previousBalance = round((float) $activeLedger
+            ->filter(fn ($entry) => Carbon::parse($entry->transaction_date)->lt(Carbon::parse($start)))
+            ->sum(fn ($entry) => (float) ($entry->debit ?? 0) - (float) ($entry->credit ?? 0)), 2);
         $totalDiscount = round((float) $transactions->sum('discount'), 2);
 
         return view('pages.admin.customersoa', [
@@ -558,39 +561,7 @@ class CustomerController extends Controller
 
     private function cleanPrintableLedger($ledger): array
     {
-        $skipIds = [];
-        $ledgerCollection = collect($ledger)->values();
-        $reversalTypes = ['Void', 'Edit Reversal'];
-        $moneyEquals = fn ($left, $right) => abs(round((float) $left, 2) - round((float) $right, 2)) <= 0.004;
-        $entryDate = fn ($entry) => Carbon::parse($entry->transaction_date)->toDateString();
-
-        foreach ($ledgerCollection as $reversal) {
-            if (! in_array($reversal->type, $reversalTypes, true) || (float) ($reversal->credit ?? 0) <= 0) {
-                continue;
-            }
-
-            $candidates = $ledgerCollection->filter(function ($entry) use ($reversal, $skipIds, $moneyEquals) {
-                return ! in_array((int) $entry->id, $skipIds, true)
-                    && (float) ($entry->debit ?? 0) > 0
-                    && (float) ($entry->credit ?? 0) <= 0
-                    && ($entry->type ?? null) !== 'Payment'
-                    && $moneyEquals($entry->debit, $reversal->credit);
-            });
-
-            $sameDateCandidates = $candidates->filter(fn ($entry) => $entryDate($entry) === $entryDate($reversal));
-            $original = $sameDateCandidates->filter(fn ($entry) => (int) $entry->id < (int) $reversal->id)->last()
-                ?? $candidates->filter(fn ($entry) => (int) $entry->id < (int) $reversal->id)->last()
-                ?? $sameDateCandidates->filter(fn ($entry) => (int) $entry->id > (int) $reversal->id)->first();
-
-            if ($original) {
-                $skipIds[] = (int) $reversal->id;
-                $skipIds[] = (int) $original->id;
-            }
-        }
-
-        $filteredLedger = $ledgerCollection
-            ->reject(fn ($entry) => in_array((int) $entry->id, array_unique($skipIds), true))
-            ->values();
+        $filteredLedger = $this->ledgerRowsWithoutReversedCharges($ledger);
 
         $runningBalance = 0;
 
@@ -606,6 +577,164 @@ class CustomerController extends Controller
             'currentBalance' => round($runningBalance, 2),
             'totalDiscount' => round((float) $filteredLedger->sum('discount'), 2),
         ];
+    }
+
+    private function ledgerRowsWithoutReversedCharges($ledgerRows, $reversalContextRows = null)
+    {
+        $ledgerRows = collect($ledgerRows)->values();
+        $reversalContextRows = $reversalContextRows === null
+            ? $ledgerRows
+            : collect($reversalContextRows)
+                ->concat($ledgerRows)
+                ->unique(fn ($row) => (int) ($row->id ?? 0))
+                ->sortBy(fn ($row) => sprintf(
+                    '%s-%010d',
+                    Carbon::parse($row->transaction_date)->toDateString(),
+                    (int) ($row->id ?? 0)
+                ))
+                ->values();
+        $skipIds = [];
+        $reversalTypes = ['Void', 'Edit Reversal'];
+        $targetLedgerIds = $ledgerRows
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        foreach ($reversalContextRows as $reversal) {
+            if (! in_array($reversal->type, $reversalTypes, true) || (float) ($reversal->credit ?? 0) <= 0) {
+                continue;
+            }
+
+            $candidates = $ledgerRows->filter(function ($row) use ($reversal, $skipIds) {
+                return ! in_array((int) $row->id, $skipIds, true)
+                    && $this->isBillableChargeRow($row)
+                    && abs($this->moneyValue($row->debit) - $this->moneyValue($reversal->credit)) <= 0.004;
+            });
+
+            $sameDateCandidates = $candidates->filter(function ($row) use ($reversal) {
+                return Carbon::parse($row->transaction_date)->toDateString()
+                    === Carbon::parse($reversal->transaction_date)->toDateString();
+            });
+
+            $referenceTokens = $this->reversalReferenceTokens($reversal);
+            $referencedCandidates = $this->reversalReferencedChargeCandidates($candidates, $referenceTokens);
+            $reversalIsInTargetRows = in_array((int) $reversal->id, $targetLedgerIds, true);
+
+            if ($referencedCandidates->isNotEmpty()) {
+                $original = $referencedCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? ($reversalIsInTargetRows ? $referencedCandidates->first() : null);
+            } elseif ($this->hasStrictReversalReferenceToken($referenceTokens)) {
+                continue;
+            } else {
+                $original = $sameDateCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? $candidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
+                    ?? ($reversalIsInTargetRows
+                        ? $sameDateCandidates->filter(fn ($row) => (int) $row->id > (int) $reversal->id)->first()
+                        : null);
+            }
+
+            if ($original) {
+                $skipIds[] = (int) $reversal->id;
+                $skipIds[] = (int) $original->id;
+            }
+        }
+
+        $skipIds = array_unique($skipIds);
+
+        return $ledgerRows
+            ->reject(fn ($row) => in_array((int) $row->id, $skipIds, true))
+            ->values();
+    }
+
+    private function isBillableChargeRow($ledger): bool
+    {
+        return (float) ($ledger->debit ?? 0) > 0
+            && (float) ($ledger->credit ?? 0) <= 0
+            && ! in_array($ledger->type ?? null, ['Payment', 'Void Payment'], true);
+    }
+
+    private function reversalReferencedChargeCandidates($candidates, array $referenceTokens)
+    {
+        if ($referenceTokens === []) {
+            return collect();
+        }
+
+        return $candidates->filter(function ($row) use ($referenceTokens) {
+            $rowReferences = array_values(array_filter([
+                trim((string) ($row->reference_no ?? '')),
+                trim((string) ($row->or_number ?? '')),
+            ], fn ($value) => $value !== ''));
+
+            foreach ($rowReferences as $rowReference) {
+                foreach ($referenceTokens as $referenceToken) {
+                    if (strcasecmp($rowReference, $referenceToken) === 0) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        });
+    }
+
+    private function hasStrictReversalReferenceToken(array $referenceTokens): bool
+    {
+        foreach ($referenceTokens as $referenceToken) {
+            if (! preg_match('/^\d+$/', $referenceToken)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function reversalReferenceTokens($reversal): array
+    {
+        $tokens = [];
+        $referenceNo = trim((string) ($reversal->reference_no ?? ''));
+        $description = (string) ($reversal->description ?? '');
+
+        if (preg_match('/^EDIT-\d+$/i', $referenceNo)) {
+            $tokens[] = $referenceNo;
+        }
+
+        foreach ([
+            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*([A-Z0-9][A-Z0-9-]*)/i',
+            '/\bRef(?:erence)?(?:\s*#|\s*:)?\s*(.+)$/i',
+            '/\bfrom\s+([A-Z0-9][A-Z0-9-]*)/i',
+            '/\bfrom\s+(.+)$/i',
+        ] as $pattern) {
+            if (preg_match_all($pattern, $description, $matches)) {
+                foreach ($matches[1] as $match) {
+                    $cleanToken = $this->cleanReversalReferenceToken($match);
+
+                    if ($cleanToken !== null) {
+                        $tokens[] = $cleanToken;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($tokens, fn ($token) => $token !== '')));
+    }
+
+    private function cleanReversalReferenceToken($value): ?string
+    {
+        $value = trim((string) $value, " \t\n\r\0\x0B.,;:");
+
+        do {
+            $previous = $value;
+            $value = preg_replace('/\s+\((?:Total\s+)?(?:Discount|Excess):[^)]*\)\s*$/i', '', $value);
+        } while ($value !== $previous);
+
+        $value = trim((string) $value, " \t\n\r\0\x0B.,;:");
+
+        return $value === '' ? null : $value;
+    }
+
+    private function moneyValue($value): float
+    {
+        return round((float) $value, 2);
     }
 
     private function insertForExistingColumns(string $table, array $values): void

@@ -205,7 +205,10 @@ class BillingController extends Controller
                     throw new \RuntimeException('Cannot generate invoice: No new transactions or rollovers found for this period.');
                 }
 
-                $cleanLedger = $this->ledgerRowsWithoutReversedCharges($periodLedger);
+                $cleanLedger = $this->ledgerRowsWithoutReversedCharges(
+                    $periodLedger,
+                    $this->customerChargeReversalRows($customerId)
+                );
                 $billableLedger = $cleanLedger->filter(fn ($row) => $this->isBillableChargeRow($row));
                 $billableLedgerIds = $billableLedger->pluck('id')->map(fn ($id) => (int) $id)->all();
                 $previousBalance = 0.0;
@@ -968,7 +971,10 @@ class BillingController extends Controller
             ->orderBy('id')
             ->get();
 
-        $visibleIds = $this->ledgerRowsWithoutReversedCharges($contextRows)
+        $visibleIds = $this->ledgerRowsWithoutReversedCharges(
+            $contextRows,
+            $this->customerChargeReversalRows((int) $invoice->customer_id)
+        )
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->all();
@@ -1301,12 +1307,39 @@ class BillingController extends Controller
             && ! in_array($ledger->type ?? null, ['Payment', 'Void Payment'], true);
     }
 
-    private function ledgerRowsWithoutReversedCharges($ledgerRows)
+    private function customerChargeReversalRows(int $customerId)
     {
+        return DB::table('customer_ledgers')
+            ->where('customer_id', $customerId)
+            ->whereIn('type', ['Void', 'Edit Reversal'])
+            ->where('credit', '>', 0)
+            ->orderBy('transaction_date')
+            ->orderBy('id')
+            ->get();
+    }
+
+    private function ledgerRowsWithoutReversedCharges($ledgerRows, $reversalContextRows = null)
+    {
+        $ledgerRows = collect($ledgerRows)->values();
+        $reversalContextRows = $reversalContextRows === null
+            ? $ledgerRows
+            : collect($reversalContextRows)
+                ->concat($ledgerRows)
+                ->unique(fn ($row) => (int) ($row->id ?? 0))
+                ->sortBy(fn ($row) => sprintf(
+                    '%s-%010d',
+                    Carbon::parse($row->transaction_date)->toDateString(),
+                    (int) ($row->id ?? 0)
+                ))
+                ->values();
         $skipIds = [];
         $reversalTypes = ['Void', 'Edit Reversal'];
+        $targetLedgerIds = $ledgerRows
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
 
-        foreach ($ledgerRows as $reversal) {
+        foreach ($reversalContextRows as $reversal) {
             if (! in_array($reversal->type, $reversalTypes, true) || (float) ($reversal->credit ?? 0) <= 0) {
                 continue;
             }
@@ -1324,16 +1357,19 @@ class BillingController extends Controller
 
             $referenceTokens = $this->reversalReferenceTokens($reversal);
             $referencedCandidates = $this->reversalReferencedChargeCandidates($candidates, $reversal, $referenceTokens);
+            $reversalIsInTargetRows = in_array((int) $reversal->id, $targetLedgerIds, true);
 
             if ($referencedCandidates->isNotEmpty()) {
                 $original = $referencedCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
-                    ?? $referencedCandidates->first();
+                    ?? ($reversalIsInTargetRows ? $referencedCandidates->first() : null);
             } elseif ($this->hasStrictReversalReferenceToken($referenceTokens)) {
                 continue;
             } else {
                 $original = $sameDateCandidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
                     ?? $candidates->filter(fn ($row) => (int) $row->id < (int) $reversal->id)->last()
-                    ?? $sameDateCandidates->filter(fn ($row) => (int) $row->id > (int) $reversal->id)->first();
+                    ?? ($reversalIsInTargetRows
+                        ? $sameDateCandidates->filter(fn ($row) => (int) $row->id > (int) $reversal->id)->first()
+                        : null);
             }
 
             if ($original) {
