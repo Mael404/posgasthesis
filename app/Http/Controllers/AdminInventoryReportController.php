@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Services\FuelInventoryReportService;
-use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -16,8 +15,7 @@ class AdminInventoryReportController extends Controller
     {
         $validated = $request->validate([
             'report_id' => ['nullable', 'integer'],
-            'start_date' => ['nullable', 'date', 'before_or_equal:today'],
-            'end_date' => ['nullable', 'date', 'after_or_equal:start_date', 'before_or_equal:today'],
+            'period_id' => ['nullable', 'integer'],
             'opening' => ['nullable', 'array'],
             'opening.*.liters' => ['nullable', 'numeric', 'min:0'],
             'opening.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
@@ -30,8 +28,22 @@ class AdminInventoryReportController extends Controller
             'tanks',
             'shift_readings',
             'fuel_prices',
+            'liters_tracking_periods',
+            'liters_movement_period_readings',
         ])->reject(fn (string $table): bool => Schema::hasTable($table))->values()->all();
+        $missingColumns = [];
 
+        if (Schema::hasTable('fuel_inventory_reports')
+            && ! Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')) {
+            $missingColumns[] = 'fuel_inventory_reports.liters_tracking_period_id';
+        }
+
+        if (Schema::hasTable('fuel_inventory_report_lines')
+            && ! Schema::hasColumn('fuel_inventory_report_lines', 'tank_limit_liters')) {
+            $missingColumns[] = 'fuel_inventory_report_lines.tank_limit_liters';
+        }
+
+        $periods = $reports->trackingPeriods();
         $latest = $reports->latestFinalizedReport();
         $viewingSavedReport = isset($validated['report_id']);
         $calculation = $viewingSavedReport
@@ -42,23 +54,37 @@ class AdminInventoryReportController extends Controller
             abort(404);
         }
 
-        $today = now()->toDateString();
-        $expectedStart = $latest
-            ? Carbon::parse($latest->period_end)->addDay()->toDateString()
-            : now()->startOfMonth()->toDateString();
-        $startDate = (string) ($validated['start_date'] ?? $expectedStart);
-        $endDate = (string) ($validated['end_date'] ?? (Carbon::parse($expectedStart)->gt($today) ? $expectedStart : $today));
-        $reportPeriodAvailable = Carbon::parse($startDate)->lte($endDate)
-            && Carbon::parse($endDate)->lte($today);
-        $manualOpening = $this->manualOpening($validated['opening'] ?? []);
-        $opening = $latest ? $reports->openingFromReport($latest) : $manualOpening;
+        $selectedPeriod = null;
 
-        if (! $viewingSavedReport && $reportPeriodAvailable && empty($missingTables)) {
-            $calculation = $reports->calculate($startDate, $endDate, $opening);
+        if (! $viewingSavedReport) {
+            $requestedPeriodId = $validated['period_id'] ?? $request->old('period_id');
+            $selectedPeriod = $requestedPeriodId
+                ? $reports->trackingPeriod((int) $requestedPeriodId)
+                : $reports->defaultTrackingPeriod();
 
-            if ($latest && $startDate !== $expectedStart) {
-                $calculation['warnings'][] = "For a continuous roll-forward, this report should start on {$expectedStart}.";
+            if ($requestedPeriodId && ! $selectedPeriod) {
+                abort(404);
             }
+        }
+
+        $manualOpening = $this->manualOpening(
+            $validated['opening'] ?? $request->old('opening', [])
+        );
+        $opening = $latest ? $reports->openingFromReport($latest) : $manualOpening;
+        $linkedReport = $selectedPeriod
+            ? $reports->finalizedReportForTrackingPeriod((int) $selectedPeriod->id)
+            : null;
+
+        if (! $viewingSavedReport
+            && $selectedPeriod
+            && empty($missingTables)
+            && empty($missingColumns)) {
+            $calculation = $reports->calculate(
+                $selectedPeriod->started_at,
+                $selectedPeriod->ended_at ?? now(),
+                $opening,
+                (int) $selectedPeriod->id
+            );
         }
 
         return view('pages.admin.inventory.report', [
@@ -67,22 +93,24 @@ class AdminInventoryReportController extends Controller
             'history' => $reports->reportHistory(),
             'latestReport' => $latest,
             'viewingSavedReport' => $viewingSavedReport,
-            'startDate' => $startDate,
-            'endDate' => $endDate,
-            'expectedStart' => $expectedStart,
-            'reportPeriodAvailable' => $reportPeriodAvailable,
+            'periods' => $periods,
+            'selectedPeriod' => $selectedPeriod,
+            'linkedReport' => $linkedReport,
+            'canFinalize' => $selectedPeriod
+                && strtolower(trim((string) $selectedPeriod->status)) === 'generated'
+                && ! $linkedReport,
             'manualOpening' => $manualOpening,
             'openingFromLastReport' => $latest ? $opening : null,
             'products' => FuelInventoryReportService::PRODUCTS,
             'missingTables' => $missingTables,
+            'missingColumns' => $missingColumns,
         ]);
     }
 
     public function store(Request $request, FuelInventoryReportService $reports): RedirectResponse
     {
         $validated = $request->validate([
-            'start_date' => ['required', 'date'],
-            'end_date' => ['required', 'date', 'after_or_equal:start_date', 'before_or_equal:today'],
+            'period_id' => ['required', 'integer'],
             'opening' => ['nullable', 'array'],
             'opening.*.liters' => ['nullable', 'numeric', 'min:0'],
             'opening.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
@@ -104,14 +132,13 @@ class AdminInventoryReportController extends Controller
 
         try {
             $saved = $reports->finalize(
-                $validated['start_date'],
-                $validated['end_date'],
+                (int) $validated['period_id'],
                 $manualOpening,
                 auth()->id()
             );
         } catch (\RuntimeException $exception) {
             throw ValidationException::withMessages([
-                'start_date' => $exception->getMessage(),
+                'period_id' => $exception->getMessage(),
             ]);
         }
 

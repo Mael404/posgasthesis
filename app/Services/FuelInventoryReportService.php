@@ -3,12 +3,15 @@
 namespace App\Services;
 
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class FuelInventoryReportService
 {
+    private const INCLUDED_READING_STATUSES = ['pending', 'verified', 'approved'];
+
     public const PRODUCTS = [
         'Premium' => [
             'product_name' => 'Premium',
@@ -24,20 +27,65 @@ class FuelInventoryReportService
         ],
     ];
 
-    public function calculate(string|Carbon $periodStart, string|Carbon $periodEnd, array $openingBalances): array
+    public function trackingPeriods(int $limit = 24): Collection
     {
-        $start = Carbon::parse($periodStart)->startOfDay();
-        $end = Carbon::parse($periodEnd)->endOfDay();
-
-        if ($end->lt($start)) {
-            throw new RuntimeException('The report end date must be on or after its start date.');
+        if (! Schema::hasTable('liters_tracking_periods')) {
+            return collect();
         }
 
+        $periods = DB::table('liters_tracking_periods')
+            ->whereIn(DB::raw('LOWER(TRIM(status))'), ['active', 'generated'])
+            ->orderByDesc('started_at')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+
+        return $periods
+            ->filter(fn (object $period): bool => strtolower(trim((string) $period->status)) === 'active')
+            ->concat($periods->filter(
+                fn (object $period): bool => strtolower(trim((string) $period->status)) !== 'active'
+            ))
+            ->values();
+    }
+
+    public function defaultTrackingPeriod(): ?object
+    {
+        return $this->trackingPeriods()->first();
+    }
+
+    public function trackingPeriod(int $periodId): ?object
+    {
+        if ($periodId <= 0 || ! Schema::hasTable('liters_tracking_periods')) {
+            return null;
+        }
+
+        return DB::table('liters_tracking_periods')
+            ->where('id', $periodId)
+            ->whereIn(DB::raw('LOWER(TRIM(status))'), ['active', 'generated'])
+            ->first();
+    }
+
+    public function calculate(
+        string|Carbon $periodStart,
+        string|Carbon $periodEnd,
+        array $openingBalances,
+        ?int $trackingPeriodId = null
+    ): array {
+        $period = $trackingPeriodId ? $this->trackingPeriod($trackingPeriodId) : null;
+
+        if ($trackingPeriodId && ! $period) {
+            throw new RuntimeException('The selected Liters Movement period is no longer available.');
+        }
+
+        [$start, $end] = $this->reportWindow($period, $periodStart, $periodEnd);
+        $definitions = $this->productDefinitions();
         $deliveries = $this->deliveryLogs($start, $end);
-        $readings = $this->verifiedShiftReadings($start, $end);
-        $adjustmentsByReading = $this->activeAdjustmentsByReading($readings->pluck('id')->map(fn ($id) => (int) $id)->all());
+        $readings = $this->includedShiftReadings($start, $end, $trackingPeriodId);
+        $adjustmentsByReading = $this->activeAdjustmentsByReading(
+            $readings->pluck('id')->map(fn ($id) => (int) $id)->all()
+        );
         $prices = $this->pricesByFuel();
-        $events = collect(array_keys(self::PRODUCTS))->mapWithKeys(fn (string $fuel) => [$fuel => []])->all();
+        $tankLimits = $this->decodedTankLimits($period);
         $deliveryRows = [];
         $readingRows = [];
 
@@ -46,38 +94,35 @@ class FuelInventoryReportService
             $liters = max(0, (float) ($delivery->liters_delivered ?? 0));
             $totalCost = max(0, (float) ($delivery->total_cost ?? 0));
 
-            if ($fuel === null || $liters <= 0) {
+            if ($fuel === null || $liters <= 0 || ! isset($definitions[$fuel])) {
                 continue;
             }
 
             $occurredAt = $this->deliveryOccurredAt($delivery);
-            $row = [
+            $deliveryRows[] = [
                 'id' => (int) $delivery->id,
                 'delivery_code' => (string) ($delivery->delivery_code ?? ''),
                 'delivery_date' => Carbon::parse($delivery->delivery_date)->toDateString(),
                 'occurred_at' => $occurredAt->toDateTimeString(),
                 'supplier' => (string) ($delivery->supplier_name ?? 'N/A'),
+                'delivery_status' => (string) ($delivery->delivery_status ?? ''),
+                'tank_id' => (int) ($delivery->tank_id ?? 0),
                 'fuel_type' => $fuel,
-                'product_name' => self::PRODUCTS[$fuel]['product_name'],
+                'product_name' => $definitions[$fuel]['product_name'],
                 'liters' => $liters,
                 'unit_cost' => $this->divide($totalCost, $liters),
                 'total_cost' => $totalCost,
             ];
-
-            $deliveryRows[] = $row;
-            $events[$fuel][] = [
-                'type' => 'delivery',
-                'occurred_at' => $row['occurred_at'],
-                'liters' => $liters,
-                'amount' => $totalCost,
-                'source_id' => (int) $delivery->id,
-            ];
         }
 
         foreach ($readings as $reading) {
-            $occurredAt = Carbon::parse($reading->period_to ?? $reading->created_at ?? $end)->endOfDay();
+            $occurredAt = Carbon::parse(
+                $reading->created_at
+                    ?? $reading->period_to
+                    ?? $end
+            );
 
-            foreach (self::PRODUCTS as $fuel => $definition) {
+            foreach ($definitions as $fuel => $definition) {
                 $liters = 0.0;
                 $revenue = 0.0;
                 $adjustmentIds = [];
@@ -87,37 +132,36 @@ class FuelInventoryReportService
                     $adjustedLiters = (float) $adjustments->sum('liters');
                     $adjustedAmount = (float) $adjustments->sum('amount');
                     $adjustmentIds = array_merge($adjustmentIds, $adjustments->pluck('id')->all());
-                    $liters += max(0, (float) ($reading->{"pump{$pump}_liters_end"} ?? 0)
-                        - (float) ($reading->{"pump{$pump}_liters_start"} ?? 0)
-                        - $adjustedLiters);
-                    $revenue += max(0, (float) ($reading->{"pump{$pump}_sales_end"} ?? 0)
-                        - (float) ($reading->{"pump{$pump}_sales_start"} ?? 0)
-                        - $adjustedAmount);
+                    $liters += max(
+                        0,
+                        (float) ($reading->{"pump{$pump}_liters_end"} ?? 0)
+                            - (float) ($reading->{"pump{$pump}_liters_start"} ?? 0)
+                            - $adjustedLiters
+                    );
+                    $revenue += max(
+                        0,
+                        (float) ($reading->{"pump{$pump}_sales_end"} ?? 0)
+                            - (float) ($reading->{"pump{$pump}_sales_start"} ?? 0)
+                            - $adjustedAmount
+                    );
                 }
 
                 if ($liters <= 0 && $revenue <= 0) {
                     continue;
                 }
 
-                $row = [
+                $readingRows[] = [
                     'id' => (int) $reading->id,
+                    'status' => (string) ($reading->status ?? ''),
                     'period_from' => Carbon::parse($reading->period_from ?? $occurredAt)->toDateString(),
                     'period_to' => Carbon::parse($reading->period_to ?? $occurredAt)->toDateString(),
                     'occurred_at' => $occurredAt->toDateTimeString(),
                     'fuel_type' => $fuel,
                     'product_name' => $definition['product_name'],
+                    'pumps' => $definition['pumps'],
                     'liters' => $liters,
                     'revenue' => $revenue,
                     'adjustment_ids' => array_values(array_unique($adjustmentIds)),
-                ];
-
-                $readingRows[] = $row;
-                $events[$fuel][] = [
-                    'type' => 'sale',
-                    'occurred_at' => $row['occurred_at'],
-                    'liters' => $liters,
-                    'amount' => $revenue,
-                    'source_id' => (int) $reading->id,
                 ];
             }
         }
@@ -125,18 +169,14 @@ class FuelInventoryReportService
         $lines = [];
         $warnings = [];
 
-        foreach (self::PRODUCTS as $fuel => $definition) {
+        foreach ($definitions as $fuel => $definition) {
+            $lineWarnings = [];
             $opening = $this->openingBalance($openingBalances, $fuel);
             $openingLiters = max(0, (float) ($opening['liters'] ?? 0));
             $openingUnitCost = max(0, (float) ($opening['unit_cost'] ?? 0));
             $openingValue = array_key_exists('value', $opening)
                 ? max(0, (float) $opening['value'])
                 : $openingLiters * $openingUnitCost;
-
-            if ($openingLiters > 0 && $openingUnitCost <= 0 && $openingValue <= 0) {
-                $warnings[] = "{$definition['product_name']} has opening liters but no opening cost.";
-            }
-
             $fuelDeliveries = collect($deliveryRows)->where('fuel_type', $fuel)->values();
             $fuelReadings = collect($readingRows)->where('fuel_type', $fuel)->values();
             $purchasedLiters = (float) $fuelDeliveries->sum('liters');
@@ -144,67 +184,53 @@ class FuelInventoryReportService
             $availableLiters = $openingLiters + $purchasedLiters;
             $availableValue = $openingValue + $purchaseValue;
             $periodicAverageCost = $this->divide($availableValue, $availableLiters);
-            $balanceLiters = $openingLiters;
-            $balanceValue = $openingValue;
-            $dispensedLiters = 0.0;
-            $salesRevenue = 0.0;
-            $costOfGoodsSold = 0.0;
-            $eventAudit = [];
-
-            usort($events[$fuel], static function (array $left, array $right): int {
-                $dateComparison = strcmp($left['occurred_at'], $right['occurred_at']);
-
-                if ($dateComparison !== 0) {
-                    return $dateComparison;
-                }
-
-                return ($left['type'] === 'delivery' ? 0 : 1) <=> ($right['type'] === 'delivery' ? 0 : 1);
-            });
-
-            foreach ($events[$fuel] as $event) {
-                $averageBefore = $this->divide($balanceValue, $balanceLiters);
-
-                if ($event['type'] === 'delivery') {
-                    $balanceLiters += $event['liters'];
-                    $balanceValue += $event['amount'];
-                    $eventCost = $event['amount'];
-                } else {
-                    $eventCost = $event['liters'] * $averageBefore;
-                    $dispensedLiters += $event['liters'];
-                    $salesRevenue += $event['amount'];
-                    $costOfGoodsSold += $eventCost;
-                    $balanceLiters -= $event['liters'];
-                    $balanceValue -= $eventCost;
-                }
-
-                $eventAudit[] = [
-                    'type' => $event['type'],
-                    'source_id' => $event['source_id'],
-                    'occurred_at' => $event['occurred_at'],
-                    'liters' => $this->rounded($event['liters']),
-                    'amount' => $this->rounded($event['amount']),
-                    'average_cost_before' => $this->rounded($averageBefore),
-                    'cost_applied' => $this->rounded($eventCost),
-                    'balance_liters_after' => $this->rounded($balanceLiters),
-                    'average_cost_after' => $this->rounded($this->divide($balanceValue, $balanceLiters)),
-                ];
-            }
-
-            if ($balanceLiters < -0.0005) {
-                $warnings[] = "{$definition['product_name']} ends with negative calculated inventory; opening stock or source movements need reconciliation.";
-            }
-
-            $endingUnitCost = $this->divide($balanceValue, $balanceLiters);
+            $dispensedLiters = (float) $fuelReadings->sum('liters');
+            $salesRevenue = (float) $fuelReadings->sum('revenue');
+            [$tankLimit, $hasTankLimit] = $this->tankLimitForDefinition(
+                $definition,
+                $tankLimits,
+                $availableLiters
+            );
+            $endingLiters = $tankLimit - $dispensedLiters;
+            $costOfGoodsSold = $dispensedLiters * $periodicAverageCost;
+            $endingValue = $endingLiters * $periodicAverageCost;
             $averageSellingPrice = $this->divide($salesRevenue, $dispensedLiters);
-            $costPerSoldLiter = $this->divide($costOfGoodsSold, $dispensedLiters);
             $pumpPrice = (float) ($prices[$fuel]['pump_price'] ?? 0);
             $bulkPrice = (float) ($prices[$fuel]['bulk_price'] ?? 0);
 
-            if ($bulkPrice <= 0) {
-                $warnings[] = "{$definition['product_name']} does not yet have a bulk selling price.";
+            if ($openingLiters > 0 && $openingValue <= 0) {
+                $lineWarnings[] = "{$definition['product_name']} has opening liters but no opening cost.";
             }
 
+            if ($period && ! $hasTankLimit) {
+                $lineWarnings[] = "{$definition['product_name']} has no tank limit in the selected Liters Movement period. Current stock is being used as a preview fallback.";
+            }
+
+            if ($period && $hasTankLimit && abs($tankLimit - $availableLiters) > 0.01) {
+                $difference = abs($tankLimit - $availableLiters);
+                $direction = $tankLimit > $availableLiters ? 'above' : 'below';
+                $lineWarnings[] = "{$definition['product_name']} tank limit is "
+                    . number_format($difference, 2)
+                    . " L {$direction} calculated current stock. Check the opening stock, delivery logs, or Liters Movement limit.";
+            }
+
+            if ($endingLiters < -0.0005) {
+                $lineWarnings[] = "{$definition['product_name']} dispensed liters exceed its tank limit by "
+                    . number_format(abs($endingLiters), 2)
+                    . ' L.';
+            }
+
+            if ($availableLiters > 0 && $periodicAverageCost <= 0) {
+                $lineWarnings[] = "{$definition['product_name']} has current stock but no usable inventory cost.";
+            }
+
+            if ($bulkPrice <= 0) {
+                $lineWarnings[] = "{$definition['product_name']} does not yet have a bulk selling price.";
+            }
+
+            $warnings = array_merge($warnings, $lineWarnings);
             $lines[] = [
+                'tank_id' => $definition['tank_ids'][0] ?? null,
                 'fuel_type' => $fuel,
                 'product_name' => $definition['product_name'],
                 'opening_liters' => $this->rounded($openingLiters),
@@ -215,33 +241,40 @@ class FuelInventoryReportService
                 'available_liters' => $this->rounded($availableLiters),
                 'available_value' => $this->rounded($availableValue),
                 'periodic_average_cost' => $this->rounded($periodicAverageCost),
+                'tank_limit_liters' => $this->rounded($tankLimit),
                 'dispensed_liters' => $this->rounded($dispensedLiters),
                 'sales_revenue' => $this->rounded($salesRevenue),
                 'cost_of_goods_sold' => $this->rounded($costOfGoodsSold),
-                'ending_liters' => $this->rounded($balanceLiters),
-                'ending_unit_cost' => $this->rounded($endingUnitCost),
-                'ending_value' => $this->rounded($balanceValue),
+                'ending_liters' => $this->rounded($endingLiters),
+                'ending_unit_cost' => $this->rounded($periodicAverageCost),
+                'ending_value' => $this->rounded($endingValue),
                 'pump_price' => $this->rounded($pumpPrice),
                 'bulk_price' => $this->rounded($bulkPrice),
-                'pump_margin' => $this->rounded($pumpPrice - $endingUnitCost),
-                'bulk_margin' => $this->rounded($bulkPrice - $endingUnitCost),
+                'pump_margin' => $this->rounded($pumpPrice - $periodicAverageCost),
+                'bulk_margin' => $this->rounded($bulkPrice - $periodicAverageCost),
                 'average_selling_price' => $this->rounded($averageSellingPrice),
-                'gross_margin_per_liter' => $this->rounded($averageSellingPrice - $costPerSoldLiter),
+                'gross_margin_per_liter' => $this->rounded($averageSellingPrice - $periodicAverageCost),
                 'gross_profit' => $this->rounded($salesRevenue - $costOfGoodsSold),
                 'source_summary' => [
+                    'liters_tracking_period' => $this->periodMetadata($period),
+                    'tank_ids' => $definition['tank_ids'],
+                    'pump_numbers' => $definition['pumps'],
+                    'tank_limit_source' => $hasTankLimit ? 'liters_movement' : 'current_stock_fallback',
                     'delivery_ids' => $fuelDeliveries->pluck('id')->all(),
                     'shift_reading_ids' => $fuelReadings->pluck('id')->unique()->values()->all(),
                     'deliveries' => $fuelDeliveries->all(),
                     'shift_readings' => $fuelReadings->all(),
-                    'events' => $eventAudit,
+                    'warnings' => $lineWarnings,
                 ],
             ];
         }
 
         return [
+            'liters_tracking_period_id' => $trackingPeriodId,
+            'tracking_period' => $this->periodMetadata($period),
             'period_start' => $start->toDateString(),
             'period_end' => $end->toDateString(),
-            'calculation_method' => 'moving_weighted_average',
+            'calculation_method' => 'periodic_weighted_average',
             'lines' => $lines,
             'deliveries' => collect($deliveryRows)
                 ->sortBy(fn (array $row): string => $row['occurred_at'] . '-' . str_pad((string) $row['id'], 12, '0', STR_PAD_LEFT))
@@ -293,7 +326,7 @@ class FuelInventoryReportService
             ->all();
     }
 
-    public function reportHistory(int $limit = 12)
+    public function reportHistory(int $limit = 12): Collection
     {
         if (! Schema::hasTable('fuel_inventory_reports')) {
             return collect();
@@ -307,6 +340,20 @@ class FuelInventoryReportService
             ->get();
     }
 
+    public function finalizedReportForTrackingPeriod(int $trackingPeriodId): ?object
+    {
+        if ($trackingPeriodId <= 0
+            || ! Schema::hasTable('fuel_inventory_reports')
+            || ! Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')) {
+            return null;
+        }
+
+        return DB::table('fuel_inventory_reports')
+            ->where('liters_tracking_period_id', $trackingPeriodId)
+            ->whereRaw('LOWER(status) = ?', ['finalized'])
+            ->first();
+    }
+
     public function storedReport(int $reportId): ?array
     {
         if (! Schema::hasTable('fuel_inventory_reports') || ! Schema::hasTable('fuel_inventory_report_lines')) {
@@ -314,6 +361,7 @@ class FuelInventoryReportService
         }
 
         $report = DB::table('fuel_inventory_reports')->where('id', $reportId)->first();
+
         if (! $report) {
             return null;
         }
@@ -341,24 +389,24 @@ class FuelInventoryReportService
             ->sortBy('occurred_at')
             ->values()
             ->all();
-        $warnings = collect($lines)->flatMap(function (array $line): array {
-            $lineWarnings = [];
-
-            if ((float) ($line['ending_liters'] ?? 0) < -0.0005) {
-                $lineWarnings[] = "{$line['product_name']} ends with negative calculated inventory; opening stock or source movements need reconciliation.";
-            }
-
-            if ((float) ($line['bulk_price'] ?? 0) <= 0) {
-                $lineWarnings[] = "{$line['product_name']} did not have a bulk selling price when this report was finalized.";
-            }
-
-            return $lineWarnings;
-        })->values()->all();
+        $warnings = collect($lines)
+            ->flatMap(fn (array $line): array => $line['source_summary']['warnings'] ?? [])
+            ->unique()
+            ->values()
+            ->all();
+        $trackingPeriodId = Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')
+            ? (int) ($report->liters_tracking_period_id ?? 0)
+            : 0;
+        $trackingPeriod = $trackingPeriodId > 0 && Schema::hasTable('liters_tracking_periods')
+            ? DB::table('liters_tracking_periods')->where('id', $trackingPeriodId)->first()
+            : null;
 
         return [
             'id' => (int) $report->id,
             'report_code' => (string) $report->report_code,
             'status' => (string) $report->status,
+            'liters_tracking_period_id' => $trackingPeriodId ?: null,
+            'tracking_period' => $this->periodMetadata($trackingPeriod),
             'period_start' => Carbon::parse($report->period_start)->toDateString(),
             'period_end' => Carbon::parse($report->period_end)->toDateString(),
             'calculation_method' => (string) $report->calculation_method,
@@ -370,48 +418,69 @@ class FuelInventoryReportService
         ];
     }
 
-    public function finalize(string $periodStart, string $periodEnd, array $manualOpening, ?int $createdBy): array
+    public function finalize(int $trackingPeriodId, array $manualOpening, ?int $createdBy): array
     {
-        return DB::transaction(function () use ($periodStart, $periodEnd, $manualOpening, $createdBy): array {
+        return DB::transaction(function () use ($trackingPeriodId, $manualOpening, $createdBy): array {
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', $trackingPeriodId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                throw new RuntimeException('The selected Liters Movement period was not found.');
+            }
+
+            if (strtolower(trim((string) $period->status)) !== 'generated') {
+                throw new RuntimeException('Generate the Liters Movement period before finalizing its inventory report.');
+            }
+
+            if (Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')
+                && DB::table('fuel_inventory_reports')
+                    ->where('liters_tracking_period_id', $trackingPeriodId)
+                    ->exists()) {
+                throw new RuntimeException('This Liters Movement period already has a finalized inventory report.');
+            }
+
             $latest = $this->latestFinalizedReport(true);
-            $start = Carbon::parse($periodStart)->startOfDay();
-            $end = Carbon::parse($periodEnd)->endOfDay();
-
-            if ($end->lt($start)) {
-                throw new RuntimeException('The report end date must be on or after its start date.');
-            }
-
-            if ($latest) {
-                $expectedStart = Carbon::parse($latest->period_end)->addDay()->toDateString();
-                if ($start->toDateString() !== $expectedStart) {
-                    throw new RuntimeException("The next report must begin on {$expectedStart} so no inventory activity is skipped or duplicated.");
-                }
-
-                $opening = $this->openingFromReport($latest);
-            } else {
-                $opening = $manualOpening;
-            }
-
-            $calculation = $this->calculate($start, $end, $opening);
+            $this->assertPeriodFollowsLatestReport($period, $latest);
+            $opening = $latest ? $this->openingFromReport($latest) : $manualOpening;
+            [$start, $end] = $this->reportWindow($period, $period->started_at, $period->ended_at);
+            $calculation = $this->calculate($start, $end, $opening, $trackingPeriodId);
             $sequence = DB::table('fuel_inventory_reports')
                 ->whereDate('period_end', $end->toDateString())
                 ->count() + 1;
             $reportCode = 'INV-' . $end->format('Ymd') . '-' . str_pad((string) $sequence, 3, '0', STR_PAD_LEFT);
             $now = now();
-            $reportId = DB::table('fuel_inventory_reports')->insertGetId([
+            $reportValues = [
                 'report_code' => $reportCode,
                 'period_start' => $start->toDateString(),
                 'period_end' => $end->toDateString(),
                 'status' => 'Finalized',
-                'calculation_method' => 'moving_weighted_average',
+                'calculation_method' => 'periodic_weighted_average',
                 'created_by' => $createdBy,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+
+            if (Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')) {
+                $reportValues['liters_tracking_period_id'] = $trackingPeriodId;
+            }
+
+            $reportId = DB::table('fuel_inventory_reports')->insertGetId($reportValues);
 
             foreach ($calculation['lines'] as $line) {
+                $lineValues = collect($line)->except('source_summary')->all();
+
+                if (! Schema::hasColumn('fuel_inventory_report_lines', 'tank_id')) {
+                    unset($lineValues['tank_id']);
+                }
+
+                if (! Schema::hasColumn('fuel_inventory_report_lines', 'tank_limit_liters')) {
+                    unset($lineValues['tank_limit_liters']);
+                }
+
                 DB::table('fuel_inventory_report_lines')->insert(array_merge(
-                    collect($line)->except('source_summary')->all(),
+                    $lineValues,
                     [
                         'fuel_inventory_report_id' => $reportId,
                         'source_summary' => json_encode($line['source_summary'], JSON_UNESCAPED_SLASHES),
@@ -429,10 +498,52 @@ class FuelInventoryReportService
         });
     }
 
-    private function deliveryLogs(Carbon $start, Carbon $end)
+    private function reportWindow(
+        ?object $period,
+        string|Carbon $periodStart,
+        string|Carbon|null $periodEnd
+    ): array {
+        $start = $period
+            ? Carbon::parse($period->started_at)
+            : Carbon::parse($periodStart)->startOfDay();
+        $end = $period
+            ? ($period->ended_at ? Carbon::parse($period->ended_at) : now())
+            : Carbon::parse($periodEnd)->endOfDay();
+
+        if ($end->lt($start)) {
+            throw new RuntimeException('The report end date must be on or after its start date.');
+        }
+
+        return [$start, $end];
+    }
+
+    private function assertPeriodFollowsLatestReport(object $period, ?object $latest): void
     {
-        if (! Schema::hasTable('inventory_logs')
-            || ! Schema::hasTable('tanks')) {
+        if (! $latest) {
+            return;
+        }
+
+        if (Schema::hasColumn('fuel_inventory_reports', 'liters_tracking_period_id')
+            && ! empty($latest->liters_tracking_period_id)) {
+            $latestPeriod = DB::table('liters_tracking_periods')
+                ->where('id', (int) $latest->liters_tracking_period_id)
+                ->first();
+
+            if ($latestPeriod && Carbon::parse($period->started_at)->lt(Carbon::parse($latestPeriod->ended_at))) {
+                throw new RuntimeException('Select a Liters Movement period that follows the latest finalized inventory report.');
+            }
+
+            return;
+        }
+
+        if (Carbon::parse($period->started_at)->startOfDay()->lte(Carbon::parse($latest->period_end)->endOfDay())) {
+            throw new RuntimeException('Select a Liters Movement period that follows the latest finalized inventory report.');
+        }
+    }
+
+    private function deliveryLogs(Carbon $start, Carbon $end): Collection
+    {
+        if (! Schema::hasTable('inventory_logs') || ! Schema::hasTable('tanks')) {
             return collect();
         }
 
@@ -446,8 +557,14 @@ class FuelInventoryReportService
         $select = [
             'logs.id',
             'logs.delivery_code',
+            'logs.tank_id',
             'logs.delivery_date',
-            Schema::hasColumn('inventory_logs', 'created_at') ? 'logs.created_at' : DB::raw('null as created_at'),
+            Schema::hasColumn('inventory_logs', 'delivery_status')
+                ? 'logs.delivery_status'
+                : DB::raw("'' as delivery_status"),
+            Schema::hasColumn('inventory_logs', 'created_at')
+                ? 'logs.created_at'
+                : DB::raw('null as created_at'),
             'logs.liters_delivered',
             'logs.total_cost',
             'tanks.fuel_type',
@@ -456,28 +573,62 @@ class FuelInventoryReportService
             ? 'suppliers.name as supplier_name'
             : DB::raw("'N/A' as supplier_name");
 
-        return $query
+        $query
             ->whereDate('logs.delivery_date', '>=', $start->toDateString())
             ->whereDate('logs.delivery_date', '<=', $end->toDateString())
             ->select($select)
-            ->orderBy('logs.delivery_date')
-            ->orderBy('logs.created_at')
+            ->orderBy('logs.delivery_date');
+
+        if (Schema::hasColumn('inventory_logs', 'created_at')) {
+            $query->orderBy('logs.created_at');
+        }
+
+        return $query
             ->orderBy('logs.id')
-            ->get();
+            ->get()
+            ->filter(function (object $delivery) use ($start, $end): bool {
+                $occurredAt = $this->deliveryOccurredAt($delivery);
+
+                return $occurredAt->betweenIncluded($start, $end);
+            })
+            ->values();
     }
 
-    private function verifiedShiftReadings(Carbon $start, Carbon $end)
+    private function includedShiftReadings(Carbon $start, Carbon $end, ?int $trackingPeriodId): Collection
     {
         if (! Schema::hasTable('shift_readings')) {
             return collect();
         }
 
-        return DB::table('shift_readings')
-            ->whereDate('period_to', '>=', $start->toDateString())
-            ->whereDate('period_to', '<=', $end->toDateString())
-            ->whereIn(DB::raw('LOWER(TRIM(status))'), ['verified', 'approved'])
-            ->orderBy('period_to')
-            ->orderBy('id')
+        $query = DB::table('shift_readings');
+
+        if ($trackingPeriodId && Schema::hasTable('liters_movement_period_readings')) {
+            $query
+                ->join(
+                    'liters_movement_period_readings as period_memberships',
+                    'period_memberships.shift_reading_id',
+                    '=',
+                    'shift_readings.id'
+                )
+                ->where('period_memberships.liters_tracking_period_id', $trackingPeriodId)
+                ->whereRaw('LOWER(TRIM(period_memberships.inclusion_status)) = ?', ['included']);
+
+            if (Schema::hasColumn('liters_movement_period_readings', 'removed_at')) {
+                $query->whereNull('period_memberships.removed_at');
+            }
+        } elseif ($trackingPeriodId && Schema::hasColumn('shift_readings', 'liters_tracking_period_id')) {
+            $query->where('shift_readings.liters_tracking_period_id', $trackingPeriodId);
+        } else {
+            $query
+                ->whereDate('shift_readings.period_to', '>=', $start->toDateString())
+                ->whereDate('shift_readings.period_to', '<=', $end->toDateString());
+        }
+
+        return $query
+            ->whereIn(DB::raw('LOWER(TRIM(shift_readings.status))'), self::INCLUDED_READING_STATUSES)
+            ->select('shift_readings.*')
+            ->orderBy('shift_readings.period_to')
+            ->orderBy('shift_readings.id')
             ->get();
     }
 
@@ -504,6 +655,101 @@ class FuelInventoryReportService
             ->all();
     }
 
+    private function productDefinitions(): array
+    {
+        $definitions = collect(self::PRODUCTS)
+            ->map(fn (array $definition): array => array_merge($definition, [
+                'tank_ids' => [],
+                'configured_pumps' => [],
+            ]))
+            ->all();
+
+        if (! Schema::hasTable('tanks')) {
+            return $definitions;
+        }
+
+        $columns = ['id', 'fuel_type'];
+
+        if (Schema::hasColumn('tanks', 'connected_pumps')) {
+            $columns[] = 'connected_pumps';
+        }
+
+        DB::table('tanks')
+            ->select($columns)
+            ->orderBy('id')
+            ->get()
+            ->each(function (object $tank) use (&$definitions): void {
+                $fuel = $this->canonicalFuel($tank->fuel_type ?? null);
+
+                if ($fuel === null || ! isset($definitions[$fuel])) {
+                    return;
+                }
+
+                $definitions[$fuel]['tank_ids'][] = (int) $tank->id;
+                $definitions[$fuel]['configured_pumps'] = array_merge(
+                    $definitions[$fuel]['configured_pumps'],
+                    $this->parsePumpNumbers($tank->connected_pumps ?? null)
+                );
+            });
+
+        foreach ($definitions as &$definition) {
+            $definition['tank_ids'] = array_values(array_unique($definition['tank_ids']));
+            $configuredPumps = array_values(array_unique($definition['configured_pumps']));
+
+            if ($configuredPumps !== []) {
+                sort($configuredPumps);
+                $definition['pumps'] = $configuredPumps;
+            }
+
+            unset($definition['configured_pumps']);
+        }
+        unset($definition);
+
+        return $definitions;
+    }
+
+    private function parsePumpNumbers(mixed $connectedPumps): array
+    {
+        preg_match_all('/\d+/', (string) $connectedPumps, $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn ($pump) => (int) $pump)
+            ->filter(fn (int $pump): bool => $pump >= 1 && $pump <= 6)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function decodedTankLimits(?object $period): array
+    {
+        if (! $period || ! isset($period->tank_limits)) {
+            return [];
+        }
+
+        $limits = json_decode((string) $period->tank_limits, true);
+
+        return is_array($limits) ? $limits : [];
+    }
+
+    private function tankLimitForDefinition(array $definition, array $tankLimits, float $fallback): array
+    {
+        $limit = 0.0;
+        $found = false;
+
+        foreach ($definition['tank_ids'] as $tankId) {
+            $key = "tank:{$tankId}";
+
+            if (! array_key_exists($key, $tankLimits) || ! is_numeric($tankLimits[$key])) {
+                continue;
+            }
+
+            $limit += max(0, (float) $tankLimits[$key]);
+            $found = true;
+        }
+
+        return [$found ? $limit : $fallback, $found];
+    }
+
     private function pricesByFuel(): array
     {
         if (! Schema::hasTable('fuel_prices')) {
@@ -513,6 +759,7 @@ class FuelInventoryReportService
         $hasBulkPrice = Schema::hasColumn('fuel_prices', 'bulk_price_per_liter');
 
         return DB::table('fuel_prices')
+            ->orderBy('id')
             ->get()
             ->mapWithKeys(function ($price) use ($hasBulkPrice): array {
                 $fuel = $this->canonicalFuel($price->fuel_type ?? null);
@@ -532,7 +779,24 @@ class FuelInventoryReportService
             ? Carbon::parse($delivery->created_at)->format('H:i:s')
             : '00:00:00';
 
-        return Carbon::parse(trim("{$date} {$time}"));
+        return Carbon::parse("{$date} {$time}");
+    }
+
+    private function periodMetadata(?object $period): ?array
+    {
+        if (! $period) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $period->id,
+            'period_code' => (string) ($period->period_code ?? ''),
+            'status' => (string) ($period->status ?? ''),
+            'started_at' => Carbon::parse($period->started_at)->toDateTimeString(),
+            'ended_at' => $period->ended_at
+                ? Carbon::parse($period->ended_at)->toDateTimeString()
+                : null,
+        ];
     }
 
     private function canonicalFuel(mixed $fuelType): ?string
@@ -566,7 +830,9 @@ class FuelInventoryReportService
             'opening_value' => $this->rounded((float) $collection->sum('opening_value')),
             'purchase_value' => $this->rounded((float) $collection->sum('purchase_value')),
             'available_value' => $this->rounded((float) $collection->sum('available_value')),
+            'tank_limit_liters' => $this->rounded((float) $collection->sum('tank_limit_liters')),
             'ending_value' => $this->rounded((float) $collection->sum('ending_value')),
+            'ending_liters' => $this->rounded((float) $collection->sum('ending_liters')),
             'dispensed_liters' => $this->rounded((float) $collection->sum('dispensed_liters')),
             'sales_revenue' => $this->rounded((float) $collection->sum('sales_revenue')),
             'cost_of_goods_sold' => $this->rounded((float) $collection->sum('cost_of_goods_sold')),

@@ -29,16 +29,21 @@ afterEach(function () {
     Carbon::setTestNow();
 });
 
-test('the report page waits until the next report period is available', function () {
+test('the report page defaults to the active liters movement period', function () {
     Carbon::setTestNow('2026-07-22 12:00:00');
 
-    $latest = (object) [
+    $period = (object) [
         'id' => 10,
-        'period_end' => '2026-07-22',
+        'period_code' => 'LTM-ACTIVE',
+        'status' => 'Active',
+        'started_at' => '2026-07-20 08:00:00',
+        'ended_at' => null,
     ];
     $reports = Mockery::mock(FuelInventoryReportService::class);
-    $reports->shouldReceive('latestFinalizedReport')->once()->andReturn($latest);
-    $reports->shouldReceive('openingFromReport')->once()->with($latest)->andReturn([]);
+    $reports->shouldReceive('trackingPeriods')->once()->andReturn(collect([$period]));
+    $reports->shouldReceive('latestFinalizedReport')->once()->andReturnNull();
+    $reports->shouldReceive('defaultTrackingPeriod')->once()->andReturn($period);
+    $reports->shouldReceive('finalizedReportForTrackingPeriod')->once()->with(10)->andReturnNull();
     $reports->shouldReceive('reportHistory')->once()->andReturn(collect());
     $reports->shouldNotReceive('calculate');
 
@@ -48,8 +53,7 @@ test('the report page waits until the next report period is available', function
     );
     $data = $view->getData();
 
-    expect($data['startDate'])->toBe('2026-07-23')
-        ->and($data['endDate'])->toBe('2026-07-23')
-        ->and($data['reportPeriodAvailable'])->toBeFalse()
+    expect($data['selectedPeriod']->id)->toBe(10)
+        ->and($data['canFinalize'])->toBeFalse()
         ->and($data['calculation'])->toBeNull();
 });
