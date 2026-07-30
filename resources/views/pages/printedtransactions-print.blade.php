@@ -8,12 +8,9 @@
         ? $printedAt
         : \Carbon\Carbon::parse($printedAt ?? now());
     $recordCount = $transactions->count();
-    $totalLabel = $isPaidInFullReceipt ? 'TOTAL AMOUNT PAID' : 'TOTAL AMOUNT DUE';
-    $amountHeader = $isPaidInFullReceipt ? 'Amount' : 'Charges (+)';
-    $summaryChargeLabel = $isPaidInFullReceipt ? 'Fuel Sales' : 'Current Fuel Charges (+)';
-    $preparedByValue = $printSignatories->prepared_by ?? '';
-    $acknowledgedByValue = $printSignatories->acknowledged_by ?? '';
-    $signedAtValue = \Carbon\Carbon::parse($signatorySignedAt ?? now());
+    $totalLabel = $isPaidInFullReceipt ? 'TOTAL PAID' : 'TOTAL DUE';
+    $amountHeader = $isPaidInFullReceipt ? 'Amount' : 'Charges';
+    $summaryChargeLabel = $isPaidInFullReceipt ? 'Fuel Sales' : 'Fuel Charges';
 
     $formatQuantity = function ($value) {
         $formatted = number_format((float) $value, 2, '.', '');
@@ -69,18 +66,18 @@
     @include('layouts.browser-icon')
     <style>
         :root {
-            --a6-paper-width: 105mm;
-            --a6-paper-height: 148mm;
-            --a6-page-margin: 4mm;
-            --a6-print-height: 140mm;
+            --a6-paper-width: 148mm;
+            --a6-paper-height: 105mm;
+            --a6-page-margin: 3mm;
+            --a6-print-height: 99mm;
         }
-        @page { margin: 4mm; size: 105mm 148mm; }
+        @page { margin: 3mm; size: 148mm 105mm; }
         body {
             margin: 0;
             color: #222;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 8.5px;
-            line-height: 1.24;
+            font-size: 7.4px;
+            line-height: 1.18;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
@@ -121,7 +118,7 @@
             gap: 8px;
             margin-bottom: 10px;
         }
-        .toolbar button, .signatory-actions button {
+        .toolbar button {
             background: #039855;
             border: 0;
             border-radius: 6px;
@@ -130,59 +127,12 @@
             font-weight: 700;
             padding: 9px 12px;
         }
-        .toolbar .primary, .signatory-actions .save-btn { background: #465fff; }
-        .toolbar .success, .signatory-actions .print-btn { background: #039855; }
-        .toolbar button:disabled, .signatory-actions button:disabled {
+        .toolbar .primary { background: #465fff; }
+        .toolbar .success { background: #039855; }
+        .toolbar button:disabled {
             cursor: not-allowed;
             opacity: 0.7;
         }
-        .signatory-panel {
-            background: #fff;
-            border: 1px solid #d0d5dd;
-            border-radius: 8px;
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
-            padding: 14px;
-        }
-        .signatory-panel-title {
-            color: #101828;
-            font-size: 14px;
-            font-weight: 700;
-            margin-bottom: 10px;
-        }
-        .signatory-field { margin-bottom: 10px; }
-        .signatory-field label {
-            color: #667085;
-            display: block;
-            font-size: 10px;
-            font-weight: 700;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-        }
-        .signatory-field input {
-            border: 1px solid #d0d5dd;
-            border-radius: 6px;
-            box-sizing: border-box;
-            font-size: 12px;
-            padding: 8px 9px;
-            width: 100%;
-        }
-        .signatory-field input[readonly] {
-            background: #f2f4f7;
-            color: #667085;
-        }
-        .signatory-actions {
-            display: flex;
-            gap: 8px;
-        }
-        .signatory-actions button { flex: 1; }
-        .signatory-status {
-            color: #667085;
-            font-size: 12px;
-            margin-top: 9px;
-            min-height: 15px;
-        }
-        .signatory-status.error { color: #b42318; }
-        .signatory-status.success { color: #027a48; }
         .sheet {
             box-sizing: border-box;
             display: flex;
@@ -190,7 +140,7 @@
             min-height: var(--a6-print-height);
             position: relative;
         }
-        .main-content { flex: 1; }
+        .main-content { flex: 0 1 auto; }
         .report-header {
             border-bottom: 1.5px solid #465fff;
             margin-bottom: 3mm;
@@ -208,36 +158,36 @@
         }
         .logo {
             height: auto;
-            max-width: 21mm;
+            max-width: 17mm;
         }
         .company-name {
             color: #465fff;
-            font-size: 11px;
+            font-size: 9.4px;
             font-weight: 900;
             margin: 0;
         }
         .company-details {
             color: #475467;
-            font-size: 7px;
+            font-size: 6.2px;
             margin: 2px 0 0;
         }
         .statement-title {
             color: #98a2b3;
-            font-size: 10px;
+            font-size: 8.5px;
             font-weight: 900;
             text-align: right;
             text-transform: uppercase;
         }
         .statement-number {
             color: #d92d20;
-            font-size: 8.5px;
+            font-size: 7.4px;
             font-weight: 900;
             margin-top: 1mm;
             text-align: right;
         }
         .status-stamp {
             color: rgba(28, 200, 138, 0.15);
-            font-size: 30px;
+            font-size: 23px;
             font-weight: 900;
             left: 50%;
             pointer-events: none;
@@ -253,23 +203,23 @@
             border: 1px solid #e4e7ec;
             border-radius: 4px;
             display: flex;
-            gap: 3mm;
+            gap: 2mm;
             justify-content: space-between;
-            margin-bottom: 3mm;
-            padding: 2mm 2.5mm;
+            margin-bottom: 2mm;
+            padding: 1.4mm 2mm;
         }
         .bill-to { min-width: 0; }
         .bill-to-label {
             color: #667085;
             display: block;
-            font-size: 7px;
+            font-size: 6.2px;
             font-weight: 700;
             margin-bottom: 2px;
             text-transform: uppercase;
         }
         .bill-to h3 {
             color: #101828;
-            font-size: 9px;
+            font-size: 8px;
             font-weight: 900;
             margin: 0 0 1mm;
             text-transform: uppercase;
@@ -280,8 +230,8 @@
         }
         .meta-table td {
             border: 0;
-            font-size: 7.5px;
-            padding: 0.6mm 1.2mm;
+            font-size: 6.6px;
+            padding: 0.35mm 1mm;
         }
         .meta-table td:first-child {
             color: #667085;
@@ -295,22 +245,22 @@
         }
         .table-title {
             color: #465fff;
-            font-size: 8px;
+            font-size: 7px;
             font-weight: 800;
-            margin-bottom: 1.5mm;
+            margin-bottom: 1mm;
             text-transform: uppercase;
         }
         .data-table th, .data-table td {
             border: 1px solid #d0d5dd;
             overflow-wrap: anywhere;
-            padding: 1.1mm 1.2mm;
+            padding: 0.75mm 1mm;
             vertical-align: top;
         }
         .data-table tr { page-break-inside: avoid; }
         .data-table th {
             background: #f2f4f7;
             color: #344054;
-            font-size: 7px;
+            font-size: 6.2px;
             font-weight: 800;
             text-align: left;
             text-transform: uppercase;
@@ -324,15 +274,15 @@
         .summary-box {
             display: flex;
             justify-content: flex-end;
-            margin-top: 3mm;
+            margin-top: 2mm;
             page-break-inside: avoid;
         }
-        .summary-table { width: 58mm; }
+        .summary-table { width: 48mm; }
         .summary-table td {
             border: 0;
             border-bottom: 1px solid #e4e7ec;
-            font-size: 8px;
-            padding: 1mm 1.2mm;
+            font-size: 6.6px;
+            padding: 0.55mm 0.9mm;
         }
         .summary-table td:first-child {
             color: #475467;
@@ -342,62 +292,53 @@
         .grand-total td {
             border: 0 !important;
             color: #fff !important;
-            font-size: 9px !important;
+            font-size: 7.2px !important;
             font-weight: 900 !important;
-            padding: 1.4mm !important;
+            padding: 0.8mm 1mm !important;
         }
         .bottom-section {
             margin-top: auto;
-            padding-top: 4mm;
-            page-break-inside: avoid;
+            padding-top: 0;
         }
         .instructions {
             background: #f8f9fc;
             border-left: 2px solid #465fff;
             color: #475467;
-            font-size: 7px;
-            margin-bottom: 4mm;
-            padding: 1.5mm 2mm;
+            font-size: 6.1px;
+            margin-bottom: 2mm;
+            padding: 1mm 1.5mm;
         }
-        .instructions p { margin: 1mm 0; }
-        .signatures {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 5mm;
-        }
-        .signature-box {
-            text-align: center;
-            width: 44%;
-        }
-        .sig-line {
-            align-items: flex-end;
-            border-bottom: 1px solid #101828;
-            box-sizing: border-box;
-            display: flex;
-            height: 6mm;
-            justify-content: center;
-            margin-bottom: 1.2mm;
-            padding: 0 1mm 0.8mm;
-        }
-        .signature-name {
-            display: block;
-            font-size: 8px;
-            font-weight: 700;
-            line-height: 1.2;
-            overflow-wrap: anywhere;
-        }
-        .sig-label {
-            color: #344054;
-            font-size: 7.5px;
-            font-weight: 700;
-        }
+        .instructions p { margin: 0.6mm 0; }
         .footer {
             border-top: 1px solid #e4e7ec;
             color: #98a2b3;
-            font-size: 6.8px;
-            margin-top: 4mm;
-            padding-top: 1.5mm;
+            font-size: 5.9px;
+            margin-top: 2mm;
+            padding-top: 1mm;
             text-align: center;
+        }
+        @media print {
+            .sheet {
+                display: flex;
+                flex-direction: column;
+                min-height: var(--a6-print-height);
+                padding: 0;
+                width: 100%;
+            }
+            .main-content {
+                flex: 0 1 auto;
+            }
+            .report-header {
+                margin-bottom: 2mm;
+                padding-bottom: 1.4mm;
+            }
+            .bottom-section {
+                margin-top: auto;
+            }
+            .summary-box {
+                break-inside: auto;
+                page-break-inside: auto;
+            }
         }
     </style>
 </head>
@@ -405,26 +346,6 @@
     <div class="no-print">
         <div class="toolbar">
             <button type="button" class="primary" onclick="window.print()">Print Copy</button>
-        </div>
-        <div class="signatory-panel">
-            <div class="signatory-panel-title">Printed Transaction Signatories</div>
-            <div class="signatory-field">
-                <label for="prepared_by_input">Prepared By</label>
-                <input type="text" id="prepared_by_input" value="{{ $preparedByValue }}" placeholder="JR-M Fuel Station representative">
-            </div>
-            <div class="signatory-field">
-                <label for="acknowledged_by_input">Received / Acknowledged By</label>
-                <input type="text" id="acknowledged_by_input" value="{{ $acknowledgedByValue }}" placeholder="Customer / Representative">
-            </div>
-            <div class="signatory-field">
-                <label for="signed_at_input">Date &amp; Time</label>
-                <input type="datetime-local" id="signed_at_input" value="{{ $signedAtValue->format('Y-m-d\TH:i') }}" readonly>
-            </div>
-            <div class="signatory-actions">
-                <button type="button" class="save-btn" id="saveSignatoriesBtn">Save</button>
-                <button type="button" class="print-btn" id="savePrintSignatoriesBtn">Save &amp; Print</button>
-            </div>
-            <div class="signatory-status" id="signatoryStatus"></div>
         </div>
     </div>
 
@@ -516,19 +437,19 @@
                     @endif
                     @if ((float) $totals->collection_amount > 0)
                         <tr>
-                            <td>Collections / Payments</td>
+                            <td>Payments</td>
                             <td class="amount-col">{{ number_format((float) $totals->collection_amount, 2) }}</td>
                         </tr>
                     @endif
                     @if ((float) $totals->discounts > 0)
                         <tr>
-                            <td style="color: #d92d20;">Total Savings Applied</td>
+                            <td style="color: #d92d20;">Savings</td>
                             <td class="amount-col" style="color: #d92d20;">- {{ number_format((float) $totals->discounts, 2) }}</td>
                         </tr>
                     @endif
                     @if ((float) $totals->surcharge > 0)
                         <tr>
-                            <td>Excess Markup (+)</td>
+                            <td>Markup</td>
                             <td class="amount-col">{{ number_format((float) $totals->surcharge, 2) }}</td>
                         </tr>
                     @endif
@@ -546,86 +467,10 @@
                 <p>Payment is expected promptly upon receipt of this statement. Failure to settle may result in account restrictions.</p>
             </div>
 
-            <div class="signatures">
-                <div class="signature-box">
-                    <p class="sig-line"><span class="signature-name" id="print_prepared_by">{{ $preparedByValue }}</span></p>
-                    <p class="sig-label">Prepared By (JR-M Fuel Station)</p>
-                </div>
-                <div class="signature-box">
-                    <p class="sig-line"><span class="signature-name" id="print_acknowledged_by">{{ $acknowledgedByValue }}</span></p>
-                    <p class="sig-label">Received / Acknowledged By</p>
-                </div>
-            </div>
-
             <div class="footer">
                 <p>{{ $documentTitle }} Generated via JR-M Fuel Station Management System &copy; {{ date('Y') }}</p>
             </div>
         </section>
     </main>
-
-    <script>
-        const signatorySaveUrl = @json($signatorySaveUrl);
-        const signatoryCsrfToken = @json(csrf_token());
-        const saveSignatoriesButton = document.getElementById('saveSignatoriesBtn');
-        const savePrintSignatoriesButton = document.getElementById('savePrintSignatoriesBtn');
-        const signatoryStatus = document.getElementById('signatoryStatus');
-        const preparedByInput = document.getElementById('prepared_by_input');
-        const acknowledgedByInput = document.getElementById('acknowledged_by_input');
-        const signedAtInput = document.getElementById('signed_at_input');
-        const printPreparedBy = document.getElementById('print_prepared_by');
-        const printAcknowledgedBy = document.getElementById('print_acknowledged_by');
-
-        function setSignatoryStatus(message, type) {
-            signatoryStatus.textContent = message || '';
-            signatoryStatus.className = 'signatory-status' + (type ? ' ' + type : '');
-        }
-
-        function setSignatoryButtons(disabled) {
-            saveSignatoriesButton.disabled = disabled;
-            savePrintSignatoriesButton.disabled = disabled;
-        }
-
-        function saveSignatories(shouldPrint) {
-            setSignatoryButtons(true);
-            setSignatoryStatus('Saving printed transaction signatories...', '');
-
-            return fetch(signatorySaveUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-CSRF-TOKEN': signatoryCsrfToken
-                },
-                body: JSON.stringify({
-                    prepared_by: preparedByInput.value,
-                    acknowledged_by: acknowledgedByInput.value
-                })
-            })
-                .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
-                .then((result) => {
-                    if (!result.ok || !result.data.success) {
-                        throw new Error(result.data.message || 'Unable to save signatories.');
-                    }
-
-                    printPreparedBy.textContent = result.data.prepared_by || '';
-                    printAcknowledgedBy.textContent = result.data.acknowledged_by || '';
-                    signedAtInput.value = result.data.signed_at_input || signedAtInput.value;
-                    setSignatoryStatus(result.data.message || 'Saved.', 'success');
-
-                    if (shouldPrint) {
-                        window.print();
-                    }
-                })
-                .catch((error) => {
-                    setSignatoryStatus(error.message || 'Unable to save signatories.', 'error');
-                })
-                .finally(() => {
-                    setSignatoryButtons(false);
-                });
-        }
-
-        saveSignatoriesButton.addEventListener('click', () => saveSignatories(false));
-        savePrintSignatoriesButton.addEventListener('click', () => saveSignatories(true));
-    </script>
 </body>
 </html>
