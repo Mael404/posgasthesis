@@ -27,6 +27,10 @@ class FuelInventoryReportService
         ],
     ];
 
+    public function __construct(
+        private readonly LitersMovementTrackingService $litersMovement
+    ) {}
+
     public function trackingPeriods(int $limit = 24): Collection
     {
         if (! Schema::hasTable('liters_tracking_periods')) {
@@ -65,6 +69,46 @@ class FuelInventoryReportService
             ->first();
     }
 
+    public function initialOpeningFromTrackingPeriod(int|object $period): array
+    {
+        if (! is_object($period)) {
+            $period = $this->trackingPeriod($period);
+        }
+
+        if (! $period) {
+            return [];
+        }
+
+        [$start, $end] = $this->reportWindow(
+            $period,
+            $period->started_at,
+            $period->ended_at ?? now()
+        );
+        $definitions = $this->productDefinitions();
+        $limits = $this->decodedTankLimits($period);
+        $deliveredByFuel = $this->deliveryLogs($start, $end)
+            ->groupBy(fn (object $delivery): string => $this->canonicalFuel($delivery->fuel_type ?? null) ?? '')
+            ->map(fn (Collection $deliveries): float => (float) $deliveries->sum('liters_delivered'));
+
+        return collect($definitions)
+            ->map(function (array $definition, string $fuel) use ($limits, $deliveredByFuel): array {
+                [$currentLimit, $hasCurrentLimit] = $this->tankLimitForDefinition(
+                    $definition,
+                    $limits,
+                    0.0
+                );
+                $deliveredLiters = max(0, (float) $deliveredByFuel->get($fuel, 0));
+
+                return [
+                    'liters' => $hasCurrentLimit
+                        ? $this->rounded(max(0, $currentLimit - $deliveredLiters))
+                        : 0.0,
+                    'unit_cost' => 0.0,
+                ];
+            })
+            ->all();
+    }
+
     public function calculate(
         string|Carbon $periodStart,
         string|Carbon $periodEnd,
@@ -84,6 +128,9 @@ class FuelInventoryReportService
         $adjustmentsByReading = $this->activeAdjustmentsByReading(
             $readings->pluck('id')->map(fn ($id) => (int) $id)->all()
         );
+        $movementTotals = $period
+            ? $this->movementTotalsByFuel($this->litersMovement->reportSummary($period))
+            : [];
         $prices = $this->pricesByFuel();
         $tankLimits = $this->decodedTankLimits($period);
         $deliveryRows = [];
@@ -102,7 +149,8 @@ class FuelInventoryReportService
             $deliveryRows[] = [
                 'id' => (int) $delivery->id,
                 'delivery_code' => (string) ($delivery->delivery_code ?? ''),
-                'delivery_date' => Carbon::parse($delivery->delivery_date)->toDateString(),
+                'delivery_date' => $occurredAt->toDateString(),
+                'logged_delivery_date' => Carbon::parse($delivery->delivery_date)->toDateString(),
                 'occurred_at' => $occurredAt->toDateTimeString(),
                 'supplier' => (string) ($delivery->supplier_name ?? 'N/A'),
                 'delivery_status' => (string) ($delivery->delivery_status ?? ''),
@@ -184,14 +232,25 @@ class FuelInventoryReportService
             $availableLiters = $openingLiters + $purchasedLiters;
             $availableValue = $openingValue + $purchaseValue;
             $periodicAverageCost = $this->divide($availableValue, $availableLiters);
-            $dispensedLiters = (float) $fuelReadings->sum('liters');
-            $salesRevenue = (float) $fuelReadings->sum('revenue');
-            [$tankLimit, $hasTankLimit] = $this->tankLimitForDefinition(
+            $movement = $movementTotals[$fuel] ?? null;
+            $dispensedLiters = $movement !== null
+                ? (float) $movement['liters']
+                : (float) $fuelReadings->sum('liters');
+            $grossSalesRevenue = $movement !== null
+                ? (float) $movement['total_sales']
+                : (float) $fuelReadings->sum('revenue');
+            $salesDiscounts = $movement !== null
+                ? (float) $movement['discounts']
+                : 0.0;
+            $salesRevenue = $movement !== null
+                ? (float) $movement['net_sales']
+                : $grossSalesRevenue;
+            [$configuredTankLimit, $hasTankLimit] = $this->tankLimitForDefinition(
                 $definition,
                 $tankLimits,
                 $availableLiters
             );
-            $endingLiters = $tankLimit - $dispensedLiters;
+            $endingLiters = $availableLiters - $dispensedLiters;
             $costOfGoodsSold = $dispensedLiters * $periodicAverageCost;
             $endingValue = $endingLiters * $periodicAverageCost;
             $averageSellingPrice = $this->divide($salesRevenue, $dispensedLiters);
@@ -206,16 +265,16 @@ class FuelInventoryReportService
                 $lineWarnings[] = "{$definition['product_name']} has no tank limit in the selected Liters Movement period. Current stock is being used as a preview fallback.";
             }
 
-            if ($period && $hasTankLimit && abs($tankLimit - $availableLiters) > 0.01) {
-                $difference = abs($tankLimit - $availableLiters);
-                $direction = $tankLimit > $availableLiters ? 'above' : 'below';
+            if ($period && $hasTankLimit && abs($configuredTankLimit - $availableLiters) > 0.01) {
+                $difference = abs($configuredTankLimit - $availableLiters);
+                $direction = $configuredTankLimit > $availableLiters ? 'above' : 'below';
                 $lineWarnings[] = "{$definition['product_name']} tank limit is "
                     . number_format($difference, 2)
-                    . " L {$direction} calculated current stock. Check the opening stock, delivery logs, or Liters Movement limit.";
+                    . " L {$direction} calculated current stock. Current stock is used for this inventory report; update the editable Liters Movement limit if needed.";
             }
 
             if ($endingLiters < -0.0005) {
-                $lineWarnings[] = "{$definition['product_name']} dispensed liters exceed its tank limit by "
+                $lineWarnings[] = "{$definition['product_name']} dispensed liters exceed calculated current stock by "
                     . number_format(abs($endingLiters), 2)
                     . ' L.';
             }
@@ -241,7 +300,7 @@ class FuelInventoryReportService
                 'available_liters' => $this->rounded($availableLiters),
                 'available_value' => $this->rounded($availableValue),
                 'periodic_average_cost' => $this->rounded($periodicAverageCost),
-                'tank_limit_liters' => $this->rounded($tankLimit),
+                'tank_limit_liters' => $this->rounded($availableLiters),
                 'dispensed_liters' => $this->rounded($dispensedLiters),
                 'sales_revenue' => $this->rounded($salesRevenue),
                 'cost_of_goods_sold' => $this->rounded($costOfGoodsSold),
@@ -259,7 +318,13 @@ class FuelInventoryReportService
                     'liters_tracking_period' => $this->periodMetadata($period),
                     'tank_ids' => $definition['tank_ids'],
                     'pump_numbers' => $definition['pumps'],
-                    'tank_limit_source' => $hasTankLimit ? 'liters_movement' : 'current_stock_fallback',
+                    'tank_limit_source' => 'calculated_current_stock',
+                    'configured_liters_movement_limit' => $this->rounded($configuredTankLimit),
+                    'has_configured_liters_movement_limit' => $hasTankLimit,
+                    'sales_basis' => $movement !== null ? 'liters_movement_net_sales' : 'meter_sales',
+                    'gross_sales_revenue' => $this->rounded($grossSalesRevenue),
+                    'sales_discounts' => $this->rounded($salesDiscounts),
+                    'net_sales_revenue' => $this->rounded($salesRevenue),
                     'delivery_ids' => $fuelDeliveries->pluck('id')->all(),
                     'shift_reading_ids' => $fuelReadings->pluck('id')->unique()->values()->all(),
                     'deliveries' => $fuelDeliveries->all(),
@@ -541,6 +606,40 @@ class FuelInventoryReportService
         }
     }
 
+    private function movementTotalsByFuel(array $summary): array
+    {
+        $totals = collect(self::PRODUCTS)
+            ->map(fn (): array => [
+                'liters' => 0.0,
+                'total_sales' => 0.0,
+                'discounts' => 0.0,
+                'net_sales' => 0.0,
+            ])
+            ->all();
+
+        foreach (($summary['pump_net_sales'] ?? []) as $pump) {
+            $fuel = $this->canonicalFuel($pump['fuel_type'] ?? null);
+
+            if ($fuel === null || ! isset($totals[$fuel])) {
+                continue;
+            }
+
+            $totals[$fuel]['liters'] += max(0, (float) ($pump['liters'] ?? 0));
+            $totals[$fuel]['total_sales'] += (float) ($pump['total_sales'] ?? 0);
+            $totals[$fuel]['discounts'] += (float) ($pump['discounts'] ?? 0);
+            $totals[$fuel]['net_sales'] += (float) ($pump['net_sales'] ?? 0);
+        }
+
+        return collect($totals)
+            ->map(fn (array $row): array => [
+                'liters' => $this->rounded($row['liters']),
+                'total_sales' => $this->rounded($row['total_sales']),
+                'discounts' => $this->rounded($row['discounts']),
+                'net_sales' => $this->rounded($row['net_sales']),
+            ])
+            ->all();
+    }
+
     private function deliveryLogs(Carbon $start, Carbon $end): Collection
     {
         if (! Schema::hasTable('inventory_logs') || ! Schema::hasTable('tanks')) {
@@ -549,6 +648,19 @@ class FuelInventoryReportService
 
         $query = DB::table('inventory_logs as logs')
             ->join('tanks', 'logs.tank_id', '=', 'tanks.id');
+        $hasDeliveryRecords = Schema::hasTable('tank_delivery_records')
+            && Schema::hasColumn('tank_delivery_records', 'inventory_log_id')
+            && Schema::hasColumn('tank_delivery_records', 'record_date')
+            && Schema::hasColumn('tank_delivery_records', 'record_time');
+
+        if ($hasDeliveryRecords) {
+            $query->leftJoin(
+                'tank_delivery_records as delivery_records',
+                'delivery_records.inventory_log_id',
+                '=',
+                'logs.id'
+            );
+        }
 
         if (Schema::hasTable('suppliers')) {
             $query->leftJoin('suppliers', 'logs.supplier_id', '=', 'suppliers.id');
@@ -569,13 +681,33 @@ class FuelInventoryReportService
             'logs.total_cost',
             'tanks.fuel_type',
         ];
+        $select[] = $hasDeliveryRecords
+            ? 'delivery_records.record_date'
+            : DB::raw('null as record_date');
+        $select[] = $hasDeliveryRecords
+            ? 'delivery_records.record_time'
+            : DB::raw('null as record_time');
+        $select[] = $hasDeliveryRecords && Schema::hasColumn('tank_delivery_records', 'rejected_at')
+            ? 'delivery_records.rejected_at'
+            : DB::raw('null as rejected_at');
         $select[] = Schema::hasTable('suppliers')
             ? 'suppliers.name as supplier_name'
             : DB::raw("'N/A' as supplier_name");
 
         $query
-            ->whereDate('logs.delivery_date', '>=', $start->toDateString())
-            ->whereDate('logs.delivery_date', '<=', $end->toDateString())
+            ->where(function ($query) use ($start, $end, $hasDeliveryRecords): void {
+                $query->whereBetween('logs.delivery_date', [
+                    $start->toDateString(),
+                    $end->toDateString(),
+                ]);
+
+                if ($hasDeliveryRecords) {
+                    $query->orWhereBetween('delivery_records.record_date', [
+                        $start->toDateString(),
+                        $end->toDateString(),
+                    ]);
+                }
+            })
             ->select($select)
             ->orderBy('logs.delivery_date');
 
@@ -587,6 +719,10 @@ class FuelInventoryReportService
             ->orderBy('logs.id')
             ->get()
             ->filter(function (object $delivery) use ($start, $end): bool {
+                if (! $this->deliveryIsIncluded($delivery)) {
+                    return false;
+                }
+
                 $occurredAt = $this->deliveryOccurredAt($delivery);
 
                 return $occurredAt->betweenIncluded($start, $end);
@@ -774,12 +910,34 @@ class FuelInventoryReportService
 
     private function deliveryOccurredAt(object $delivery): Carbon
     {
+        if (! empty($delivery->record_date)) {
+            $date = Carbon::parse($delivery->record_date)->toDateString();
+            $time = ! empty($delivery->record_time)
+                ? Carbon::parse($delivery->record_time)->format('H:i:s')
+                : '00:00:00';
+
+            return Carbon::parse("{$date} {$time}");
+        }
+
         $date = Carbon::parse($delivery->delivery_date)->toDateString();
         $time = ! empty($delivery->created_at)
             ? Carbon::parse($delivery->created_at)->format('H:i:s')
             : '00:00:00';
 
         return Carbon::parse("{$date} {$time}");
+    }
+
+    private function deliveryIsIncluded(object $delivery): bool
+    {
+        if (! empty($delivery->rejected_at)) {
+            return false;
+        }
+
+        $status = strtolower(trim((string) ($delivery->delivery_status ?? '')));
+
+        return ! str_contains($status, 'reject')
+            && ! str_contains($status, 'cancel')
+            && ! str_contains($status, 'void');
     }
 
     private function periodMetadata(?object $period): ?array

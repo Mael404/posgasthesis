@@ -7,12 +7,15 @@ use Illuminate\Support\Facades\Schema;
 
 beforeEach(function () {
     foreach ([
+        'fuel_inventory_report_lines',
+        'fuel_inventory_reports',
         'liters_movement_period_readings',
         'liters_tracking_periods',
         'liters_movement_adjustments',
         'tank_delivery_records',
         'inventory_logs',
         'suppliers',
+        'sales',
         'shift_readings',
         'fuel_prices',
         'tanks',
@@ -52,6 +55,7 @@ beforeEach(function () {
 
     Schema::create('shift_readings', function (Blueprint $table) {
         $table->id();
+        $table->unsignedBigInteger('user_id')->nullable();
         $table->date('period_from');
         $table->date('period_to');
         $table->string('status');
@@ -64,6 +68,18 @@ beforeEach(function () {
             $table->decimal("pump{$pump}_sales_start", 14, 2)->default(0);
             $table->decimal("pump{$pump}_sales_end", 14, 2)->default(0);
         }
+    });
+
+    Schema::create('sales', function (Blueprint $table) {
+        $table->id();
+        $table->unsignedBigInteger('pump_id');
+        $table->unsignedBigInteger('user_id')->nullable();
+        $table->unsignedBigInteger('locked_by_shift_reading_id')->nullable();
+        $table->decimal('discount', 14, 2)->default(0);
+        $table->decimal('manual_discount', 14, 2)->default(0);
+        $table->string('payment_type')->nullable();
+        $table->timestamp('customer_payment_voided_at')->nullable();
+        $table->timestamp('created_at')->nullable();
     });
 
     Schema::create('fuel_prices', function (Blueprint $table) {
@@ -98,6 +114,22 @@ beforeEach(function () {
         $table->foreignId('shift_reading_id');
         $table->string('inclusion_status')->default('included');
         $table->timestamp('removed_at')->nullable();
+    });
+
+    Schema::create('fuel_inventory_reports', function (Blueprint $table) {
+        $table->id();
+        $table->string('report_code');
+        $table->string('status');
+        $table->date('period_end');
+    });
+
+    Schema::create('fuel_inventory_report_lines', function (Blueprint $table) {
+        $table->id();
+        $table->foreignId('fuel_inventory_report_id');
+        $table->string('fuel_type');
+        $table->decimal('ending_liters', 16, 3);
+        $table->decimal('ending_unit_cost', 16, 6);
+        $table->decimal('ending_value', 18, 6);
     });
 });
 
@@ -183,6 +215,30 @@ test('current stock and fuel profit use one periodic weighted average cost', fun
         ->and($result['deliveries'][0]['delivery_code'])->toBe('DLV-VERIFIED');
 });
 
+test('a finalized ending stock becomes the next report opening stock', function () {
+    DB::table('fuel_inventory_reports')->insert([
+        'id' => 1,
+        'report_code' => 'INV-PREVIOUS',
+        'status' => 'Finalized',
+        'period_end' => '2026-07-14',
+    ]);
+    DB::table('fuel_inventory_report_lines')->insert([
+        'fuel_inventory_report_id' => 1,
+        'fuel_type' => 'Premium',
+        'ending_liters' => 1000,
+        'ending_unit_cost' => 68.25,
+        'ending_value' => 68250,
+    ]);
+
+    $opening = app(FuelInventoryReportService::class)->openingFromReport(1);
+
+    expect($opening['Premium'])->toBe([
+        'liters' => 1000.0,
+        'unit_cost' => 68.25,
+        'value' => 68250.0,
+    ]);
+});
+
 test('a movement period includes pending readings and uses its stored tank limit', function () {
     DB::table('tanks')->insert([
         'id' => 1,
@@ -235,10 +291,101 @@ test('a movement period includes pending readings and uses its stored tank limit
         ->and($premium['source_summary']['shift_reading_ids'])->toBe([20]);
 });
 
+test('current stock drives ending stock while liters movement supplies net sales', function () {
+    DB::table('tanks')->insert([
+        'id' => 1,
+        'name' => 'Tank 1',
+        'fuel_type' => 'Premium',
+        'connected_pumps' => 'Pump 1, Pump 3',
+    ]);
+    DB::table('liters_tracking_periods')->insert([
+        'id' => 6,
+        'period_code' => 'LTM-CURRENT-STOCK',
+        'liters_limit' => 999,
+        'tank_limits' => json_encode(['tank:1' => 999]),
+        'status' => 'Generated',
+        'started_at' => '2026-07-15 08:00:00',
+        'ended_at' => '2026-07-17 08:00:00',
+    ]);
+    DB::table('suppliers')->insert(['id' => 1, 'name' => 'Q & Q']);
+    DB::table('inventory_logs')->insert([
+        'id' => 1,
+        'delivery_code' => 'DLV-IN-PERIOD',
+        'tank_id' => 1,
+        'supplier_id' => 1,
+        'liters_delivered' => 50,
+        'total_cost' => 3500,
+        'delivery_date' => '2026-07-14',
+        'delivery_status' => 'Verified',
+    ]);
+    DB::table('tank_delivery_records')->insert([
+        'inventory_log_id' => 1,
+        'record_date' => '2026-07-16',
+        'record_time' => '10:00:00',
+    ]);
+
+    $reading = shiftReadingRow(30, '2026-07-16', 20, 1500);
+    $reading['status'] = 'Pending';
+    $reading['liters_tracking_period_id'] = 6;
+    $reading['user_id'] = 10;
+    $rejected = shiftReadingRow(31, '2026-07-16', 100, 7500);
+    $rejected['status'] = 'Rejected';
+    $rejected['liters_tracking_period_id'] = 6;
+    $rejected['user_id'] = 11;
+    DB::table('shift_readings')->insert([$reading, $rejected]);
+    DB::table('liters_movement_period_readings')->insert([
+        [
+            'liters_tracking_period_id' => 6,
+            'shift_reading_id' => 30,
+            'inclusion_status' => 'included',
+            'removed_at' => null,
+        ],
+        [
+            'liters_tracking_period_id' => 6,
+            'shift_reading_id' => 31,
+            'inclusion_status' => 'included',
+            'removed_at' => null,
+        ],
+    ]);
+    DB::table('sales')->insert([
+        'pump_id' => 1,
+        'user_id' => 10,
+        'locked_by_shift_reading_id' => 30,
+        'discount' => 40,
+        'manual_discount' => 10,
+        'payment_type' => 'Walkin',
+        'customer_payment_voided_at' => null,
+        'created_at' => '2026-07-16 12:00:00',
+    ]);
+
+    $service = app(FuelInventoryReportService::class);
+    $suggestedOpening = $service->initialOpeningFromTrackingPeriod(6);
+    $result = $service->calculate(
+        '2026-07-15',
+        '2026-07-17',
+        ['Premium' => ['liters' => 100, 'unit_cost' => 60]],
+        6
+    );
+    $premium = collect($result['lines'])->firstWhere('fuel_type', 'Premium');
+
+    expect($suggestedOpening['Premium']['liters'])->toBe(949.0)
+        ->and($premium['available_liters'])->toBe(150.0)
+        ->and($premium['tank_limit_liters'])->toBe(150.0)
+        ->and($premium['dispensed_liters'])->toBe(20.0)
+        ->and($premium['ending_liters'])->toBe(130.0)
+        ->and($premium['sales_revenue'])->toBe(1450.0)
+        ->and($premium['average_selling_price'])->toBe(72.5)
+        ->and($premium['source_summary']['configured_liters_movement_limit'])->toBe(999.0)
+        ->and($premium['source_summary']['sales_discounts'])->toBe(50.0)
+        ->and($result['deliveries'][0]['delivery_date'])->toBe('2026-07-16')
+        ->and($result['deliveries'][0]['logged_delivery_date'])->toBe('2026-07-14');
+});
+
 function shiftReadingRow(int $id, string $date, float $liters, float $revenue): array
 {
     $row = [
         'id' => $id,
+        'user_id' => null,
         'period_from' => $date,
         'period_to' => $date,
         'status' => 'Verified',

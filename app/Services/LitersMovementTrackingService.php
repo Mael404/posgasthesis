@@ -63,6 +63,27 @@ class LitersMovementTrackingService
         ];
     }
 
+    public function reportSummary(int|object $period): array
+    {
+        if (! $this->isReady()) {
+            throw new \RuntimeException('Liters tracking is not migrated yet. Run php artisan migrate.');
+        }
+
+        if (! is_object($period)) {
+            $period = DB::table('liters_tracking_periods')->where('id', $period)->first();
+        }
+
+        if (! $period) {
+            throw new \RuntimeException('Liters Movement period was not found.');
+        }
+
+        return $this->summaryFromRows(
+            $period,
+            $this->summaryRowsForPeriod($period, null),
+            true
+        );
+    }
+
     public function ensureActivePeriod(?float $limit = null, ?array $tankLimits = null): object
     {
         $period = $this->activePeriod();
@@ -1875,7 +1896,15 @@ class LitersMovementTrackingService
 
         $selects = ['liters_movement_adjustments.*'];
 
-        if ($this->hasTable('users') && $this->hasColumn('users', 'id') && $this->hasColumn('users', 'name')) {
+        if (
+            $this->hasTable('users')
+            && $this->hasColumn('users', 'id')
+            && $this->hasColumn('users', 'name')
+            && $this->hasColumn('liters_movement_adjustments', 'created_by')
+            && $this->hasColumn('liters_movement_adjustments', 'authorized_by')
+            && $this->hasColumn('liters_movement_adjustments', 'voided_by')
+            && $this->hasColumn('liters_movement_adjustments', 'void_authorized_by')
+        ) {
             $query
                 ->leftJoin('users as creators', 'liters_movement_adjustments.created_by', '=', 'creators.id')
                 ->leftJoin('users as authorizers', 'liters_movement_adjustments.authorized_by', '=', 'authorizers.id')
@@ -1893,9 +1922,13 @@ class LitersMovementTrackingService
             $selects[] = DB::raw('NULL as void_authorized_by_name');
         }
 
+        $query->select($selects);
+
+        if ($this->hasColumn('liters_movement_adjustments', 'created_at')) {
+            $query->orderBy('liters_movement_adjustments.created_at');
+        }
+
         return $query
-            ->select($selects)
-            ->orderBy('liters_movement_adjustments.created_at')
             ->orderBy('liters_movement_adjustments.id')
             ->get()
             ->map(fn ($adjustment) => $this->formatAdjustment($adjustment))

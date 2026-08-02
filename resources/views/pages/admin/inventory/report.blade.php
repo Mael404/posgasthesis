@@ -26,7 +26,7 @@
         $periodStatus = strtolower((string) ($trackingPeriod['status'] ?? $selectedPeriod->status ?? ''));
     @endphp
 
-    <x-common.page-breadcrumb pageTitle="Fuel Inventory Report" />
+    <x-common.page-breadcrumb pageTitle="Liters Movement & Inventory" />
 
     <div class="space-y-6">
         @if (session('success'))
@@ -63,7 +63,7 @@
                         @endif
                     </div>
                     <p class="mt-2 max-w-3xl text-theme-sm leading-6 text-gray-500 dark:text-gray-400">
-                        Last report ending stock plus logged deliveries forms current stock. Dispensed liters come from the selected Liters Movement period, and ending stock is the tank limit less dispensed liters.
+                        Previous ending stock + received deliveries = current stock / limit. Current stock - included Liters Movement dispensing = new ending stock.
                     </p>
                     @if ($trackingPeriod)
                         <p class="mt-2 text-theme-sm font-medium text-gray-700 dark:text-gray-300">
@@ -77,6 +77,7 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3 print:hidden">
+                    <a href="{{ route('admin.liters-movement.index') }}" class="{{ $secondary }}">Liters Movement</a>
                     @if ($viewingSavedReport)
                         <a href="{{ route('inventory.reports.index') }}" class="{{ $secondary }}">Current preview</a>
                     @endif
@@ -112,7 +113,7 @@
                         <div class="px-5 py-4 md:px-6">
                             <h2 class="font-semibold text-gray-800 dark:text-white/90">Initial Ending Stock - Last Report</h2>
                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
-                                Enter this once for the first inventory report. Do not enter the same stock again as a delivery because that would count it twice.
+                                Quantity is prefilled from the editable Liters Movement current-stock limit minus this period's deliveries. Confirm it and enter the starting cost per liter once for the first report.
                             </p>
                         </div>
                         <div class="overflow-x-auto">
@@ -172,7 +173,7 @@
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <h2 class="font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
                     <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Dispensed = included pump readings. Ending stock = Liters Movement tank limit - dispensed.
+                        Pending, Verified, and Approved readings are included. Rejected and voided readings are excluded. Ending stock = current stock - dispensed.
                     </p>
                 </div>
                 <div class="overflow-x-auto">
@@ -181,7 +182,7 @@
                             <tr>
                                 <th class="{{ $th }}">Product</th>
                                 <th class="{{ $thNumber }}">Dispensed (L)</th>
-                                <th class="{{ $thNumber }}">Limit (L)</th>
+                                <th class="{{ $thNumber }}">Current Stock / Limit (L)</th>
                                 <th class="{{ $thNumber }}">Ending Stock (L)</th>
                             </tr>
                         </thead>
@@ -356,7 +357,7 @@
                 <div class="flex flex-col gap-2 border-b border-gray-100 px-5 py-4 dark:border-gray-800 md:flex-row md:items-end md:justify-between">
                     <div>
                         <h2 class="font-semibold text-gray-800 dark:text-white/90">Fuel Profit</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Gross fuel profit before operating expenses.</p>
+                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Net fuel sales less the weighted inventory cost of dispensed liters, before operating expenses.</p>
                     </div>
                     <p class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">
                         {{ \Carbon\Carbon::parse($calculation['period_start'])->format('M d, Y') }} to {{ \Carbon\Carbon::parse($calculation['period_end'])->format('M d, Y') }}
@@ -365,7 +366,7 @@
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[920px]">
                         <thead class="bg-gray-50 dark:bg-white/[0.02]">
-                            <tr><th class="{{ $th }}">Product</th><th class="{{ $thNumber }}">Sale Liters</th><th class="{{ $thNumber }}">Avg Selling Price</th><th class="{{ $thNumber }}">Cost / L</th><th class="{{ $thNumber }}">Profit Margin / L</th><th class="{{ $thNumber }}">Sales</th><th class="{{ $thNumber }}">Profit</th></tr>
+                            <tr><th class="{{ $th }}">Product</th><th class="{{ $thNumber }}">Sale Liters</th><th class="{{ $thNumber }}">Avg Selling Price</th><th class="{{ $thNumber }}">Cost / L</th><th class="{{ $thNumber }}">Profit Margin / L</th><th class="{{ $thNumber }}">Net Sales</th><th class="{{ $thNumber }}">Profit</th></tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             @foreach ($lines as $line)

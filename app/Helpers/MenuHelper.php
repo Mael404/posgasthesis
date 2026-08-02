@@ -194,11 +194,15 @@ class MenuHelper
                         ],
                     ],
                     [
-                        'name' => 'Liters Movement',
+                        'name' => 'Liters Movement & Inventory',
                         'path' => self::routePath('admin.liters-movement.index', '/admin/liters-movement'),
                         'badge' => $litersMovementAlertCount,
                         'badgeKey' => 'admin-liters-movement',
-                        'activePatterns' => ['/admin/liters-movement', '/admin/liters-movement/*'],
+                        'activePatterns' => [
+                            '/admin/liters-movement',
+                            '/admin/liters-movement/*',
+                            '/inventory/report',
+                        ],
                     ],
                     [
                         'name' => 'Shift Reconciliation',
@@ -216,11 +220,6 @@ class MenuHelper
                 'icon' => 'task',
                 'name' => 'Inventory & Tanks',
                 'subItems' => [
-                    [
-                        'name' => 'Inventory Report',
-                        'path' => self::routePath('inventory.reports.index', '/inventory/report'),
-                        'activePatterns' => ['/inventory/report'],
-                    ],
                     [
                         'name' => 'Tank Management',
                         'path' => self::routePath('inventory.tanks.index', '/inventory/tank-management'),

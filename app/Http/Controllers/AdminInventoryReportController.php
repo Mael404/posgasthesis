@@ -67,9 +67,24 @@ class AdminInventoryReportController extends Controller
             }
         }
 
-        $manualOpening = $this->manualOpening(
-            $validated['opening'] ?? $request->old('opening', [])
-        );
+        $manualOpeningInput = $validated['opening'] ?? $request->old('opening', []);
+        $manualOpening = $this->manualOpening($manualOpeningInput);
+
+        if (! $latest
+            && $selectedPeriod
+            && empty($missingTables)
+            && empty($missingColumns)) {
+            $suggestedOpening = $reports->initialOpeningFromTrackingPeriod($selectedPeriod);
+
+            foreach (array_keys(FuelInventoryReportService::PRODUCTS) as $fuel) {
+                if (array_key_exists('liters', $manualOpeningInput[$fuel] ?? [])) {
+                    continue;
+                }
+
+                $manualOpening[$fuel]['liters'] = (float) ($suggestedOpening[$fuel]['liters'] ?? 0);
+            }
+        }
+
         $opening = $latest ? $reports->openingFromReport($latest) : $manualOpening;
         $linkedReport = $selectedPeriod
             ? $reports->finalizedReportForTrackingPeriod((int) $selectedPeriod->id)
@@ -88,7 +103,7 @@ class AdminInventoryReportController extends Controller
         }
 
         return view('pages.admin.inventory.report', [
-            'title' => 'Fuel Inventory Report',
+            'title' => 'Liters Movement & Inventory',
             'calculation' => $calculation,
             'history' => $reports->reportHistory(),
             'latestReport' => $latest,

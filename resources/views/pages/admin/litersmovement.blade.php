@@ -820,6 +820,10 @@
                         <form x-ref="generateForm" method="POST" action="{{ route('admin.liters-movement.generate') }}" class="hidden">
                             @csrf
                         </form>
+                        <a href="{{ route('inventory.reports.index', ['period_id' => $period->id ?? null]) }}" class="{{ $secondaryButtonClass }}">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.75h14v14.5H5V4.75Zm3 4h8M8 12h8M8 15.25h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Inventory Report
+                        </a>
                         <button type="button" x-on:click="confirmGenerate()" class="{{ $dangerButtonClass }}">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M8 7.5V5.75C8 4.784 8.784 4 9.75 4h4.5C15.216 4 16 4.784 16 5.75V7.5M9 10.75v6M15 10.75v6M6.5 7.5l.75 12A1.75 1.75 0 0 0 9 21.25h6a1.75 1.75 0 0 0 1.75-1.75l.75-12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             Generate Record & Reset
