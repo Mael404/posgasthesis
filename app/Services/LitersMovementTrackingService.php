@@ -787,16 +787,75 @@ class LitersMovementTrackingService
                 ->first();
 
             $tanks = $this->preparedTanks();
-            $legacyLimit = $this->legacyLimitFromLimits($limits, $tanks);
 
             if (! $period) {
+                $legacyLimit = $this->legacyLimitFromLimits($limits, $tanks);
                 $period = DB::table('liters_tracking_periods')
                     ->where('id', $this->createPeriod($legacyLimit, null, $limits))
                     ->first();
             }
 
+            $availableLimits = $this->availableLimitsFromCurrentStock($period, $limits);
+            $legacyLimit = $this->legacyLimitFromLimits($availableLimits, $tanks);
+
             $values = [
                 'liters_limit' => round($legacyLimit, 2),
+                'updated_at' => now(),
+            ];
+
+            if ($this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+                $values['tank_limits'] = json_encode($availableLimits);
+            }
+
+            DB::table('liters_tracking_periods')->where('id', $period->id)->update($values);
+
+            return DB::table('liters_tracking_periods')->where('id', $period->id)->first();
+        });
+    }
+
+    public function addActiveTankDeliveries(array $deliveredLitersByTank): ?object
+    {
+        if (! $this->isReady()) {
+            return null;
+        }
+
+        $deliveredLitersByTank = collect($deliveredLitersByTank)
+            ->mapWithKeys(function ($liters, $tankId): array {
+                $tankId = (int) $tankId;
+
+                return $tankId > 0 && is_numeric($liters) && (float) $liters > 0
+                    ? [$tankId => round((float) $liters, 2)]
+                    : [];
+            })
+            ->all();
+
+        if ($deliveredLitersByTank === []) {
+            return $this->activePeriod();
+        }
+
+        return DB::transaction(function () use ($deliveredLitersByTank) {
+            $period = DB::table('liters_tracking_periods')
+                ->where('status', self::ACTIVE_STATUS)
+                ->lockForUpdate()
+                ->orderByDesc('started_at')
+                ->orderByDesc('id')
+                ->first();
+
+            if (! $period) {
+                return null;
+            }
+
+            $tanks = $this->preparedTanks();
+            $limits = $this->storedTankLimitsForPeriod($period, $tanks);
+
+            foreach ($deliveredLitersByTank as $tankId => $deliveredLiters) {
+                $limits['tank:' . $tankId] = $this->liters(
+                    max(0, (float) ($limits['tank:' . $tankId] ?? 0)) + $deliveredLiters
+                );
+            }
+
+            $values = [
+                'liters_limit' => $this->legacyLimitFromLimits($limits, $tanks),
                 'updated_at' => now(),
             ];
 
@@ -851,6 +910,7 @@ class LitersMovementTrackingService
 
             $this->cancelLegacyCorrectionsForPeriod((int) $period->id);
             $tankLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
+            $endingTankLimits = $this->endingTankLimits($summary, $tankLimits);
             $snapshot = [
                 'source' => 'shift_readings',
                 'snapshot_version' => 2,
@@ -859,6 +919,7 @@ class LitersMovementTrackingService
                 'ended_at' => $endedAt->toDateTimeString(),
                 'liters_limit' => $summary['limit'],
                 'tank_limits' => $tankLimits,
+                'ending_tank_limits' => $endingTankLimits,
                 'total_liters' => $summary['total_liters'],
                 'total_amount' => $summary['total_amount'],
                 'total_sales' => $summary['total_sales'],
@@ -897,9 +958,9 @@ class LitersMovementTrackingService
             ]);
 
             $newPeriodId = $this->createPeriod(
-                (float) $period->liters_limit,
+                $this->legacyLimitFromLimits($endingTankLimits, $this->preparedTanks()),
                 $endedAt,
-                $tankLimits
+                $endingTankLimits
             );
 
             return [
@@ -1026,6 +1087,13 @@ class LitersMovementTrackingService
                 throw new \RuntimeException('The included shift-reading submissions are no longer attached to this generated record.');
             }
 
+            $restoredTankLiters = [];
+
+            if (! empty($snapshot['ending_tank_limits'])) {
+                $restoredTankLiters = $this->tankLitersForSnapshotReadings($snapshot, $restoredIds);
+                $this->increasePeriodTankLimits($activePeriod, $restoredTankLiters);
+            }
+
             DB::table('shift_readings')
                 ->whereIn('id', $restoredIds)
                 ->update(['liters_tracking_period_id' => $activePeriod->id]);
@@ -1056,6 +1124,7 @@ class LitersMovementTrackingService
             $snapshot['voided_by'] = $voidedBy;
             $snapshot['reverted_to_period_id'] = (int) $activePeriod->id;
             $snapshot['reverted_shift_reading_ids'] = $restoredIds;
+            $snapshot['reverted_tank_liters'] = $restoredTankLiters;
             $snapshot['cancelled_correction_ids'] = $cancelledCorrectionIds;
             $snapshot['reverted_correction_ids'] = $restoredCorrectionIds;
             $snapshot['reverted_liters'] = $restoredLiters;
@@ -2184,6 +2253,9 @@ class LitersMovementTrackingService
                     'id' => (int) ($tank->id ?? 0),
                     'name' => ($tank->name ?? null) ?: $fuelType,
                     'fuel_type' => $fuelType,
+                    'current_volume' => isset($tank->current_volume) && is_numeric($tank->current_volume)
+                        ? $this->liters(max(0, (float) $tank->current_volume))
+                        : null,
                     'connected_pump_numbers' => $pumpNumbers,
                     'connected_pumps_display' => $pumpNumbers->isEmpty()
                         ? 'N/A'
@@ -2284,11 +2356,156 @@ class LitersMovementTrackingService
             ->all();
     }
 
+    private function availableLimitsFromCurrentStock(object $period, array $currentStock): array
+    {
+        $dispensedByLimit = collect($this->summaryForPeriod($period, null)['tank_breakdown'] ?? [])
+            ->filter(fn (array $tank): bool => ! empty($tank['limit_key']))
+            ->mapWithKeys(fn (array $tank): array => [
+                (string) $tank['limit_key'] => max(0, (float) ($tank['liters'] ?? 0)),
+            ]);
+
+        return collect($currentStock)
+            ->mapWithKeys(function ($stock, string $key) use ($dispensedByLimit): array {
+                if ($stock === null) {
+                    return [$key => null];
+                }
+
+                return [$key => $this->liters(
+                    max(0, (float) $stock) + (float) $dispensedByLimit->get($key, 0)
+                )];
+            })
+            ->all();
+    }
+
+    private function endingTankLimits(array $summary, array $fallback): array
+    {
+        $ending = $fallback;
+
+        foreach (($summary['tank_breakdown'] ?? []) as $tank) {
+            $key = trim((string) ($tank['limit_key'] ?? ''));
+
+            if ($key === '' || $key === 'unassigned' || ! ($tank['has_limit'] ?? false)) {
+                continue;
+            }
+
+            $ending[$key] = $this->liters(max(0, (float) ($tank['remaining_liters'] ?? 0)));
+        }
+
+        return $ending;
+    }
+
+    private function tankLitersForSnapshotReadings(array $snapshot, array $readingIds): array
+    {
+        $readingIds = array_map('intval', $readingIds);
+        $litersByTank = [];
+
+        foreach (($snapshot['tank_breakdown'] ?? []) as $tank) {
+            $key = trim((string) ($tank['limit_key'] ?? ''));
+
+            if ($key === '' && (int) ($tank['id'] ?? 0) > 0) {
+                $key = 'tank:' . (int) $tank['id'];
+            }
+
+            if ($key === '' || $key === 'unassigned') {
+                continue;
+            }
+
+            $liters = collect($tank['entries'] ?? [])
+                ->filter(fn (array $entry): bool => in_array((int) ($entry['id'] ?? 0), $readingIds, true))
+                ->sum(fn (array $entry): float => max(0, (float) ($entry['liters'] ?? 0)));
+
+            if ($liters > 0) {
+                $litersByTank[$key] = $this->liters(($litersByTank[$key] ?? 0) + $liters);
+            }
+        }
+
+        return $litersByTank;
+    }
+
+    private function increasePeriodTankLimits(object $period, array $litersByTank): void
+    {
+        if ($litersByTank === []) {
+            return;
+        }
+
+        $tanks = $this->preparedTanks();
+        $limits = $this->storedTankLimitsForPeriod($period, $tanks);
+
+        foreach ($litersByTank as $key => $liters) {
+            $limits[$key] = $this->liters(max(0, (float) ($limits[$key] ?? 0)) + max(0, (float) $liters));
+        }
+
+        $values = [
+            'liters_limit' => $this->legacyLimitFromLimits($limits, $tanks),
+            'updated_at' => now(),
+        ];
+
+        if ($this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+            $values['tank_limits'] = json_encode($limits);
+        }
+
+        DB::table('liters_tracking_periods')->where('id', (int) $period->id)->update($values);
+    }
+
+    private function applyGeneratedEndingDeltaToActivePeriod(
+        object $generatedPeriod,
+        array $previousEnding,
+        array $newEnding
+    ): void {
+        $activePeriod = DB::table('liters_tracking_periods')
+            ->where('status', self::ACTIVE_STATUS)
+            ->where('started_at', '>=', $generatedPeriod->ended_at)
+            ->lockForUpdate()
+            ->orderByDesc('started_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $activePeriod) {
+            return;
+        }
+
+        $tanks = $this->preparedTanks();
+        $limits = $this->storedTankLimitsForPeriod($activePeriod, $tanks);
+        $changed = false;
+
+        foreach (array_unique(array_merge(array_keys($previousEnding), array_keys($newEnding))) as $key) {
+            if (! is_numeric($previousEnding[$key] ?? null) || ! is_numeric($newEnding[$key] ?? null)) {
+                continue;
+            }
+
+            $delta = (float) $newEnding[$key] - (float) $previousEnding[$key];
+
+            if (abs($delta) < 0.005) {
+                continue;
+            }
+
+            $limits[$key] = $this->liters(max(0, (float) ($limits[$key] ?? 0) + $delta));
+            $changed = true;
+        }
+
+        if (! $changed) {
+            return;
+        }
+
+        $values = [
+            'liters_limit' => $this->legacyLimitFromLimits($limits, $tanks),
+            'updated_at' => now(),
+        ];
+
+        if ($this->hasColumn('liters_tracking_periods', 'tank_limits')) {
+            $values['tank_limits'] = json_encode($limits);
+        }
+
+        DB::table('liters_tracking_periods')->where('id', (int) $activePeriod->id)->update($values);
+    }
+
     private function defaultStoredTankLimits(float $legacyLimit): array
     {
         return $this->preparedTanks()
             ->mapWithKeys(fn (array $tank) => [
-                $this->tankLimitKey($tank) => $this->defaultLimitForFuel($tank['fuel_type'], $legacyLimit),
+                $this->tankLimitKey($tank) => $tank['current_volume'] !== null
+                    ? $tank['current_volume']
+                    : $this->defaultLimitForFuel($tank['fuel_type'], $legacyLimit),
             ])
             ->all();
     }
@@ -2310,7 +2527,7 @@ class LitersMovementTrackingService
             }
 
             $numeric = round((float) $value, 2);
-            $sanitized[$key] = $numeric > 0 ? $numeric : null;
+            $sanitized[$key] = $numeric >= 0 ? $numeric : null;
         }
 
         return $sanitized;
@@ -2764,6 +2981,8 @@ class LitersMovementTrackingService
         $summary = $this->summaryFromRows($period, $rows, true);
         $readingIds = $rows->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
         $existing = $this->decodeSnapshot($period->totals_snapshot ?? null);
+        $tankLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
+        $endingTankLimits = $this->endingTankLimits($summary, $tankLimits);
         $recalculatedAt = now();
         $history = collect($existing['recalculation_history'] ?? [])
             ->push([
@@ -2798,7 +3017,8 @@ class LitersMovementTrackingService
             'started_at' => $period->started_at,
             'ended_at' => $period->ended_at,
             'liters_limit' => $summary['limit'],
-            'tank_limits' => $this->storedTankLimitsForPeriod($period, $this->preparedTanks()),
+            'tank_limits' => $tankLimits,
+            'ending_tank_limits' => $endingTankLimits,
             'total_liters' => $summary['total_liters'],
             'total_amount' => $summary['total_amount'],
             'total_sales' => $summary['total_sales'],
@@ -2828,6 +3048,14 @@ class LitersMovementTrackingService
                 'totals_snapshot' => json_encode($snapshot),
                 'updated_at' => $recalculatedAt,
             ]);
+
+        if (! empty($existing['ending_tank_limits'])) {
+            $this->applyGeneratedEndingDeltaToActivePeriod(
+                $period,
+                (array) $existing['ending_tank_limits'],
+                $endingTankLimits
+            );
+        }
 
         return $summary;
     }

@@ -155,6 +155,7 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
         Route::get('/inventory/report', [AdminInventoryReportController::class, 'index'])->name('inventory.reports.index');
+        Route::post('/inventory/report/opening', [AdminInventoryReportController::class, 'saveOpening'])->name('inventory.reports.opening');
         Route::post('/inventory/report', [AdminInventoryReportController::class, 'store'])->name('inventory.reports.store');
         Route::get('/inventory/tank-management', [AdminTankManagementController::class, 'index'])->name('inventory.tanks.index');
         Route::get('/inventory/stock-in', [AdminStockInController::class, 'index'])->name('inventory.stock.index');

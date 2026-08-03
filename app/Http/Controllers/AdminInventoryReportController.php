@@ -43,6 +43,11 @@ class AdminInventoryReportController extends Controller
             $missingColumns[] = 'fuel_inventory_report_lines.tank_limit_liters';
         }
 
+        if (Schema::hasTable('liters_tracking_periods')
+            && ! Schema::hasColumn('liters_tracking_periods', 'opening_inventory')) {
+            $missingColumns[] = 'liters_tracking_periods.opening_inventory';
+        }
+
         $periods = $reports->trackingPeriods();
         $latest = $reports->latestFinalizedReport();
         $viewingSavedReport = isset($validated['report_id']);
@@ -77,11 +82,11 @@ class AdminInventoryReportController extends Controller
             $suggestedOpening = $reports->initialOpeningFromTrackingPeriod($selectedPeriod);
 
             foreach (array_keys(FuelInventoryReportService::PRODUCTS) as $fuel) {
-                if (array_key_exists('liters', $manualOpeningInput[$fuel] ?? [])) {
-                    continue;
-                }
-
                 $manualOpening[$fuel]['liters'] = (float) ($suggestedOpening[$fuel]['liters'] ?? 0);
+
+                if (! array_key_exists('unit_cost', $manualOpeningInput[$fuel] ?? [])) {
+                    $manualOpening[$fuel]['unit_cost'] = (float) ($suggestedOpening[$fuel]['unit_cost'] ?? 0);
+                }
             }
         }
 
@@ -122,6 +127,30 @@ class AdminInventoryReportController extends Controller
         ]);
     }
 
+    public function saveOpening(Request $request, FuelInventoryReportService $reports): RedirectResponse
+    {
+        $validated = $request->validate([
+            'period_id' => ['required', 'integer'],
+            'opening' => ['required', 'array'],
+            'opening.*.unit_cost' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        try {
+            $reports->saveInitialOpening(
+                (int) $validated['period_id'],
+                $this->manualOpening($validated['opening'])
+            );
+        } catch (\RuntimeException $exception) {
+            throw ValidationException::withMessages([
+                'opening' => $exception->getMessage(),
+            ]);
+        }
+
+        return redirect()
+            ->route('inventory.reports.index', ['period_id' => (int) $validated['period_id']])
+            ->with('success', 'Initial ending stock saved. Quantities came from the tank opening volumes and costs were calculated from the prices entered.');
+    }
+
     public function store(Request $request, FuelInventoryReportService $reports): RedirectResponse
     {
         $validated = $request->validate([
@@ -134,12 +163,15 @@ class AdminInventoryReportController extends Controller
         $manualOpening = $this->manualOpening($validated['opening'] ?? []);
 
         if (! $reports->latestFinalizedReport()) {
+            $period = $reports->trackingPeriod((int) $validated['period_id']);
+            $firstOpening = $period ? $reports->initialOpeningFromTrackingPeriod($period) : [];
+
             foreach (FuelInventoryReportService::PRODUCTS as $fuel => $definition) {
-                $line = $manualOpening[$fuel];
+                $line = $firstOpening[$fuel] ?? $manualOpening[$fuel];
 
                 if ($line['liters'] > 0 && $line['unit_cost'] <= 0) {
                     throw ValidationException::withMessages([
-                        "opening.{$fuel}.unit_cost" => "Enter the opening unit cost for {$definition['product_name']}.",
+                        "opening.{$fuel}.unit_cost" => "Enter and save the opening price per liter for {$definition['product_name']}.",
                     ]);
                 }
             }

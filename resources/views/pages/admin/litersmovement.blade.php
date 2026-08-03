@@ -797,22 +797,22 @@
                                     @php
                                         $style = $fuelStyle($tank['fuel_type'] ?? '');
                                         $limitKey = $tank['limit_key'] ?? '';
-                                        $oldLimit = old("tank_limits.{$limitKey}", ($tank['has_limit'] ?? false) ? ($tank['limit'] ?? '') : '');
+                                        $oldLimit = old("tank_limits.{$limitKey}", ($tank['has_limit'] ?? false) ? ($tank['remaining_liters'] ?? '') : '');
                                     @endphp
                                     <label class="min-w-0 text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                         <span class="flex items-center gap-2">
                                             <span class="h-2 w-2 rounded-full {{ $style['dot'] }}"></span>
                                             {{ $tank['fuel_type'] ?? 'Fuel' }}
                                         </span>
-                                        <input type="number" name="tank_limits[{{ $limitKey }}]" min="1" step="0.01" value="{{ $oldLimit }}" placeholder="No limit" class="mt-1.5 {{ $inputClass }}">
+                                        <input type="number" name="tank_limits[{{ $limitKey }}]" min="0" step="0.01" value="{{ $oldLimit }}" placeholder="No stock value" class="mt-1.5 {{ $inputClass }}">
                                     </label>
                                 @endforeach
                             </div>
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <p class="{{ $captionClass }}">Leave a tank blank to skip limit alerts for that tank.</p>
+                                <p class="{{ $captionClass }}">Current stock is editable. Submitted liters are deducted live, while Stock In deliveries are added automatically.</p>
                                 <button type="submit" class="{{ $primaryButtonClass }}">
                                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5 9.2 16.7 19 6.9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                    Update Limits
+                                    Update Current Stock
                                 </button>
                             </div>
                         </form>
@@ -844,12 +844,12 @@
                 <p class="mt-1 {{ $captionClass }}">&#8369;{{ number_format((float) $summary['total_amount'], 2) }} meter sales</p>
             </article>
             <article class="{{ $cardClass }}">
-                <p class="{{ $labelClass }}">Configured Limits</p>
+                <p class="{{ $labelClass }}">Available This Period</p>
                 <p class="{{ $valueClass }}">{{ number_format((float) $summary['limit'], 2) }} L</p>
                 <p class="mt-1 {{ $captionClass }}">{{ number_format((int) ($summary['configured_limit_count'] ?? 0)) }} active tank limit{{ (int) ($summary['configured_limit_count'] ?? 0) === 1 ? '' : 's' }}</p>
             </article>
             <article class="{{ $cardClass }}">
-                <p class="{{ $labelClass }}">Remaining Before Limits</p>
+                <p class="{{ $labelClass }}">Current Stock</p>
                 <p class="{{ $valueClass }}">{{ number_format((float) $summary['remaining_liters'], 2) }} L</p>
                 <p class="mt-1 {{ $captionClass }}">{{ (float) $summary['over_liters'] > 0 ? number_format((float) $summary['over_liters'], 2) . ' L over configured limits' : 'Across configured tanks' }}</p>
             </article>
@@ -932,7 +932,7 @@
             <div class="mb-4 flex items-center justify-between gap-4">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
-                    <p class="mt-1 {{ $captionClass }}">Active tracking period by tank limit.</p>
+                    <p class="mt-1 {{ $captionClass }}">Current stock after submitted dispensing; Stock In deliveries are included automatically.</p>
                 </div>
             </div>
             <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -949,8 +949,14 @@
                             <span class="shrink-0 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $tank['status']['badge_class'] ?? '' }}">{{ $tank['status']['label'] ?? 'Normal' }}</span>
                         </div>
                         <div class="mt-4 flex items-end justify-between gap-4">
-                            <p class="text-xl font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }} L</p>
-                            <p class="{{ $captionClass }}">{{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L limit' : 'No limit' }}</p>
+                            <div>
+                                <p class="text-xl font-bold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['remaining_liters'] ?? 0), 2) }} L</p>
+                                <p class="{{ $captionClass }}">current stock</p>
+                            </div>
+                            <p class="text-right {{ $captionClass }}">
+                                {{ number_format((float) ($tank['liters'] ?? 0), 2) }} L dispensed<br>
+                                {{ ($tank['has_limit'] ?? false) ? number_format((float) ($tank['limit'] ?? 0), 2) . ' L available' : 'No stock value' }}
+                            </p>
                         </div>
                         <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-white/[0.08]">
                             <div class="h-full rounded-full {{ $style['bar'] }}" style="width: {{ $tank['progress_width'] ?? 0 }}%"></div>

@@ -24,6 +24,9 @@
             default => 'bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400',
         };
         $periodStatus = strtolower((string) ($trackingPeriod['status'] ?? $selectedPeriod->status ?? ''));
+        $initialOpeningTotal = collect($manualOpening ?? [])->sum(
+            fn ($line) => (float) ($line['liters'] ?? 0) * (float) ($line['unit_cost'] ?? 0)
+        );
     @endphp
 
     <x-common.page-breadcrumb pageTitle="Liters Movement & Inventory" />
@@ -107,13 +110,17 @@
                     </label>
                     <button type="submit" class="{{ $primary }}" {{ collect($periods)->isEmpty() ? 'disabled' : '' }}>Refresh preview</button>
                 </div>
+            </form>
 
-                @if (! $latestReport)
-                    <div class="border-t border-gray-100 dark:border-gray-800">
+            @if (! $latestReport && $selectedPeriod)
+                <form method="POST" action="{{ route('inventory.reports.opening') }}" class="{{ $panel }} overflow-hidden print:hidden">
+                    @csrf
+                    <input type="hidden" name="period_id" value="{{ $selectedPeriod->id }}">
+                    <div>
                         <div class="px-5 py-4 md:px-6">
                             <h2 class="font-semibold text-gray-800 dark:text-white/90">Initial Ending Stock - Last Report</h2>
                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
-                                Quantity is prefilled from the editable Liters Movement current-stock limit minus this period's deliveries. Confirm it and enter the starting cost per liter once for the first report.
+                                On the first report, quantity comes from the tank volume captured when this Liters Movement period started. Enter only the starting price per liter; cost is Quantity &times; Price.
                             </p>
                         </div>
                         <div class="overflow-x-auto">
@@ -137,24 +144,31 @@
                                                 <span class="rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $fuelClass($fuel) }}">{{ $definition['product_name'] }}</span>
                                             </td>
                                             <td class="px-4 py-3">
-                                                <input type="number" name="opening[{{ $fuel }}][liters]" min="0" step="0.001" value="{{ $openingLiters }}" class="{{ $input }} text-right tabular-nums">
+                                                <input type="number" min="0" step="0.001" value="{{ $openingLiters }}" class="{{ $input }} cursor-not-allowed bg-gray-50 text-right tabular-nums dark:bg-gray-800" readonly aria-label="{{ $definition['product_name'] }} opening quantity from tank">
                                             </td>
                                             <td class="px-4 py-3">
-                                                <input type="number" name="opening[{{ $fuel }}][unit_cost]" min="0" step="0.000001" value="{{ $openingCost }}" class="{{ $input }} text-right tabular-nums">
+                                                <input type="number" name="opening[{{ $fuel }}][unit_cost]" min="0" step="0.000001" value="{{ $openingCost }}" class="{{ $input }} text-right tabular-nums" required>
                                             </td>
                                             <td class="{{ $tdNumber }} font-semibold">{{ $money((float) $openingLiters * (float) $openingCost) }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>
+                                <tfoot class="bg-gray-50 font-semibold dark:bg-white/[0.02]">
+                                    <tr><td colspan="3" class="{{ $tdNumber }}">Total</td><td class="{{ $tdNumber }}">{{ $money($initialOpeningTotal) }}</td></tr>
+                                </tfoot>
                             </table>
                         </div>
+                        <div class="flex flex-col gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 md:flex-row md:items-center md:justify-between md:px-6">
+                            <p class="text-theme-sm text-gray-500 dark:text-gray-400">Save this once before recording the first shifts. Later reports carry their opening quantity and cost automatically.</p>
+                            <button type="submit" class="{{ $primary }}" {{ $setupIssues ? 'disabled' : '' }}>Save Initial Stock</button>
+                        </div>
                     </div>
-                @else
-                    <div class="border-t border-gray-100 px-5 py-4 text-theme-sm text-gray-500 dark:border-gray-800 dark:text-gray-400 md:px-6">
-                        Opening stock is carried automatically from {{ $latestReport->report_code }}.
-                    </div>
-                @endif
-            </form>
+                </form>
+            @elseif ($latestReport)
+                <div class="{{ $panel }} px-5 py-4 text-theme-sm text-gray-500 dark:text-gray-400 md:px-6">
+                    Opening stock is carried automatically from {{ $latestReport->report_code }}.
+                </div>
+            @endif
         @endunless
 
         @if ($calculation)
@@ -168,6 +182,35 @@
                     </ul>
                 </div>
             @endif
+
+            <section class="{{ $panel }} overflow-hidden">
+                <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+                    <h2 class="font-semibold text-gray-800 dark:text-white/90">Liters Movement Sales Summary</h2>
+                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Matches the workbook Sales summary. Average price per liter = net sales &divide; dispensed liters.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[900px]">
+                        <thead class="bg-gray-50 dark:bg-white/[0.02]">
+                            <tr><th class="{{ $th }}">Product</th><th class="{{ $thNumber }}">Liters</th><th class="{{ $thNumber }}">Current Stock / Limit</th><th class="{{ $thNumber }}">Net Sales</th><th class="{{ $thNumber }}">Avg Price / L</th><th class="{{ $thNumber }}">Ending Stock</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                            @foreach ($lines as $line)
+                                <tr>
+                                    <td class="{{ $td }}">{{ $line['product_name'] }}</td>
+                                    <td class="{{ $tdNumber }}">{{ $number($line['dispensed_liters']) }}</td>
+                                    <td class="{{ $tdNumber }}">{{ $number($line['tank_limit_liters']) }}</td>
+                                    <td class="{{ $tdNumber }}">{{ $money($line['sales_revenue']) }}</td>
+                                    <td class="{{ $tdNumber }}">{{ $money($line['average_selling_price']) }}</td>
+                                    <td class="{{ $tdNumber }} font-semibold">{{ $number($line['ending_liters']) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot class="bg-gray-50 font-semibold dark:bg-white/[0.02]">
+                            <tr><td class="{{ $td }}">Total</td><td class="{{ $tdNumber }}">{{ $number($totals['dispensed_liters'] ?? 0) }}</td><td class="{{ $tdNumber }}">{{ $number($totals['tank_limit_liters'] ?? 0) }}</td><td class="{{ $tdNumber }}">{{ $money($totals['sales_revenue'] ?? 0) }}</td><td class="{{ $tdNumber }}">&mdash;</td><td class="{{ $tdNumber }}">{{ $number($totals['ending_liters'] ?? 0) }}</td></tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </section>
 
             <section class="{{ $panel }} overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
@@ -412,12 +455,6 @@
                             <form method="POST" action="{{ route('inventory.reports.store') }}" onsubmit="return confirm('Finalize this inventory report and carry its ending stock into the next report?')">
                                 @csrf
                                 <input type="hidden" name="period_id" value="{{ $selectedPeriod->id }}">
-                                @unless ($latestReport)
-                                    @foreach ($products as $fuel => $definition)
-                                        <input type="hidden" name="opening[{{ $fuel }}][liters]" value="{{ $manualOpening[$fuel]['liters'] ?? 0 }}">
-                                        <input type="hidden" name="opening[{{ $fuel }}][unit_cost]" value="{{ $manualOpening[$fuel]['unit_cost'] ?? 0 }}">
-                                    @endforeach
-                                @endunless
                                 <button type="submit" class="{{ $primary }}" {{ ! $canFinalize || $setupIssues ? 'disabled' : '' }}>Finalize report</button>
                             </form>
                         </div>

@@ -79,6 +79,12 @@ class FuelInventoryReportService
             return [];
         }
 
+        $storedOpening = $this->storedInitialOpening($period);
+
+        if ($storedOpening !== []) {
+            return $storedOpening;
+        }
+
         [$start, $end] = $this->reportWindow(
             $period,
             $period->started_at,
@@ -107,6 +113,57 @@ class FuelInventoryReportService
                 ];
             })
             ->all();
+    }
+
+    public function saveInitialOpening(int $trackingPeriodId, array $openingCosts): array
+    {
+        if (! Schema::hasColumn('liters_tracking_periods', 'opening_inventory')) {
+            throw new RuntimeException('Run the pending inventory migration before saving initial stock.');
+        }
+
+        return DB::transaction(function () use ($trackingPeriodId, $openingCosts): array {
+            $period = DB::table('liters_tracking_periods')
+                ->where('id', $trackingPeriodId)
+                ->whereIn(DB::raw('LOWER(TRIM(status))'), ['active', 'generated'])
+                ->lockForUpdate()
+                ->first();
+
+            if (! $period) {
+                throw new RuntimeException('The selected Liters Movement period was not found.');
+            }
+
+            if ($this->latestFinalizedReport(true)) {
+                throw new RuntimeException('Initial stock can only be entered before the first inventory report is finalized.');
+            }
+
+            $opening = $this->initialOpeningFromTrackingPeriod($period);
+
+            foreach (self::PRODUCTS as $fuel => $definition) {
+                $submitted = $this->openingBalance($openingCosts, $fuel);
+                $unitCost = max(0, (float) ($submitted['unit_cost'] ?? 0));
+                $liters = max(0, (float) ($opening[$fuel]['liters'] ?? 0));
+
+                if ($liters > 0 && $unitCost <= 0) {
+                    throw new RuntimeException("Enter the opening price per liter for {$definition['product_name']}.");
+                }
+
+                $opening[$fuel] = [
+                    'liters' => $this->rounded($liters),
+                    'unit_cost' => $this->rounded($unitCost),
+                    'value' => $this->rounded($liters * $unitCost),
+                ];
+            }
+
+            $values = ['opening_inventory' => json_encode($opening, JSON_UNESCAPED_SLASHES)];
+
+            if (Schema::hasColumn('liters_tracking_periods', 'updated_at')) {
+                $values['updated_at'] = now();
+            }
+
+            DB::table('liters_tracking_periods')->where('id', $trackingPeriodId)->update($values);
+
+            return $opening;
+        });
     }
 
     public function calculate(
@@ -254,6 +311,9 @@ class FuelInventoryReportService
             $costOfGoodsSold = $dispensedLiters * $periodicAverageCost;
             $endingValue = $endingLiters * $periodicAverageCost;
             $averageSellingPrice = $this->divide($salesRevenue, $dispensedLiters);
+            $grossMarginPerLiter = $dispensedLiters > 0
+                ? $averageSellingPrice - $periodicAverageCost
+                : 0.0;
             $pumpPrice = (float) ($prices[$fuel]['pump_price'] ?? 0);
             $bulkPrice = (float) ($prices[$fuel]['bulk_price'] ?? 0);
 
@@ -312,7 +372,7 @@ class FuelInventoryReportService
                 'pump_margin' => $this->rounded($pumpPrice - $periodicAverageCost),
                 'bulk_margin' => $this->rounded($bulkPrice - $periodicAverageCost),
                 'average_selling_price' => $this->rounded($averageSellingPrice),
-                'gross_margin_per_liter' => $this->rounded($averageSellingPrice - $periodicAverageCost),
+                'gross_margin_per_liter' => $this->rounded($grossMarginPerLiter),
                 'gross_profit' => $this->rounded($salesRevenue - $costOfGoodsSold),
                 'source_summary' => [
                     'liters_tracking_period' => $this->periodMetadata($period),
@@ -508,7 +568,9 @@ class FuelInventoryReportService
 
             $latest = $this->latestFinalizedReport(true);
             $this->assertPeriodFollowsLatestReport($period, $latest);
-            $opening = $latest ? $this->openingFromReport($latest) : $manualOpening;
+            $opening = $latest
+                ? $this->openingFromReport($latest)
+                : $this->firstOpeningForFinalization($period, $manualOpening);
             [$start, $end] = $this->reportWindow($period, $period->started_at, $period->ended_at);
             $calculation = $this->calculate($start, $end, $opening, $trackingPeriodId);
             $sequence = DB::table('fuel_inventory_reports')
@@ -978,6 +1040,65 @@ class FuelInventoryReportService
         }
 
         return [];
+    }
+
+    private function storedInitialOpening(object $period): array
+    {
+        if (! isset($period->opening_inventory) || trim((string) $period->opening_inventory) === '') {
+            return [];
+        }
+
+        $decoded = json_decode((string) $period->opening_inventory, true);
+
+        if (! is_array($decoded)) {
+            return [];
+        }
+
+        return collect(self::PRODUCTS)
+            ->mapWithKeys(function (array $definition, string $fuel) use ($decoded): array {
+                $line = $this->openingBalance($decoded, $fuel);
+                $liters = max(0, (float) ($line['liters'] ?? 0));
+                $unitCost = max(0, (float) ($line['unit_cost'] ?? 0));
+
+                return [$fuel => [
+                    'liters' => $this->rounded($liters),
+                    'unit_cost' => $this->rounded($unitCost),
+                    'value' => $this->rounded(
+                        array_key_exists('value', $line)
+                            ? max(0, (float) $line['value'])
+                            : $liters * $unitCost
+                    ),
+                ]];
+            })
+            ->all();
+    }
+
+    private function firstOpeningForFinalization(object $period, array $manualOpening): array
+    {
+        $opening = $this->initialOpeningFromTrackingPeriod($period);
+
+        foreach (self::PRODUCTS as $fuel => $definition) {
+            $line = $opening[$fuel] ?? ['liters' => 0.0, 'unit_cost' => 0.0];
+            $submitted = $this->openingBalance($manualOpening, $fuel);
+            $liters = max(0, (float) ($line['liters'] ?? 0));
+            $unitCost = max(0, (float) ($line['unit_cost'] ?? 0));
+
+            if ($unitCost <= 0) {
+                $unitCost = max(0, (float) ($submitted['unit_cost'] ?? 0));
+            }
+
+            if ($liters > 0 && $unitCost <= 0) {
+                throw new RuntimeException("Enter and save the opening price per liter for {$definition['product_name']} before finalizing.");
+            }
+
+            $opening[$fuel] = [
+                'liters' => $this->rounded($liters),
+                'unit_cost' => $this->rounded($unitCost),
+                'value' => $this->rounded($liters * $unitCost),
+            ];
+        }
+
+        return $opening;
     }
 
     private function totals(array $lines): array

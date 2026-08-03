@@ -27,6 +27,7 @@ beforeEach(function () {
         $table->id();
         $table->string('name')->nullable();
         $table->string('fuel_type');
+        $table->decimal('current_volume', 14, 2)->nullable();
         $table->string('connected_pumps')->nullable();
     });
 
@@ -103,6 +104,7 @@ beforeEach(function () {
         $table->string('period_code');
         $table->decimal('liters_limit', 16, 2)->default(0);
         $table->text('tank_limits')->nullable();
+        $table->text('opening_inventory')->nullable();
         $table->string('status');
         $table->timestamp('started_at');
         $table->timestamp('ended_at')->nullable();
@@ -213,6 +215,132 @@ test('current stock and fuel profit use one periodic weighted average cost', fun
         ->and($premium['gross_profit'])->toBe(530.0)
         ->and($result['deliveries'])->toHaveCount(1)
         ->and($result['deliveries'][0]['delivery_code'])->toBe('DLV-VERIFIED');
+});
+
+test('initial stock saves tank-derived quantities and manually entered prices', function () {
+    DB::table('tanks')->insert([
+        ['id' => 1, 'name' => 'Premium Tank', 'fuel_type' => 'Premium', 'current_volume' => 2270.23, 'connected_pumps' => 'Pump 1, Pump 3'],
+        ['id' => 2, 'name' => 'Regular Tank', 'fuel_type' => 'Unleaded', 'current_volume' => 4700.21, 'connected_pumps' => 'Pump 2, Pump 4'],
+        ['id' => 3, 'name' => 'Diesel Tank', 'fuel_type' => 'Diesel', 'current_volume' => 4197.50, 'connected_pumps' => 'Pump 5, Pump 6'],
+    ]);
+    DB::table('liters_tracking_periods')->insert([
+        'id' => 4,
+        'period_code' => 'LTM-FIRST',
+        'liters_limit' => 4700.21,
+        'tank_limits' => json_encode(['tank:1' => 2270.23, 'tank:2' => 4700.21, 'tank:3' => 4197.50]),
+        'opening_inventory' => null,
+        'status' => 'Active',
+        'started_at' => '2026-07-15 08:00:00',
+        'ended_at' => null,
+    ]);
+
+    $saved = app(FuelInventoryReportService::class)->saveInitialOpening(4, [
+        'Premium' => ['unit_cost' => 66.80],
+        'Unleaded' => ['unit_cost' => 66.30],
+        'Diesel' => ['unit_cost' => 68.10],
+    ]);
+    $stored = json_decode((string) DB::table('liters_tracking_periods')->where('id', 4)->value('opening_inventory'), true);
+
+    expect($saved['Premium'])->toBe([
+        'liters' => 2270.23,
+        'unit_cost' => 66.8,
+        'value' => 151651.364,
+    ])->and($saved['Unleaded']['liters'])->toBe(4700.21)
+        ->and($saved['Diesel']['liters'])->toBe(4197.5)
+        ->and($stored)->toBe($saved);
+});
+
+test('workbook inventory formulas match current stock price guide tank progress and fuel profit', function () {
+    DB::table('tanks')->insert([
+        ['id' => 1, 'name' => 'Premium Tank', 'fuel_type' => 'Premium', 'current_volume' => 2270.23, 'connected_pumps' => 'Pump 1, Pump 3'],
+        ['id' => 2, 'name' => 'Regular Tank', 'fuel_type' => 'Unleaded', 'current_volume' => 4700.21, 'connected_pumps' => 'Pump 2, Pump 4'],
+        ['id' => 3, 'name' => 'Diesel Tank', 'fuel_type' => 'Diesel', 'current_volume' => 4197.50, 'connected_pumps' => 'Pump 5, Pump 6'],
+    ]);
+    DB::table('suppliers')->insert(['id' => 1, 'name' => 'Q & Q']);
+    DB::table('fuel_prices')->insert([
+        ['fuel_type' => 'Premium', 'price_per_liter' => 76.00, 'bulk_price_per_liter' => 71.50],
+        ['fuel_type' => 'Unleaded', 'price_per_liter' => 75.50, 'bulk_price_per_liter' => 71.30],
+        ['fuel_type' => 'Diesel', 'price_per_liter' => 77.50, 'bulk_price_per_liter' => 75.00],
+    ]);
+    DB::table('liters_tracking_periods')->insert([
+        'id' => 8,
+        'period_code' => 'LTM-WORKBOOK',
+        'liters_limit' => 10700.21,
+        'tank_limits' => json_encode(['tank:1' => 8270.23, 'tank:2' => 10700.21, 'tank:3' => 10197.50]),
+        'opening_inventory' => null,
+        'status' => 'Generated',
+        'started_at' => '2026-07-15 00:00:00',
+        'ended_at' => '2026-07-20 23:59:59',
+    ]);
+
+    $deliveries = [
+        [1, 1, 4000, 276000],
+        [2, 2, 4000, 274000],
+        [3, 3, 6000, 459300],
+        [4, 1, 2000, 137000],
+        [5, 2, 2000, 138000],
+    ];
+
+    foreach ($deliveries as [$id, $tankId, $liters, $cost]) {
+        DB::table('inventory_logs')->insert([
+            'id' => $id,
+            'delivery_code' => 'DLV-' . $id,
+            'tank_id' => $tankId,
+            'supplier_id' => 1,
+            'liters_delivered' => $liters,
+            'total_cost' => $cost,
+            'delivery_date' => '2026-07-16',
+            'delivery_status' => 'Verified',
+        ]);
+        DB::table('tank_delivery_records')->insert([
+            'inventory_log_id' => $id,
+            'record_date' => '2026-07-16',
+            'record_time' => sprintf('%02d:00:00', 8 + $id),
+        ]);
+    }
+
+    $reading = shiftReadingRow(80, '2026-07-20', 1599.39, 120458.18);
+    $reading['status'] = 'Pending';
+    $reading['liters_tracking_period_id'] = 8;
+    $reading['pump2_liters_end'] = 2931.51;
+    $reading['pump2_sales_end'] = 220710.05;
+    $reading['pump5_liters_end'] = 2583.27;
+    $reading['pump5_sales_end'] = 199060.22;
+    DB::table('shift_readings')->insert($reading);
+    DB::table('liters_movement_period_readings')->insert([
+        'liters_tracking_period_id' => 8,
+        'shift_reading_id' => 80,
+        'inclusion_status' => 'included',
+        'removed_at' => null,
+    ]);
+
+    $result = app(FuelInventoryReportService::class)->calculate(
+        '2026-07-15',
+        '2026-07-20',
+        [
+            'Premium' => ['liters' => 2270.23, 'unit_cost' => 66.80],
+            'Unleaded' => ['liters' => 4700.21, 'unit_cost' => 66.30],
+            'Diesel' => ['liters' => 4197.50, 'unit_cost' => 68.10],
+        ],
+        8
+    );
+    $lines = collect($result['lines'])->keyBy('fuel_type');
+
+    expect($lines['Premium']['available_liters'])->toBe(8270.23)
+        ->and($lines['Premium']['periodic_average_cost'])->toBe(68.275171)
+        ->and($lines['Premium']['dispensed_liters'])->toBe(1599.39)
+        ->and($lines['Premium']['ending_liters'])->toBe(6670.84)
+        ->and($lines['Premium']['average_selling_price'])->toBe(75.315076)
+        ->and($lines['Premium']['pump_margin'])->toBe(7.724829)
+        ->and($lines['Premium']['bulk_margin'])->toBe(3.224829)
+        ->and($lines['Premium']['gross_profit'])->toBe(11259.554923)
+        ->and($lines['Unleaded']['available_liters'])->toBe(10700.21)
+        ->and($lines['Unleaded']['ending_liters'])->toBe(7768.7)
+        ->and($lines['Unleaded']['gross_profit'])->toBe(22460.598212)
+        ->and($lines['Diesel']['available_liters'])->toBe(10197.5)
+        ->and($lines['Diesel']['ending_liters'])->toBe(7614.23)
+        ->and($lines['Diesel']['gross_profit'])->toBe(10296.013608)
+        ->and($result['totals']['gross_profit'])->toBe(44016.166743);
 });
 
 test('a finalized ending stock becomes the next report opening stock', function () {

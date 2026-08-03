@@ -19,6 +19,7 @@ beforeEach(function () {
         $table->id();
         $table->string('name')->nullable();
         $table->string('fuel_type');
+        $table->decimal('current_volume', 14, 2)->nullable();
         $table->string('connected_pumps')->nullable();
         $table->string('status')->nullable();
     });
@@ -132,9 +133,9 @@ beforeEach(function () {
     });
 
     DB::table('tanks')->insert([
-        ['id' => 1, 'name' => 'Premium Tank', 'fuel_type' => 'Premium', 'connected_pumps' => 'Pump 1, Pump 3', 'status' => 'Active'],
-        ['id' => 2, 'name' => 'Unleaded Tank', 'fuel_type' => 'Unleaded', 'connected_pumps' => 'Pump 2, Pump 4', 'status' => 'Active'],
-        ['id' => 3, 'name' => 'Diesel Tank', 'fuel_type' => 'Diesel', 'connected_pumps' => 'Pump 5, Pump 6', 'status' => 'Active'],
+        ['id' => 1, 'name' => 'Premium Tank', 'fuel_type' => 'Premium', 'current_volume' => 2270.23, 'connected_pumps' => 'Pump 1, Pump 3', 'status' => 'Active'],
+        ['id' => 2, 'name' => 'Unleaded Tank', 'fuel_type' => 'Unleaded', 'current_volume' => 4700.21, 'connected_pumps' => 'Pump 2, Pump 4', 'status' => 'Active'],
+        ['id' => 3, 'name' => 'Diesel Tank', 'fuel_type' => 'Diesel', 'current_volume' => 4197.50, 'connected_pumps' => 'Pump 5, Pump 6', 'status' => 'Active'],
     ]);
 
     DB::table('fuel_prices')->insert([
@@ -221,6 +222,23 @@ beforeEach(function () {
     ]);
 });
 
+test('the first liters movement period starts from tank current volumes', function () {
+    DB::table('liters_movement_period_readings')->delete();
+    DB::table('liters_movement_corrections')->delete();
+    DB::table('liters_movement_adjustments')->delete();
+    DB::table('shift_readings')->delete();
+    DB::table('liters_tracking_periods')->delete();
+
+    $period = app(LitersMovementTrackingService::class)->ensureActivePeriod();
+    $limits = json_decode((string) $period->tank_limits, true);
+
+    expect($limits)->toEqual([
+        'tank:1' => 2270.23,
+        'tank:2' => 4700.21,
+        'tank:3' => 4197.5,
+    ]);
+});
+
 test('shared liters movement totals pending and verified shift reading pump deltas by tank', function () {
     $state = app(LitersMovementTrackingService::class)->state();
     $diesel = collect($state['summary']['tank_breakdown'])
@@ -283,7 +301,7 @@ test('pump deduction subtracts both liters and submitted sales amount', function
 test('a reached shared limit remains non blocking for the next shift reading submission', function () {
     $service = app(LitersMovementTrackingService::class);
 
-    $service->updateActiveLimits(['tank:1' => 1000, 'tank:2' => 1000, 'tank:3' => 500]);
+    $service->updateActiveLimits(['tank:1' => 1000, 'tank:2' => 1000, 'tank:3' => 0]);
     $state = $service->state();
     $diesel = collect($state['summary']['tank_breakdown'])
         ->firstWhere('fuel_type', 'Diesel');
@@ -293,19 +311,46 @@ test('a reached shared limit remains non blocking for the next shift reading sub
         ->and($service->activePeriodIdForNewShiftReading())->toBe(1);
 });
 
-test('generate record snapshots shift readings and starts a zeroed shared period', function () {
+test('generate record snapshots shift readings and carries ending stock into the new period', function () {
     $service = app(LitersMovementTrackingService::class);
     $result = $service->generateAndReset(99);
     $snapshot = json_decode((string) $result['period']->totals_snapshot, true);
+    $newLimits = json_decode((string) $result['new_period']->tank_limits, true);
     $newState = $service->state();
 
     expect($result['summary']['total_liters'])->toBe(500.0)
         ->and($snapshot['source'])->toBe('shift_readings')
         ->and($snapshot['submission_count'])->toBe(2)
         ->and($snapshot['shift_reading_ids'])->toBe([10, 11])
+        ->and($snapshot['ending_tank_limits'])->toEqual([
+            'tank:1' => 1000.0,
+            'tank:2' => 1000.0,
+            'tank:3' => 500.0,
+        ])
+        ->and($newLimits)->toBe($snapshot['ending_tank_limits'])
         ->and($newState['summary']['total_liters'])->toBe(0.0)
+        ->and($newState['summary']['remaining_liters'])->toBe(2500.0)
         ->and($newState['summary']['submission_count'])->toBe(0)
         ->and((int) $newState['period']->id)->not->toBe(1);
+});
+
+test('editing current stock and adding a delivery preserve live dispensing exactly once', function () {
+    $service = app(LitersMovementTrackingService::class);
+
+    $service->updateActiveLimits(['tank:1' => 1000, 'tank:2' => 1000, 'tank:3' => 450]);
+    $edited = $service->state();
+    $editedDiesel = collect($edited['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
+
+    $service->addActiveTankDeliveries([3 => 150]);
+    $delivered = $service->state();
+    $deliveredDiesel = collect($delivered['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
+    $storedLimits = json_decode((string) $delivered['period']->tank_limits, true);
+
+    expect($editedDiesel['liters'])->toBe(500.0)
+        ->and($editedDiesel['remaining_liters'])->toBe(450.0)
+        ->and($deliveredDiesel['liters'])->toBe(500.0)
+        ->and($deliveredDiesel['remaining_liters'])->toBe(600.0)
+        ->and((float) $storedLimits['tank:3'])->toBe(1100.0);
 });
 
 test('voiding a generated record restores its included shift readings to the active period', function () {
@@ -317,6 +362,7 @@ test('voiding a generated record restores its included shift readings to the act
     $result = $service->voidGeneratedPeriod($generatedPeriodId, 88);
     $snapshot = json_decode((string) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('totals_snapshot'), true);
     $newState = $service->state();
+    $diesel = collect($newState['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
 
     expect($result['restored_shift_reading_ids'])->toBe([10, 11])
         ->and($result['restored_count'])->toBe(2)
@@ -325,8 +371,10 @@ test('voiding a generated record restores its included shift readings to the act
         ->and((int) DB::table('liters_tracking_periods')->where('id', $generatedPeriodId)->value('voided_by'))->toBe(88)
         ->and($snapshot['reverted_to_period_id'])->toBe($activePeriodId)
         ->and($snapshot['reverted_shift_reading_ids'])->toBe([10, 11])
+        ->and($snapshot['reverted_tank_liters'])->toEqual(['tank:3' => 500.0])
         ->and(DB::table('shift_readings')->whereIn('id', [10, 11])->pluck('liters_tracking_period_id', 'id')->all())->toBe([10 => $activePeriodId, 11 => $activePeriodId])
         ->and($newState['summary']['total_liters'])->toBe(500.0)
+        ->and($diesel['remaining_liters'])->toBe(500.0)
         ->and($newState['summary']['submission_count'])->toBe(2);
 });
 
@@ -361,6 +409,7 @@ test('rejection after generation recalculates the original record and never post
         ->where('id', $generatedPeriodId)
         ->value('totals_snapshot'), true);
     $activeState = $service->state(null, 20, 'page', true);
+    $activeDiesel = collect($activeState['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
     $secondRemoval = $service->recordShiftReadingVoid(10, 88, 'Rejected', 'Meter total needs correction');
 
     expect($removal['action'])->toBe('generated_period_recalculated')
@@ -372,10 +421,16 @@ test('rejection after generation recalculates the original record and never post
         ->and($snapshot['total_net_sales'])->toEqual(2965)
         ->and($snapshot['submission_count'])->toBe(1)
         ->and($snapshot['shift_reading_ids'])->toBe([11])
+        ->and($snapshot['ending_tank_limits'])->toEqual([
+            'tank:1' => 1000.0,
+            'tank:2' => 1000.0,
+            'tank:3' => 950.0,
+        ])
         ->and($snapshot['removed_shift_readings'])->toHaveCount(1)
         ->and($snapshot['removed_shift_readings'][0]['id'])->toBe(10)
         ->and($snapshot['removed_shift_readings'][0]['removal_status'])->toBe('Rejected')
         ->and($activeState['summary']['total_liters'])->toBe(0.0)
+        ->and($activeDiesel['remaining_liters'])->toBe(950.0)
         ->and($activeState['summary']['total_sales'])->toBe(0.0)
         ->and($activeState['transactions']->total())->toBe(0)
         ->and(DB::table('liters_movement_corrections')->count())->toBe(0);

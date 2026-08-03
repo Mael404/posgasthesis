@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\LitersMovementTrackingService;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -25,6 +26,10 @@ class InventoryController extends Controller
 
     private array $tablePresence = [];
     private array $columnPresence = [];
+
+    public function __construct(
+        private readonly LitersMovementTrackingService $litersMovementTracking
+    ) {}
 
     public function index(Request $request)
     {
@@ -649,6 +654,14 @@ class InventoryController extends Controller
                     if ($tankIds->count() > self::MAX_BULK_DELIVERIES) {
                         throw new \RuntimeException('A bulk delivery can include up to ' . self::MAX_BULK_DELIVERIES . ' tank entries only.');
                     }
+
+                    $this->litersMovementTracking->addActiveTankDeliveries(
+                        collect($deliveries)
+                            ->mapWithKeys(fn (array $delivery): array => [
+                                (int) $delivery['tank_id'] => (float) $delivery['liters'],
+                            ])
+                            ->all()
+                    );
 
                     $tanks = DB::table('tanks')
                         ->whereIn('id', $tankIds->all())
