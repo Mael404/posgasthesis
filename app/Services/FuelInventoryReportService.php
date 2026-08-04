@@ -92,12 +92,13 @@ class FuelInventoryReportService
         );
         $definitions = $this->productDefinitions();
         $limits = $this->decodedTankLimits($period);
+        $previousCurrentStockCosts = $this->previousGeneratedCurrentStockCosts($period);
         $deliveredByFuel = $this->deliveryLogs($start, $end)
             ->groupBy(fn (object $delivery): string => $this->canonicalFuel($delivery->fuel_type ?? null) ?? '')
             ->map(fn (Collection $deliveries): float => (float) $deliveries->sum('liters_delivered'));
 
         return collect($definitions)
-            ->map(function (array $definition, string $fuel) use ($limits, $deliveredByFuel): array {
+            ->map(function (array $definition, string $fuel) use ($limits, $deliveredByFuel, $previousCurrentStockCosts): array {
                 [$currentLimit, $hasCurrentLimit] = $this->tankLimitForDefinition(
                     $definition,
                     $limits,
@@ -109,9 +110,48 @@ class FuelInventoryReportService
                     'liters' => $hasCurrentLimit
                         ? $this->rounded(max(0, $currentLimit - $deliveredLiters))
                         : 0.0,
-                    'unit_cost' => 0.0,
+                    'unit_cost' => $this->rounded(max(0, (float) ($previousCurrentStockCosts[$fuel] ?? 0))),
                 ];
             })
+            ->all();
+    }
+
+    private function previousGeneratedCurrentStockCosts(object $period): array
+    {
+        if (! Schema::hasTable('liters_tracking_periods') || empty($period->started_at)) {
+            return [];
+        }
+
+        $previousPeriod = DB::table('liters_tracking_periods')
+            ->whereRaw('LOWER(TRIM(status)) = ?', ['generated'])
+            ->whereNotNull('ended_at')
+            ->where('ended_at', '<=', Carbon::parse($period->started_at))
+            ->where('id', '!=', (int) $period->id)
+            ->orderByDesc('ended_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $previousPeriod) {
+            return [];
+        }
+
+        $opening = $this->storedInitialOpening($previousPeriod);
+
+        if ($opening === []) {
+            $opening = $this->initialOpeningFromTrackingPeriod($previousPeriod);
+        }
+
+        $calculation = $this->calculate(
+            $previousPeriod->started_at,
+            $previousPeriod->ended_at,
+            $opening,
+            (int) $previousPeriod->id
+        );
+
+        return collect($calculation['lines'] ?? [])
+            ->mapWithKeys(fn (array $line): array => [
+                (string) $line['fuel_type'] => max(0, (float) ($line['periodic_average_cost'] ?? 0)),
+            ])
             ->all();
     }
 

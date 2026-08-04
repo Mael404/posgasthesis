@@ -120,7 +120,7 @@
                         <div class="px-5 py-4 md:px-6">
                             <h2 class="font-semibold text-gray-800 dark:text-white/90">Initial Ending Stock - Last Report</h2>
                             <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
-                                On the first report, quantity comes from the tank volume captured when this Liters Movement period started. Enter only the starting price per liter; cost is Quantity &times; Price.
+                                Quantity comes from the tank volume captured when this Liters Movement period started. Price per liter carries over from Current Stock in the last generated period; if none is available yet, enter the starting price. Cost is Quantity &times; Price.
                             </p>
                         </div>
                         <div class="overflow-x-auto">
