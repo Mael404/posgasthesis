@@ -500,12 +500,19 @@
             ->values();
     @endphp
 
-    <x-common.page-breadcrumb pageTitle="Liters Movement" />
+    <x-common.page-breadcrumb pageTitle="Liters Movement & Inventory" />
 
     <div
         x-data="litersMovementAdmin({
             sessionMessage: @js(session('success') ?: session('status')),
             sessionError: @js(session('error') ?: $errors->first()),
+            initialModuleTab: @js(request('tab') === 'inventory' ? 'inventory' : 'liters'),
+            inventoryUrl: @js(route('inventory.reports.index', array_filter([
+                'report_id' => request('report_id'),
+                'period_id' => request('period_id'),
+            ], fn ($value) => $value !== null && $value !== ''))),
+            inventoryReportPath: @js('/' . ltrim(route('inventory.reports.index', [], false), '/')),
+            litersMovementPath: @js('/' . ltrim(route('admin.liters-movement.index', [], false), '/')),
             historyRecords: @js($historyDetailsPayload),
             activeSubmissions: @js($activeSubmissionsPayload),
             canManageAdjustments: @js($canManageAdjustments),
@@ -513,6 +520,7 @@
             deductionVoidUrlTemplate: @js(route('admin.liters-movement.deductions.void', ['deduction' => '__DEDUCTION__'])),
         })"
         x-init="init()"
+        :data-active-module-tab="moduleTab"
         x-effect="document.body.classList.toggle('overflow-hidden', confirmation.open || messageDialog.open || activeDetails.open || deduction.open || deductionVoid.open || historyDetails.open || voidConfirmation.open)"
         x-on:keydown.escape.window="closeTopLayer()"
         class="liters-movement-admin space-y-6">
@@ -540,7 +548,8 @@
                 body > .min-h-screen > :not(.min-w-0),
                 body > .min-h-screen > .min-w-0 > header,
                 body > .min-h-screen > .min-w-0 > .min-w-0 > :not(.liters-movement-admin),
-                .liters-movement-admin > :not(.liters-print-report) {
+                .liters-movement-admin[data-active-module-tab="liters"] > :not(.liters-print-report),
+                .liters-movement-admin[data-active-module-tab="inventory"] > :not(.inventory-report-panel) {
                     display: none !important;
                 }
                 body > .min-h-screen > .min-w-0,
@@ -554,7 +563,7 @@
                     transition: none !important;
                     width: 100% !important;
                 }
-                .liters-print-report {
+                .liters-movement-admin[data-active-module-tab="liters"] .liters-print-report {
                     box-sizing: border-box;
                     color: #222 !important;
                     display: flex !important;
@@ -565,6 +574,12 @@
                     min-height: 277mm;
                     position: static;
                     width: 100%;
+                }
+                .liters-movement-admin[data-active-module-tab="inventory"] .inventory-report-panel {
+                    display: block !important;
+                }
+                .liters-movement-admin[data-active-module-tab="inventory"] .liters-print-report {
+                    display: none !important;
                 }
                 .liters-print-main { flex: 1; }
                 .liters-report-header {
@@ -764,6 +779,43 @@
             </div>
         </div>
 
+        <div class="print:hidden">
+            <div class="inline-flex w-full gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] sm:w-auto" role="tablist" aria-label="Liters Movement and Inventory Report">
+                <button
+                    type="button"
+                    id="liters-movement-tab"
+                    role="tab"
+                    aria-controls="liters-movement-panel"
+                    x-on:click="setModuleTab('liters')"
+                    :aria-selected="moduleTab === 'liters'"
+                    class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 text-theme-sm font-medium transition sm:flex-none"
+                    :class="moduleTab === 'liters' ? 'bg-brand-500 text-white shadow-theme-xs' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 18.5h14M7 15V9.5m5 5.5V5.5m5 9.5v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    Liters Movement
+                </button>
+                <button
+                    type="button"
+                    id="inventory-report-tab"
+                    role="tab"
+                    aria-controls="inventory-report-panel"
+                    x-on:click="setModuleTab('inventory')"
+                    :aria-selected="moduleTab === 'inventory'"
+                    class="inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 text-theme-sm font-medium transition sm:flex-none"
+                    :class="moduleTab === 'inventory' ? 'bg-brand-500 text-white shadow-theme-xs' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.75h14v14.5H5V4.75Zm3 4h8M8 12h8M8 15.25h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Inventory Report
+                </button>
+            </div>
+        </div>
+
+        <div
+            id="liters-movement-panel"
+            role="tabpanel"
+            aria-labelledby="liters-movement-tab"
+            x-show="moduleTab === 'liters'"
+            x-cloak
+            class="space-y-6">
+
         @if ($missingRequirements)
             <div class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-theme-sm text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
                 Missing tracking requirement(s): {{ implode(', ', $missingRequirements) }}.
@@ -774,7 +826,6 @@
             <div class="rounded-xl border border-error-200 bg-error-50 p-4 text-theme-sm text-error-800 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
                 <span class="font-semibold">Tank limit reached:</span>
                 {{ $reachedLimits->map(fn ($tank) => ($tank['name'] ?? $tank['fuel_type'] ?? 'Tank') . ' (' . number_format((float) ($tank['liters'] ?? 0), 2) . ' L / ' . number_format((float) ($tank['limit'] ?? 0), 2) . ' L)')->implode(', ') }}.
-                Staff can continue submitting shift readings; the limit is an alert and does not block submission.
             </div>
         @endif
 
@@ -783,9 +834,7 @@
                 <div class="min-w-0">
                     <p class="{{ $labelClass }}">Admin Module</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Liters Movement</h1>
-                    <p class="mt-2 {{ $captionClass }}">
-                        Shared period {{ $period->period_code ?? 'Pending Migration' }} started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}. Totals come from submitted staff shift readings.
-                    </p>
+                    <p class="mt-2 {{ $captionClass }}">{{ $period->period_code ?? 'Pending Migration' }} &middot; Started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}</p>
                 </div>
 
                 @if (! $missingRequirements)
@@ -808,9 +857,8 @@
                                     </label>
                                 @endforeach
                             </div>
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <p class="{{ $captionClass }}">Current stock is editable. Submitted liters are deducted live, while Stock In deliveries are added automatically.</p>
-                                <button type="submit" class="{{ $primaryButtonClass }}">
+                            <div class="flex justify-end">
+                                <button type="submit" class="{{ $primaryButtonClass }} w-full shrink-0 whitespace-nowrap sm:w-auto">
                                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5 9.2 16.7 19 6.9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     Update Current Stock
                                 </button>
@@ -820,10 +868,6 @@
                         <form x-ref="generateForm" method="POST" action="{{ route('admin.liters-movement.generate') }}" class="hidden">
                             @csrf
                         </form>
-                        <a href="{{ route('inventory.reports.index', ['period_id' => $period->id ?? null]) }}" class="{{ $secondaryButtonClass }}">
-                            <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.75h14v14.5H5V4.75Zm3 4h8M8 12h8M8 15.25h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            Inventory Report
-                        </a>
                         <button type="button" x-on:click="confirmGenerate()" class="{{ $dangerButtonClass }}">
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M8 7.5V5.75C8 4.784 8.784 4 9.75 4h4.5C15.216 4 16 4.784 16 5.75V7.5M9 10.75v6M15 10.75v6M6.5 7.5l.75 12A1.75 1.75 0 0 0 9 21.25h6a1.75 1.75 0 0 0 1.75-1.75l.75-12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             Generate Record & Reset
@@ -862,10 +906,7 @@
 
         <section class="{{ $cardClass }}">
             <div class="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Net Sales Per Pump</h2>
-                    <p class="mt-1 {{ $captionClass }}">Submitted pump sales from Pending and Verified shift readings, less their automatic and manual discounts. Rejected and Voided readings are excluded.</p>
-                </div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Net Sales Per Pump</h2>
                 <div class="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-left dark:border-brand-500/25 dark:bg-brand-500/10 sm:text-right">
                     <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Overall Net Sales</p>
                     <p class="mt-1 text-title-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format((float) $summary['total_net_sales'], 2) }}</p>
@@ -930,10 +971,7 @@
 
         <section class="{{ $cardClass }}">
             <div class="mb-4 flex items-center justify-between gap-4">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
-                    <p class="mt-1 {{ $captionClass }}">Current stock after submitted dispensing; Stock In deliveries are included automatically.</p>
-                </div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
             </div>
             <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 @foreach ($tankBreakdown as $tank)
@@ -968,10 +1006,7 @@
 
         <section class="space-y-5">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Movement Tables</h2>
-                    <p class="mt-1 {{ $captionClass }}">Review active tank ledgers, staff totals, included submissions, and generated records.</p>
-                </div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Movement Tables</h2>
 
                 <div class="max-w-full overflow-x-auto">
                     <div class="inline-flex min-w-full gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] sm:min-w-0" role="tablist" aria-label="Liters movement tables">
@@ -1022,7 +1057,6 @@
             <div x-show="tableTab === 'tank-ledgers'" x-cloak role="tabpanel" class="space-y-4">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Ledgers</h2>
-                    <p class="mt-1 {{ $captionClass }}">Each submitted pump meter delta is assigned to its designated tank and uses the same discount-adjusted net sales as the Net Sales card.</p>
                 </div>
 
                 <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -1107,7 +1141,6 @@
             <div x-show="tableTab === 'staff-breakdown'" x-cloak role="tabpanel" class="{{ $cardClass }}">
                 <div class="mb-5">
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Staff Breakdown</h2>
-                    <p class="mt-1 {{ $captionClass }}">Active tracking totals grouped by staff.</p>
                 </div>
                 <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                     <div class="max-w-full overflow-x-auto">
@@ -1151,7 +1184,6 @@
             <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h2>
-                    <p class="mt-1 {{ $captionClass }}">Pending and verified submissions share the same global tank limits.</p>
                 </div>
                 <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
                     {{ number_format((int) $summary['submission_count']) }} submissions
@@ -1260,7 +1292,6 @@
             <div x-show="tableTab === 'generated-history'" x-cloak role="tabpanel" class="{{ $cardClass }}">
             <div class="mb-5">
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Generated History</h2>
-                <p class="mt-1 {{ $captionClass }}">Saved records from previous tracking periods.</p>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
@@ -1358,6 +1389,34 @@
             @endif
             </div>
         </section>
+        </div>
+
+        <div
+            id="inventory-report-panel"
+            role="tabpanel"
+            aria-labelledby="inventory-report-tab"
+            x-show="moduleTab === 'inventory'"
+            x-cloak
+            :aria-busy="inventoryLoading"
+            x-on:click="handleInventoryClick($event)"
+            x-on:submit="handleInventorySubmit($event)"
+            class="inventory-report-panel">
+            <div x-show="inventoryLoading" class="grid min-h-64 place-items-center rounded-2xl border border-gray-200 bg-white p-8 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+                <div class="text-center">
+                    <span class="mx-auto block size-8 animate-spin rounded-full border-2 border-gray-200 border-t-brand-500 dark:border-gray-700 dark:border-t-brand-400" aria-hidden="true"></span>
+                    <p class="mt-3 text-theme-sm font-medium text-gray-600 dark:text-gray-300">Loading inventory report...</p>
+                </div>
+            </div>
+
+            <div x-show="inventoryError && ! inventoryLoading" class="rounded-2xl border border-error-200 bg-error-50 p-5 text-theme-sm text-error-800 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p x-text="inventoryError"></p>
+                    <button type="button" x-on:click="loadInventory(inventoryUrl)" class="{{ $secondaryButtonClass }} shrink-0">Try Again</button>
+                </div>
+            </div>
+
+            <div x-show="inventoryLoaded && ! inventoryLoading" x-html="inventoryHtml"></div>
+        </div>
 
         <section class="liters-print-report" aria-hidden="true">
             <div class="liters-print-main">
@@ -1650,12 +1709,6 @@
 
                     <div class="mt-6">
                         <h4 class="text-base font-semibold text-gray-800 dark:text-white/90" x-text="activeDetails.row?.is_correction ? 'Correction Breakdown' : 'Pump Movement'"></h4>
-                        <p x-show="activeDetails.row?.is_correction" class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
-                            Original Shift Reading #<span x-text="activeDetails.row?.original_shift_reading_id || 'N/A'"></span> was reversed
-                            <span x-show="activeDetails.row?.replacement_shift_reading_id">and replaced by Shift Reading #<span x-text="activeDetails.row?.replacement_shift_reading_id"></span>.</span>
-                            <span x-show="!activeDetails.row?.replacement_shift_reading_id">and is awaiting a corrected replacement.</span>
-                            Original and replacement cells show liters with meter sales underneath.
-                        </p>
                         <div class="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                             <div class="max-w-full overflow-x-auto">
                                 <table class="min-w-[1040px] w-full table-fixed">
@@ -1843,7 +1896,6 @@
                     <div>
                         <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_amount">Amount to Deduct <span class="text-error-500">*</span></label>
                         <input id="admin_deduction_amount" name="amount" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailableAmount()" x-model="deduction.amount" x-on:input="deduction.amountManual = true" class="{{ $inputClass }}" required>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Auto-calculated from liters x current pump price. You can still edit it.</p>
                     </div>
 
                     <div>
@@ -1872,7 +1924,6 @@
                 @csrf
                 <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Void Your Deduction</h3>
-                    <p class="mt-1 {{ $captionClass }}">This restores the deducted liters and amount to the staff submission.</p>
                 </div>
 
                 <div class="space-y-4 p-5">
@@ -1919,7 +1970,6 @@
                                 :class="historyDetails.record?.status === 'voided' ? 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300' : 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400'"
                                 x-text="historyDetails.record?.status_label || 'Generated'"></span>
                         </div>
-                        <p class="mt-1 {{ $captionClass }}">Included shift-reading submissions and pump movement saved in this generated record.</p>
                     </div>
                     <button type="button" x-on:click="closeHistoryDetails()" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="Close history details">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -2157,7 +2207,6 @@
                             <h4 class="text-base font-semibold text-gray-800 dark:text-white/90">Removal Audit Trail</h4>
                             <span class="rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-700 dark:bg-white/[0.06] dark:text-gray-300"><span x-text="historyRemovedSubmissions().length"></span> removed</span>
                         </div>
-                        <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">These submissions were once associated with this generated record but are excluded from every displayed total.</p>
                         <div class="mt-3 space-y-3">
                             <template x-for="submission in historyRemovedSubmissions()" :key="`removed-${submission.id}`">
                                 <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -2278,6 +2327,12 @@
     <script>
         function litersMovementAdmin(config) {
             return {
+                moduleTab: config.initialModuleTab === 'inventory' ? 'inventory' : 'liters',
+                inventoryUrl: config.inventoryUrl || '',
+                inventoryHtml: '',
+                inventoryLoading: false,
+                inventoryLoaded: false,
+                inventoryError: '',
                 toast: { open: false, message: '', timer: null },
                 confirmation: { open: false },
                 messageDialog: { open: false, title: '', message: '' },
@@ -2319,6 +2374,142 @@
                     if (config.sessionError) {
                         this.showMessage('Unable to Continue', config.sessionError);
                     }
+
+                    this.loadInventory(this.inventoryUrl, false);
+                },
+                setModuleTab(tab) {
+                    if (! ['liters', 'inventory'].includes(tab)) {
+                        return;
+                    }
+
+                    this.moduleTab = tab;
+                    this.syncModuleUrl(tab, tab === 'inventory' ? this.inventoryUrl : null);
+
+                    if (tab === 'inventory' && ! this.inventoryLoaded && ! this.inventoryLoading) {
+                        this.loadInventory(this.inventoryUrl, false);
+                    }
+                },
+                syncModuleUrl(tab, inventoryUrl = null) {
+                    if (! window.history || typeof window.history.replaceState !== 'function') {
+                        return;
+                    }
+
+                    const url = new URL(window.location.href);
+                    url.hash = '';
+
+                    if (tab === 'inventory') {
+                        url.searchParams.set('tab', 'inventory');
+                        url.searchParams.delete('report_id');
+                        url.searchParams.delete('period_id');
+
+                        if (inventoryUrl) {
+                            const source = new URL(inventoryUrl, window.location.origin);
+
+                            ['report_id', 'period_id'].forEach((key) => {
+                                if (source.searchParams.has(key)) {
+                                    url.searchParams.set(key, source.searchParams.get(key));
+                                }
+                            });
+                        }
+                    } else {
+                        url.searchParams.delete('tab');
+                        url.searchParams.delete('report_id');
+                        url.searchParams.delete('period_id');
+                    }
+
+                    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+                },
+                normalizePath(path) {
+                    const normalized = String(path || '/').replace(/\/+$/, '');
+
+                    return normalized || '/';
+                },
+                async loadInventory(url, syncParentUrl = true) {
+                    if (! url || this.inventoryLoading) {
+                        return;
+                    }
+
+                    const source = new URL(url, window.location.origin);
+                    this.inventoryUrl = source.toString();
+                    this.inventoryLoading = true;
+                    this.inventoryError = '';
+
+                    try {
+                        const response = await window.fetch(source.toString(), {
+                            credentials: 'same-origin',
+                            headers: {
+                                'Accept': 'text/html',
+                                'X-Requested-With': 'XMLHttpRequest',
+                            },
+                        });
+
+                        if (! response.ok) {
+                            throw new Error(`Inventory report request failed with status ${response.status}.`);
+                        }
+
+                        const documentHtml = await response.text();
+                        const parsed = new DOMParser().parseFromString(documentHtml, 'text/html');
+                        const report = parsed.querySelector('[data-inventory-report-content]');
+
+                        if (! report) {
+                            throw new Error('The inventory report content was not found.');
+                        }
+
+                        this.inventoryHtml = report.outerHTML;
+                        this.inventoryLoaded = true;
+
+                        if (syncParentUrl) {
+                            this.syncModuleUrl('inventory', source.toString());
+                        }
+                    } catch (error) {
+                        this.inventoryError = error?.message || 'The inventory report could not be loaded.';
+                    } finally {
+                        this.inventoryLoading = false;
+                    }
+                },
+                handleInventoryClick(event) {
+                    const link = event.target.closest('a[href]');
+
+                    if (! link || link.target === '_blank' || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+                        return;
+                    }
+
+                    const url = new URL(link.href, window.location.origin);
+
+                    if (url.origin !== window.location.origin) {
+                        return;
+                    }
+
+                    const path = this.normalizePath(url.pathname);
+
+                    if (path === this.normalizePath(config.litersMovementPath)) {
+                        event.preventDefault();
+                        this.setModuleTab('liters');
+                        return;
+                    }
+
+                    if (path === this.normalizePath(config.inventoryReportPath)) {
+                        event.preventDefault();
+                        this.loadInventory(url.toString());
+                    }
+                },
+                handleInventorySubmit(event) {
+                    const form = event.target;
+
+                    if (! form || String(form.method || 'get').toLowerCase() !== 'get') {
+                        return;
+                    }
+
+                    const url = new URL(form.action || this.inventoryUrl, window.location.origin);
+
+                    if (this.normalizePath(url.pathname) !== this.normalizePath(config.inventoryReportPath)) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    url.search = '';
+                    new FormData(form).forEach((value, key) => url.searchParams.append(key, String(value)));
+                    this.loadInventory(url.toString());
                 },
                 setTableTab(tab) {
                     if (! this.tableTabs.includes(tab)) {

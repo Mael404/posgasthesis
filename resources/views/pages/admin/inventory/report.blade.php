@@ -31,7 +31,7 @@
 
     <x-common.page-breadcrumb pageTitle="Liters Movement & Inventory" />
 
-    <div class="space-y-6">
+    <div class="space-y-6" data-inventory-report-content>
         @if (session('success'))
             <div class="rounded-lg border border-success-200 bg-success-50 p-4 text-theme-sm text-success-800 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300">
                 {{ session('success') }}
@@ -65,9 +65,6 @@
                             </span>
                         @endif
                     </div>
-                    <p class="mt-2 max-w-3xl text-theme-sm leading-6 text-gray-500 dark:text-gray-400">
-                        Previous ending stock + received deliveries = current stock / limit. Current stock - included Liters Movement dispensing = new ending stock.
-                    </p>
                     @if ($trackingPeriod)
                         <p class="mt-2 text-theme-sm font-medium text-gray-700 dark:text-gray-300">
                             {{ $trackingPeriod['period_code'] ?: 'Liters Movement #' . $trackingPeriod['id'] }}
@@ -80,7 +77,6 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3 print:hidden">
-                    <a href="{{ route('admin.liters-movement.index') }}" class="{{ $secondary }}">Liters Movement</a>
                     @if ($viewingSavedReport)
                         <a href="{{ route('inventory.reports.index') }}" class="{{ $secondary }}">Current preview</a>
                     @endif
@@ -119,9 +115,6 @@
                     <div>
                         <div class="px-5 py-4 md:px-6">
                             <h2 class="font-semibold text-gray-800 dark:text-white/90">Initial Ending Stock - Last Report</h2>
-                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">
-                                Quantity comes from the tank volume captured when this Liters Movement period started. Price per liter carries over from Current Stock in the last generated period; if none is available yet, enter the starting price. Cost is Quantity &times; Price.
-                            </p>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full min-w-[680px]">
@@ -158,16 +151,11 @@
                                 </tfoot>
                             </table>
                         </div>
-                        <div class="flex flex-col gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 md:flex-row md:items-center md:justify-between md:px-6">
-                            <p class="text-theme-sm text-gray-500 dark:text-gray-400">Save this once before recording the first shifts. Later reports carry their opening quantity and cost automatically.</p>
+                        <div class="flex justify-end border-t border-gray-100 px-5 py-4 dark:border-gray-800 md:px-6">
                             <button type="submit" class="{{ $primary }}" {{ $setupIssues ? 'disabled' : '' }}>Save Initial Stock</button>
                         </div>
                     </div>
                 </form>
-            @elseif ($latestReport)
-                <div class="{{ $panel }} px-5 py-4 text-theme-sm text-gray-500 dark:text-gray-400 md:px-6">
-                    Opening stock is carried automatically from {{ $latestReport->report_code }}.
-                </div>
             @endif
         @endunless
 
@@ -186,7 +174,6 @@
             <section class="{{ $panel }} overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <h2 class="font-semibold text-gray-800 dark:text-white/90">Liters Movement Sales Summary</h2>
-                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Matches the workbook Sales summary. Average price per liter = net sales &divide; dispensed liters.</p>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[900px]">
@@ -215,9 +202,6 @@
             <section class="{{ $panel }} overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <h2 class="font-semibold text-gray-800 dark:text-white/90">Tank Progress</h2>
-                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Pending, Verified, and Approved readings are included. Rejected and voided readings are excluded. Ending stock = current stock - dispensed.
-                    </p>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[680px]">
@@ -255,7 +239,6 @@
                 <section class="{{ $panel }} overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                         <h2 class="font-semibold text-gray-800 dark:text-white/90">Ending Stock - Last Report</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">The previous finalized ending stock carried into this period.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[620px]">
@@ -282,7 +265,6 @@
                 <section class="{{ $panel }} overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                         <h2 class="font-semibold text-gray-800 dark:text-white/90">Placed Orders / Deliveries</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Delivery logs whose effective date and time fall inside this movement period.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[800px]">
@@ -315,9 +297,6 @@
             <section class="{{ $panel }} overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <h2 class="font-semibold text-gray-800 dark:text-white/90">Current Stock</h2>
-                    <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Last report quantity and cost plus placed orders. Price is the periodic weighted-average inventory cost.
-                    </p>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[680px]">
@@ -345,7 +324,6 @@
                 <section class="{{ $panel }} overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                         <h2 class="font-semibold text-gray-800 dark:text-white/90">Price Guide</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Pump and bulk margins use the Current Stock price per liter.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[800px]">
@@ -371,7 +349,6 @@
                 <section class="{{ $panel }} overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                         <h2 class="font-semibold text-gray-800 dark:text-white/90">Ending Stock Value</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">The Tank Progress ending liters valued at the Current Stock cost per liter.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[640px]">
@@ -398,10 +375,7 @@
 
             <section class="{{ $panel }} overflow-hidden">
                 <div class="flex flex-col gap-2 border-b border-gray-100 px-5 py-4 dark:border-gray-800 md:flex-row md:items-end md:justify-between">
-                    <div>
-                        <h2 class="font-semibold text-gray-800 dark:text-white/90">Fuel Profit</h2>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Net fuel sales less the weighted inventory cost of dispensed liters, before operating expenses.</p>
-                    </div>
+                    <h2 class="font-semibold text-gray-800 dark:text-white/90">Fuel Profit</h2>
                     <p class="text-theme-sm font-medium text-gray-700 dark:text-gray-300">
                         {{ \Carbon\Carbon::parse($calculation['period_start'])->format('M d, Y') }} to {{ \Carbon\Carbon::parse($calculation['period_end'])->format('M d, Y') }}
                     </p>
@@ -436,21 +410,16 @@
                     @if ($linkedReport)
                         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                             <div>
-                                <h2 class="font-semibold text-gray-800 dark:text-white/90">Period already finalized</h2>
-                                <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">This movement period is saved as {{ $linkedReport->report_code }}.</p>
+                                <h2 class="font-semibold text-gray-800 dark:text-white/90">Period already finalized: {{ $linkedReport->report_code }}</h2>
                             </div>
                             <a href="{{ route('inventory.reports.index', ['report_id' => $linkedReport->id]) }}" class="{{ $secondary }}">Open finalized report</a>
                         </div>
                     @elseif ($periodStatus === 'active')
-                        <div>
-                            <h2 class="font-semibold text-gray-800 dark:text-white/90">Live preview</h2>
-                            <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Generate this period in Liters Movement when the shift range is complete. It can then be finalized here as an inventory snapshot.</p>
-                        </div>
+                        <h2 class="font-semibold text-gray-800 dark:text-white/90">Live preview</h2>
                     @else
                         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div>
                                 <h2 class="font-semibold text-gray-800 dark:text-white/90">Finalize this inventory report</h2>
-                                <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">The ending liters and weighted cost shown above become the opening stock of the next report.</p>
                             </div>
                             <form method="POST" action="{{ route('inventory.reports.store') }}" onsubmit="return confirm('Finalize this inventory report and carry its ending stock into the next report?')">
                                 @csrf
@@ -464,7 +433,6 @@
         @elseif (! $viewingSavedReport && collect($periods)->isEmpty())
             <section class="{{ $panel }} px-5 py-10 text-center md:px-6">
                 <h2 class="font-semibold text-gray-800 dark:text-white/90">No Liters Movement period found</h2>
-                <p class="mt-2 text-theme-sm text-gray-500 dark:text-gray-400">Start a Liters Movement period to preview tank progress and build the inventory report.</p>
             </section>
         @endif
 
@@ -478,7 +446,6 @@
                         <a href="{{ route('inventory.reports.index', ['report_id' => $report->id]) }}" class="flex flex-col gap-2 px-5 py-4 transition hover:bg-gray-50 dark:hover:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <p class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">{{ $report->report_code }}</p>
-                                <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Periodic weighted average - Finalized</p>
                             </div>
                             <span class="text-theme-sm text-gray-600 dark:text-gray-300">{{ \Carbon\Carbon::parse($report->period_start)->format('M d, Y') }} to {{ \Carbon\Carbon::parse($report->period_end)->format('M d, Y') }}</span>
                         </a>

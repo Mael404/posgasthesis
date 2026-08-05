@@ -147,7 +147,10 @@ class AdminInventoryReportController extends Controller
         }
 
         return redirect()
-            ->route('inventory.reports.index', ['period_id' => (int) $validated['period_id']])
+            ->route('admin.liters-movement.index', [
+                'tab' => 'inventory',
+                'period_id' => (int) $validated['period_id'],
+            ])
             ->with('success', 'Initial ending stock saved. Quantities came from the tank opening volumes and costs were calculated from the prices entered.');
     }
 
@@ -190,7 +193,10 @@ class AdminInventoryReportController extends Controller
         }
 
         return redirect()
-            ->route('inventory.reports.index', ['report_id' => $saved['id']])
+            ->route('admin.liters-movement.index', [
+                'tab' => 'inventory',
+                'report_id' => $saved['id'],
+            ])
             ->with('success', "Inventory report {$saved['report_code']} finalized. Its ending stock will be the next report's opening stock.");
     }
 

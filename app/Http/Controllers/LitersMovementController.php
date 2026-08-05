@@ -30,7 +30,7 @@ class LitersMovementController extends Controller
         $state = $tracking->state(null, 25, 'tracking_page', true);
 
         return view('pages.admin.litersmovement', [
-            'title' => 'Liters Movement',
+            'title' => 'Liters Movement & Inventory',
             'period' => $state['period'],
             'summary' => $state['summary'],
             'transactions' => $state['transactions'],
