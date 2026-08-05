@@ -851,7 +851,7 @@
                                                     </select>
                                                 </label>
 
-                                                <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                                                <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
                                                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                                         <span>Volume</span>
                                                         <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
@@ -861,10 +861,18 @@
                                                     </label>
 
                                                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                                                        <span>Price / L</span>
+                                                        <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
+                                                            <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
+                                                            <input type="number" x-model="row.price_per_liter" :name="'deliveries[' + index + '][price_per_liter]'" min="0.0001" step="0.0001" class="h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00" required>
+                                                        </div>
+                                                    </label>
+
+                                                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                                                         <span>Total Cost</span>
                                                         <div class="mt-1.5 flex rounded-lg shadow-theme-xs">
                                                             <span class="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 px-3 text-theme-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">&#8369;</span>
-                                                            <input type="number" x-model="row.cost" :name="'deliveries[' + index + '][cost]'" min="1" step="0.01" class="h-11 w-full rounded-r-lg border border-gray-300 bg-transparent px-4 py-2.5 text-theme-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" placeholder="0.00" required>
+                                                            <input type="text" :value="formatDeliveryTotal(row)" class="h-11 w-full cursor-not-allowed rounded-r-lg border border-gray-300 bg-gray-100 px-4 py-2.5 text-right text-theme-sm font-semibold tabular-nums text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" readonly aria-label="Calculated total delivery cost">
                                                         </div>
                                                     </label>
                                                 </div>
@@ -1131,8 +1139,20 @@
                         key: Date.now().toString() + '-' + Math.random().toString(16).slice(2),
                         tank_id: availableTank ? availableTank.id : (this.tanks[0]?.id || ''),
                         liters: '',
-                        cost: ''
+                        price_per_liter: ''
                     };
+                },
+                deliveryTotal(row) {
+                    const liters = Math.max(0, Number(row?.liters || 0));
+                    const pricePerLiter = Math.max(0, Number(row?.price_per_liter || 0));
+
+                    return Math.round((liters * pricePerLiter + Number.EPSILON) * 100) / 100;
+                },
+                formatDeliveryTotal(row) {
+                    return this.deliveryTotal(row).toLocaleString('en-PH', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
                 },
                 addDeliveryRow() {
                     if (this.deliveryRows.length >= this.maxDeliveryRows) {
@@ -1370,12 +1390,15 @@
                     const totalLiters = this.deliveryRows.reduce(function(total, row) {
                         return total + Number(row.liters || 0);
                     }, 0);
+                    const totalCost = this.deliveryRows.reduce((total, row) => {
+                        return total + this.deliveryTotal(row);
+                    }, 0);
                     const entryLabel = this.deliveryRows.length === 1 ? 'delivery entry' : 'delivery entries';
 
                     const confirmed = await this.askConfirmation({
                         title: 'Save Delivery',
                         message: 'Save ' + this.deliveryRows.length + ' ' + entryLabel + ' totaling ' + totalLiters.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' liters under one delivery code?',
-                        details: 'This saves a normal admin delivery log and updates the selected tank volume.',
+                        details: 'Calculated total cost: ₱' + totalCost.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '. This updates the selected tank volume.',
                         confirmText: 'Save Delivery',
                         tone: 'success'
                     });

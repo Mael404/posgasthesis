@@ -109,10 +109,10 @@ class InventoryController extends Controller
             'deliveries' => ['nullable', 'array', 'min:1', 'max:' . self::MAX_BULK_DELIVERIES],
             'deliveries.*.tank_id' => ['required_with:deliveries', 'integer', 'exists:tanks,id', 'distinct'],
             'deliveries.*.liters' => ['required_with:deliveries', 'numeric', 'min:1'],
-            'deliveries.*.cost' => ['required_with:deliveries', 'numeric', 'min:1'],
+            'deliveries.*.price_per_liter' => ['required_with:deliveries', 'numeric', 'gt:0'],
             'tank_id' => ['required_without:deliveries', 'integer', 'exists:tanks,id'],
             'liters' => ['required_without:deliveries', 'numeric', 'min:1'],
-            'cost' => ['required_without:deliveries', 'numeric', 'min:1'],
+            'price_per_liter' => ['required_without:deliveries', 'numeric', 'gt:0'],
         ], [
             'deliveries.max' => 'A bulk delivery can include up to ' . self::MAX_BULK_DELIVERIES . ' tank entries only.',
             'deliveries.*.tank_id.distinct' => 'Each bulk delivery row must use a different tank.',
@@ -625,15 +625,21 @@ class InventoryController extends Controller
         $rows = $validated['deliveries'] ?? [[
             'tank_id' => $validated['tank_id'] ?? null,
             'liters' => $validated['liters'] ?? null,
-            'cost' => $validated['cost'] ?? null,
+            'price_per_liter' => $validated['price_per_liter'] ?? null,
         ]];
 
         return collect($rows)
-            ->map(fn ($row) => [
-                'tank_id' => (int) ($row['tank_id'] ?? 0),
-                'liters' => (float) ($row['liters'] ?? 0),
-                'cost' => (float) ($row['cost'] ?? 0),
-            ])
+            ->map(function ($row): array {
+                $liters = (float) ($row['liters'] ?? 0);
+                $pricePerLiter = (float) ($row['price_per_liter'] ?? 0);
+
+                return [
+                    'tank_id' => (int) ($row['tank_id'] ?? 0),
+                    'liters' => $liters,
+                    'price_per_liter' => $pricePerLiter,
+                    'total_cost' => round($liters * $pricePerLiter, 2),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -696,7 +702,7 @@ class InventoryController extends Controller
                             'tank_id' => $delivery['tank_id'],
                             'supplier_id' => $supplierId,
                             'liters_delivered' => $liters,
-                            'total_cost' => (float) $delivery['cost'],
+                            'total_cost' => (float) $delivery['total_cost'],
                             'delivery_date' => $parsedDeliveryDate,
                             'created_at' => $createdAt,
                         ]);
