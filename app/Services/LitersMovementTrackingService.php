@@ -676,6 +676,13 @@ class LitersMovementTrackingService
                 throw new \RuntimeException('Deduction amount cannot exceed the remaining pump sales (₱' . number_format($availableAmount, 2) . ').');
             }
 
+            // Exhausting a pump's remaining liters must also exhaust its remaining
+            // meter sales. This prevents a stale Net Sales balance when the saved
+            // fuel price differs from the submitted meter-sales-per-liter ratio.
+            if (abs($liters - $availableLiters) < 0.005) {
+                $amount = $availableAmount;
+            }
+
             $now = now();
             $adjustmentId = DB::table('liters_movement_adjustments')->insertGetId([
                 'liters_tracking_period_id' => (int) $period->id,
@@ -1696,7 +1703,12 @@ class LitersMovementTrackingService
             }
 
             $rawAmount = $this->rawPumpAmount($reading, $pumpId);
-            $deductedAmount = $this->money(min($rawAmount, $this->activeAdjustmentAmountForPump($activeAdjustments, $pumpId)));
+            $adjustmentAmount = $this->activeAdjustmentAmountForPump($activeAdjustments, $pumpId);
+            $deductedAmount = $this->money(
+                $rawLiters > 0 && $deductedLiters >= $rawLiters - 0.005
+                    ? $rawAmount
+                    : min($rawAmount, $adjustmentAmount)
+            );
             $amount = $this->money(max(0, $rawAmount - $deductedAmount));
             $configuredPrice = $this->priceForFuel($fuelType);
             $price = $configuredPrice > 0
@@ -1779,7 +1791,7 @@ class LitersMovementTrackingService
         ) {
             return $this->cacheReadingNetSales(
                 $cacheKey,
-                $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments)
+                $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments, $reading)
             );
         }
 
@@ -1803,7 +1815,7 @@ class LitersMovementTrackingService
                 } catch (\Throwable) {
                     return $this->cacheReadingNetSales(
                         $cacheKey,
-                        $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments)
+                        $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments, $reading)
                     );
                 }
             }
@@ -1851,23 +1863,37 @@ class LitersMovementTrackingService
             $pumpRows[$pumpId] = $row;
         }
 
-        $pumpRows = $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments);
+        $pumpRows = $this->applyAdjustmentAmountsToPumpRows($pumpRows, $activeAdjustments, $reading);
         ksort($pumpRows);
 
         return $this->cacheReadingNetSales($cacheKey, $pumpRows);
     }
 
-    private function applyAdjustmentAmountsToPumpRows(array $pumpRows, array $activeAdjustments): array
+    private function applyAdjustmentAmountsToPumpRows(
+        array $pumpRows,
+        array $activeAdjustments,
+        ?object $reading = null
+    ): array
     {
         foreach ($pumpRows as $pumpId => $row) {
             $deductedAmount = $this->activeAdjustmentAmountForPump($activeAdjustments, (int) $pumpId);
+            $rawLiters = $reading ? $this->rawPumpLiters($reading, (int) $pumpId) : 0.0;
+            $deductedLiters = $this->activeAdjustmentLitersForPump($activeAdjustments, (int) $pumpId);
+
+            if ($rawLiters > 0 && $deductedLiters >= $rawLiters - 0.005) {
+                $deductedAmount = max($deductedAmount, (float) ($row['total_sales'] ?? 0));
+            }
 
             if ($deductedAmount <= 0) {
                 continue;
             }
 
             $row['total_sales'] = $this->money(max(0, (float) ($row['total_sales'] ?? 0) - $deductedAmount));
-            $row['net_sales'] = $this->money($row['total_sales'] - (float) ($row['discounts'] ?? 0));
+            $row['discounts'] = $this->money(min(
+                $row['total_sales'],
+                max(0, (float) ($row['discounts'] ?? 0))
+            ));
+            $row['net_sales'] = $this->money(max(0, $row['total_sales'] - $row['discounts']));
             $pumpRows[$pumpId] = $row;
         }
 
@@ -2139,6 +2165,7 @@ class LitersMovementTrackingService
                         'total_sales' => 0.0,
                         'discounts' => 0.0,
                         'net_sales' => 0.0,
+                        'average_selling_price' => 0.0,
                         'remaining_liters' => $limit !== null ? (float) $limit : 0.0,
                         'over_liters' => 0.0,
                         'percent' => 0.0,
@@ -2181,6 +2208,9 @@ class LitersMovementTrackingService
                 $tank['total_sales'] = $totalSales;
                 $tank['discounts'] = $discounts;
                 $tank['net_sales'] = $netSales;
+                $tank['average_selling_price'] = $liters > 0
+                    ? round($netSales / $liters, 6)
+                    : 0.0;
                 $tank['price_per_liter'] = $this->money($tank['price_per_liter'] ?? 0);
                 $tank['limit'] = $limitValue;
                 $tank['has_limit'] = $hasLimit;
@@ -2221,6 +2251,7 @@ class LitersMovementTrackingService
             'total_sales' => 0.0,
             'discounts' => 0.0,
             'net_sales' => 0.0,
+            'average_selling_price' => 0.0,
             'remaining_liters' => 0.0,
             'over_liters' => 0.0,
             'percent' => 0.0,

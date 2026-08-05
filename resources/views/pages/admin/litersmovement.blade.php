@@ -1067,6 +1067,8 @@
                             $tankGrossSales = (float) ($tank['total_sales'] ?? $entries->sum(fn ($entry) => (float) ($entry['total_sales'] ?? $entry['amount'] ?? 0)));
                             $tankDiscounts = (float) ($tank['discounts'] ?? $entries->sum(fn ($entry) => (float) ($entry['discounts'] ?? 0)));
                             $tankNetSales = (float) ($tank['net_sales'] ?? $entries->sum(fn ($entry) => (float) ($entry['net_sales'] ?? 0)));
+                            $tankLiters = (float) ($tank['liters'] ?? 0);
+                            $tankAverageSellingPrice = (float) ($tank['average_selling_price'] ?? ($tankLiters > 0 ? $tankNetSales / $tankLiters : 0));
                         @endphp
                         <article class="{{ $cardClass }} flex h-[520px] flex-col overflow-hidden p-0">
                             <div class="px-4 py-3 {{ $style['header'] }}">
@@ -1084,11 +1086,11 @@
                             <div class="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                                 <div>
                                     <p class="{{ $labelClass }}">Liters</p>
-                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((float) ($tank['liters'] ?? 0), 2) }} L</p>
+                                    <p class="mt-1 text-theme-sm font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format($tankLiters, 2) }} L</p>
                                 </div>
                                 <div>
-                                    <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
-                                    <p class="mt-1 text-theme-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format($tankNetSales, 2) }}</p>
+                                    <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Avg Selling Price</p>
+                                    <p class="mt-1 text-theme-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format($tankAverageSellingPrice, 2) }}</p>
                                 </div>
                                 <div>
                                     <p class="{{ $labelClass }}">Sales</p>
@@ -1097,6 +1099,12 @@
                                 <div>
                                     <p class="{{ $labelClass }}">Discount</p>
                                     <p class="mt-1 text-theme-sm font-semibold tabular-nums text-error-600 dark:text-error-400">-&#8369;{{ number_format($tankDiscounts, 2) }}</p>
+                                </div>
+                                <div class="col-span-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <p class="{{ $labelClass }} text-brand-600 dark:text-brand-400">Net Sales</p>
+                                        <p class="text-theme-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">&#8369;{{ number_format($tankNetSales, 2) }}</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1873,8 +1881,8 @@
                             <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(selectedPumpAvailableAmount())"></span></span>
                         </div>
                         <div class="mt-2 flex justify-between gap-4">
-                            <span class="text-gray-500 dark:text-gray-400">Pump price</span>
-                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(selectedPumpPrice())"></span> / L</span>
+                            <span class="text-gray-500 dark:text-gray-400">Avg meter sales price</span>
+                            <span class="font-semibold tabular-nums text-gray-800 dark:text-white/90">&#8369;<span x-text="formatHistoryNumber(selectedPumpAverageSalesPrice())"></span> / L</span>
                         </div>
                     </div>
 
@@ -2669,16 +2677,30 @@
                 selectedPumpPrice() {
                     return Number(this.selectedPump()?.price_per_liter || 0);
                 },
+                selectedPumpAverageSalesPrice() {
+                    const liters = this.selectedPumpAvailable();
+                    const amount = this.selectedPumpAvailableAmount();
+
+                    return liters > 0 && amount > 0
+                        ? amount / liters
+                        : this.selectedPumpPrice();
+                },
                 syncDeductionAmount(force = false) {
                     if (this.deduction.amountManual && ! force) {
                         return;
                     }
 
                     const liters = Number(this.deduction.liters || 0);
-                    const price = this.selectedPumpPrice();
+                    const availableLiters = this.selectedPumpAvailable();
+                    const availableAmount = this.selectedPumpAvailableAmount();
+                    const price = this.selectedPumpAverageSalesPrice();
 
                     this.deduction.amount = liters > 0 && price > 0
-                        ? this.roundCurrency(Math.min(liters * price, this.selectedPumpAvailableAmount()))
+                        ? this.roundCurrency(
+                            Math.abs(liters - availableLiters) < 0.005
+                                ? availableAmount
+                                : Math.min(liters * price, availableAmount)
+                        )
                         : '';
                 },
                 roundCurrency(value) {

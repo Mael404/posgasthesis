@@ -161,6 +161,82 @@ test('active liters movement deductions reduce report liters and revenue', funct
         ->and($premium['source_summary']['shift_readings'][0]['adjustment_ids'])->toBe([1]);
 });
 
+test('fuel profit clears net sales for a fully deducted pump and restores it when the deduction is voided', function () {
+    DB::table('tanks')->insert([
+        'id' => 1,
+        'name' => 'Premium Tank',
+        'fuel_type' => 'Premium',
+        'current_volume' => 100,
+        'connected_pumps' => 'Pump 1, Pump 3',
+    ]);
+    DB::table('liters_tracking_periods')->insert([
+        'id' => 7,
+        'period_code' => 'LTM-NET-SALES-VOID',
+        'liters_limit' => 100,
+        'tank_limits' => json_encode(['tank:1' => 100]),
+        'status' => 'Generated',
+        'started_at' => '2026-07-15 08:00:00',
+        'ended_at' => '2026-07-16 08:00:00',
+    ]);
+
+    $reading = shiftReadingRow(40, '2026-07-15', 20, 1500);
+    $reading['liters_tracking_period_id'] = 7;
+    $reading['user_id'] = 10;
+    DB::table('shift_readings')->insert($reading);
+    DB::table('liters_movement_period_readings')->insert([
+        'liters_tracking_period_id' => 7,
+        'shift_reading_id' => 40,
+        'inclusion_status' => 'included',
+        'removed_at' => null,
+    ]);
+    DB::table('sales')->insert([
+        'pump_id' => 1,
+        'user_id' => 10,
+        'locked_by_shift_reading_id' => 40,
+        'discount' => 40,
+        'manual_discount' => 10,
+        'payment_type' => 'Walkin',
+        'customer_payment_voided_at' => null,
+        'created_at' => '2026-07-15 12:00:00',
+    ]);
+    $adjustmentId = DB::table('liters_movement_adjustments')->insertGetId([
+        'shift_reading_id' => 40,
+        'pump_number' => 1,
+        'liters' => 20,
+        'amount' => 1400,
+        'voided_at' => null,
+    ]);
+
+    $service = app(FuelInventoryReportService::class);
+    $deducted = collect($service->calculate(
+        '2026-07-15',
+        '2026-07-16',
+        ['Premium' => ['liters' => 100, 'unit_cost' => 60]],
+        7
+    )['lines'])->firstWhere('fuel_type', 'Premium');
+
+    expect($deducted['dispensed_liters'])->toBe(0.0)
+        ->and($deducted['sales_revenue'])->toBe(0.0)
+        ->and($deducted['average_selling_price'])->toBe(0.0)
+        ->and($deducted['gross_profit'])->toBe(0.0);
+
+    DB::table('liters_movement_adjustments')->where('id', $adjustmentId)->update([
+        'voided_at' => '2026-07-15 13:00:00',
+    ]);
+
+    $restored = collect($service->calculate(
+        '2026-07-15',
+        '2026-07-16',
+        ['Premium' => ['liters' => 100, 'unit_cost' => 60]],
+        7
+    )['lines'])->firstWhere('fuel_type', 'Premium');
+
+    expect($restored['dispensed_liters'])->toBe(20.0)
+        ->and($restored['sales_revenue'])->toBe(1450.0)
+        ->and($restored['average_selling_price'])->toBe(72.5)
+        ->and($restored['gross_profit'])->toBe(250.0);
+});
+
 test('current stock and fuel profit use one periodic weighted average cost', function () {
     DB::table('tanks')->insert([
         'id' => 1,

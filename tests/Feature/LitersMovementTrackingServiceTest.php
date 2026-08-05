@@ -258,6 +258,7 @@ test('shared liters movement totals pending and verified shift reading pump delt
 test('net sales uses submitted pump totals while discounts stay scoped to eligible readings', function () {
     $state = app(LitersMovementTrackingService::class)->state(null, 20, 'page', true);
     $pumpSales = collect($state['summary']['pump_net_sales'])->keyBy('pump_id');
+    $diesel = collect($state['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
 
     expect($pumpSales[5]['total_sales'])->toBe(15000.0)
         ->and($pumpSales[5]['discounts'])->toBe(155.0)
@@ -269,7 +270,8 @@ test('net sales uses submitted pump totals while discounts stay scoped to eligib
         ->and($pumpSales[6]['transaction_count'])->toBe(0)
         ->and($state['summary']['total_sales'])->toBe(30000.0)
         ->and($state['summary']['total_discounts'])->toBe(155.0)
-        ->and($state['summary']['total_net_sales'])->toBe(29845.0);
+        ->and($state['summary']['total_net_sales'])->toBe(29845.0)
+        ->and($diesel['average_selling_price'])->toBe(59.69);
 });
 
 test('pump deduction subtracts both liters and submitted sales amount', function () {
@@ -296,6 +298,34 @@ test('pump deduction subtracts both liters and submitted sales amount', function
         ->and($pumpSales[5]['net_sales'])->toBe(14245.0)
         ->and($state['summary']['total_sales'])->toBe(29400.0)
         ->and($state['summary']['total_net_sales'])->toBe(29245.0);
+});
+
+test('full pump deduction clears net sales and voiding it restores every total', function () {
+    DB::table('shift_readings')->where('id', 10)->update([
+        'pump5_sales_end' => 62500,
+    ]);
+
+    $service = app(LitersMovementTrackingService::class);
+    $adjustment = $service->deductPumpLiters(10, 5, 200, 12000, 1, 99, 'Void all Pump 5 movement');
+    $deducted = $service->state(null, 20, 'page', true);
+    $deductedPumpSales = collect($deducted['summary']['pump_net_sales'])->keyBy('pump_id');
+
+    expect((float) $adjustment->amount)->toBe(12500.0)
+        ->and($deductedPumpSales[5]['liters'])->toBe(50.0)
+        ->and($deductedPumpSales[5]['total_sales'])->toBe(3000.0)
+        ->and($deductedPumpSales[5]['discounts'])->toBe(35.0)
+        ->and($deductedPumpSales[5]['net_sales'])->toBe(2965.0)
+        ->and($deducted['summary']['total_net_sales'])->toBe(17965.0);
+
+    $service->voidDeduction((int) $adjustment->id, 1, 1, 'Restore deduction', null, 1);
+    $restored = $service->state(null, 20, 'page', true);
+    $restoredPumpSales = collect($restored['summary']['pump_net_sales'])->keyBy('pump_id');
+
+    expect($restoredPumpSales[5]['liters'])->toBe(250.0)
+        ->and($restoredPumpSales[5]['total_sales'])->toBe(15500.0)
+        ->and($restoredPumpSales[5]['discounts'])->toBe(155.0)
+        ->and($restoredPumpSales[5]['net_sales'])->toBe(15345.0)
+        ->and($restored['summary']['total_net_sales'])->toBe(30345.0);
 });
 
 test('a reached shared limit remains non blocking for the next shift reading submission', function () {
