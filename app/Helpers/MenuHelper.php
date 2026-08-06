@@ -250,6 +250,12 @@ class MenuHelper
                 'activePatterns' => ['/admin/printed-transactions', '/admin/printed-transactions/*'],
             ],
             [
+                'icon' => 'tables',
+                'name' => 'Official Receipts',
+                'path' => self::routePath('admin.official-receipts.index', '/admin/official-receipts'),
+                'activePatterns' => ['/admin/official-receipts', '/admin/official-receipts/*'],
+            ],
+            [
                 'icon' => 'chat',
                 'name' => 'Announcements',
                 'path' => self::routePath('admin.announcements.index', '/admin/announcements'),

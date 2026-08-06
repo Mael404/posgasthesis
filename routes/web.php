@@ -4,6 +4,7 @@ use App\Helpers\MenuHelper;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminInventoryReportController;
+use App\Http\Controllers\AdminOfficialReceiptController;
 use App\Http\Controllers\AdminPriceManagementController;
 use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\AdminStockInController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LitersMovementController;
 use App\Http\Controllers\PrintedTransactionController;
+use App\Http\Controllers\SalesInvoiceController;
 use App\Http\Controllers\ShiftReconciliationController;
 use App\Http\Controllers\StaffAnnouncementController;
 use App\Http\Controllers\StaffController;
@@ -115,6 +117,13 @@ Route::middleware('auth')->group(function () {
             Route::delete('/{batch}', [PrintedTransactionController::class, 'destroy'])->name('destroy');
         });
 
+        Route::prefix('admin/official-receipts')->name('admin.official-receipts.')->group(function () {
+            Route::get('/', [AdminOfficialReceiptController::class, 'index'])->name('index');
+            Route::post('/{receipt}/cancel', [AdminOfficialReceiptController::class, 'cancel'])
+                ->whereNumber('receipt')
+                ->name('cancel');
+        });
+
         Route::prefix('admin/announcements')->name('admin.announcements.')->group(function () {
             Route::get('/', [AnnouncementController::class, 'index'])->name('index');
             Route::post('/', [AnnouncementController::class, 'store'])->name('store');
@@ -213,6 +222,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/pump-station', [StaffPumpController::class, 'index'])->name('pump.index');
 
         Route::post('/pump-station/store', [StaffPumpController::class, 'storeSale'])->name('pump.store');
+
+        Route::post('/pump-station/sales-invoices', [SalesInvoiceController::class, 'store'])
+            ->name('sales-invoices.store');
 
         Route::post('/pump-station/{id}/update', [StaffPumpController::class, 'updateSale'])
             ->whereNumber('id')

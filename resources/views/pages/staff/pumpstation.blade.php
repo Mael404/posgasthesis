@@ -278,15 +278,18 @@
                 payment: @js(route('staff.pump.storePayment')),
                 bypass: @js(route('staff.pump.bypassPayment')),
                 voidPostedPayment: @js(route('staff.pump.voidPostedPayment')),
+                salesInvoiceStore: @js(route('staff.sales-invoices.store')),
                 printSelected: @js(route('staff.pump.printSelected')),
                 unpaidInvoicesBase: @js(url('/staff/pump-station/customers'))
             },
+            today: @js(now()->format('Y-m-d')),
+            nextSalesInvoiceNumber: @js($nextSalesInvoiceNumber ?? 1),
             csrfToken: @js(csrf_token())
         })"
         x-init="init()"
         x-effect="
-            document.body.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
-            document.documentElement.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
+            document.body.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || salesInvoiceModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
+            document.documentElement.classList.toggle('overflow-hidden', saleModalOpen || paymentModalOpen || salesInvoiceModalOpen || confirmation.open || messageDialog.open || passwordDialog.open);
         "
         class="space-y-6">
 
@@ -330,6 +333,12 @@
                     <p class="mt-1 {{ $captionClass }}">Open a pump to log a credit or walk-in sale.</p>
                 </div>
                 <div class="flex flex-col gap-2 sm:flex-row lg:shrink-0">
+                    <button type="button" x-on:click="openSalesInvoiceModal" class="{{ $secondaryButtonClass }}">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M7.75 3.5h8.5A1.75 1.75 0 0 1 18 5.25v13.5a1.75 1.75 0 0 1-1.75 1.75h-8.5A1.75 1.75 0 0 1 6 18.75V5.25A1.75 1.75 0 0 1 7.75 3.5ZM9 8h6M9 11.5h6M9 15h3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        Sales Invoice
+                    </button>
                     <a href="{{ route('staff.printed-transactions.index') }}" class="{{ $secondaryButtonClass }}">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M7 8V4.75C7 4.336 7.336 4 7.75 4h8.5c.414 0 .75.336.75.75V8M7 17.5H5.75A2.75 2.75 0 0 1 3 14.75v-3A2.75 2.75 0 0 1 5.75 9h12.5A2.75 2.75 0 0 1 21 11.75v3a2.75 2.75 0 0 1-2.75 2.75H17M7.75 14h8.5c.414 0 .75.336.75.75v4.5a.75.75 0 0 1-.75.75h-8.5a.75.75 0 0 1-.75-.75v-4.5c0-.414.336-.75.75-.75Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -611,6 +620,8 @@
                 </div>
             @endif
         </section>
+
+        @include('pages.staff.partials.sales-invoice-modal')
 
         <template x-teleport="body">
             <div x-show="saleModalOpen" x-cloak class="fixed inset-0 z-[100010] grid place-items-center overflow-hidden bg-gray-950/75 p-1.5 backdrop-blur-md sm:p-3">
@@ -1363,6 +1374,7 @@
                 customers: config.customers || [],
                 prices: config.prices || {},
                 editableSales: config.editableSales || {},
+                nextSalesInvoiceNumber: Number(config.nextSalesInvoiceNumber || 1),
                 customersById: {},
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
@@ -1394,13 +1406,16 @@
                 selectedCustomerLabel: '',
                 saleModalOpen: false,
                 paymentModalOpen: false,
+                salesInvoiceModalOpen: false,
                 savingSale: false,
                 savingPayment: false,
+                savingSalesInvoice: false,
                 loadingInvoices: false,
                 invoices: [],
                 selectedInvoice: null,
                 sale: {},
                 payment: {},
+                salesInvoice: {},
                 saleCreditCustomerSearch: '',
                 saleCreditCustomerDropdownOpen: false,
                 saleWalkinCustomerSearch: '',
@@ -1417,6 +1432,7 @@
                     this.customersById = Object.fromEntries(this.customers.map(customer => [String(customer.id), customer]));
                     this.resetSale();
                     this.resetPayment();
+                    this.resetSalesInvoice();
                     this.restoreNotice();
                     this.$watch('sale.customer_id', () => this.touchSale());
                     this.$watch('sale.walkin_customer_id', () => this.touchSale());
@@ -1486,6 +1502,195 @@
                             customer.owner_name,
                         ].some((value) => this.normalizeCustomerSearch(value) === normalizedQuery);
                     }) || null;
+                },
+                blankSalesInvoiceItem() {
+                    return {
+                        item_type: '',
+                        other_description: '',
+                        quantity: '',
+                        price: '',
+                        amount: ''
+                    };
+                },
+                resetSalesInvoice() {
+                    this.salesInvoice = {
+                        invoice_date: config.today || new Date().toISOString().slice(0, 10),
+                        sold_to: '',
+                        tin: '',
+                        terms: '',
+                        address: '',
+                        discount_id_no: '',
+                        signature: '',
+                        si_number: String(this.nextSalesInvoiceNumber || 1),
+                        authorized_representative: '',
+                        vat_exempt_sales: '',
+                        zero_rated_sales: '',
+                        sc_pwd_discount: '',
+                        withholding_tax: '',
+                        items: Array.from({ length: 7 }, () => this.blankSalesInvoiceItem())
+                    };
+                    this.savingSalesInvoice = false;
+                },
+                openSalesInvoiceModal() {
+                    this.resetSalesInvoice();
+                    this.salesInvoiceModalOpen = true;
+                },
+                closeSalesInvoiceModal() {
+                    if (this.savingSalesInvoice) {
+                        return;
+                    }
+
+                    this.salesInvoiceModalOpen = false;
+                    this.resetSalesInvoice();
+                },
+                invoiceNumber(value, precision = 2) {
+                    const number = Number(value || 0);
+
+                    if (!Number.isFinite(number) || number < 0) {
+                        return 0;
+                    }
+
+                    const multiplier = 10 ** precision;
+
+                    return Math.round((number + Number.EPSILON) * multiplier) / multiplier;
+                },
+                invoiceTotalSales() {
+                    return this.invoiceNumber((this.salesInvoice.items || []).reduce((total, item) => {
+                        return total + this.invoiceNumber(item.amount);
+                    }, 0));
+                },
+                invoiceLessVat() {
+                    return this.invoiceNumber((this.invoiceTotalSales() / 1.12) * 0.12);
+                },
+                invoiceAmountNetOfVat() {
+                    return this.invoiceNumber(this.invoiceTotalSales() - this.invoiceLessVat());
+                },
+                invoiceVatableSales() {
+                    return this.invoiceAmountNetOfVat();
+                },
+                invoiceVatAmount() {
+                    return this.invoiceLessVat();
+                },
+                invoiceAddVat() {
+                    return this.invoiceLessVat();
+                },
+                invoiceTotalAmountDue() {
+                    return this.invoiceNumber(this.invoiceAmountNetOfVat() + this.invoiceAddVat());
+                },
+                invoiceMoney(value) {
+                    return this.invoiceNumber(value).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                },
+                invoiceItemHasInput(item) {
+                    return ['item_type', 'other_description', 'quantity', 'price', 'amount'].some((field) => {
+                        return item[field] !== null && item[field] !== undefined && String(item[field]).trim() !== '';
+                    });
+                },
+                fillSalesInvoiceDefaults() {
+                    const defaults = {
+                        sold_to: 'No Name Inputted',
+                        tin: 'No TIN Inputted',
+                        terms: 'No Terms Inputted',
+                        address: 'No Address Inputted',
+                        discount_id_no: 'No ID Number Inputted',
+                        signature: 'No Signature Inputted',
+                        authorized_representative: 'No Authorized Representative Inputted'
+                    };
+
+                    Object.entries(defaults).forEach(([field, fallback]) => {
+                        this.salesInvoice[field] = String(this.salesInvoice[field] || '').trim() || fallback;
+                    });
+
+                    this.salesInvoice.invoice_date = this.salesInvoice.invoice_date || config.today || new Date().toISOString().slice(0, 10);
+                    this.salesInvoice.sold_to = this.salesInvoice.sold_to.toUpperCase();
+                    this.salesInvoice.address = this.salesInvoice.address.toUpperCase();
+                    this.salesInvoice.authorized_representative = this.salesInvoice.authorized_representative.toUpperCase();
+
+                    this.salesInvoice.items.forEach((item) => {
+                        if (item.item_type === 'Others' && !String(item.other_description || '').trim()) {
+                            item.other_description = 'No Item Description Inputted';
+                        }
+                    });
+                },
+                salesInvoicePayload() {
+                    return {
+                        invoice_date: this.salesInvoice.invoice_date,
+                        sold_to: this.salesInvoice.sold_to,
+                        tin: this.salesInvoice.tin,
+                        terms: this.salesInvoice.terms,
+                        address: this.salesInvoice.address,
+                        discount_id_no: this.salesInvoice.discount_id_no,
+                        signature: this.salesInvoice.signature,
+                        authorized_representative: this.salesInvoice.authorized_representative,
+                        vat_exempt_sales: this.invoiceNumber(this.salesInvoice.vat_exempt_sales),
+                        zero_rated_sales: this.invoiceNumber(this.salesInvoice.zero_rated_sales),
+                        sc_pwd_discount: this.invoiceNumber(this.salesInvoice.sc_pwd_discount),
+                        withholding_tax: this.invoiceNumber(this.salesInvoice.withholding_tax),
+                        items: this.salesInvoice.items
+                            .filter((item) => this.invoiceItemHasInput(item))
+                            .map((item) => ({
+                                item_type: item.item_type || null,
+                                other_description: item.other_description || null,
+                                quantity: this.invoiceNumber(item.quantity, 3),
+                                price: this.invoiceNumber(item.price),
+                                amount: this.invoiceNumber(item.amount)
+                            }))
+                    };
+                },
+                async submitSalesInvoice(printAfterSave = false) {
+                    if (this.savingSalesInvoice) {
+                        return;
+                    }
+
+                    this.fillSalesInvoiceDefaults();
+                    this.savingSalesInvoice = true;
+
+                    try {
+                        const response = await fetch(config.routes.salesInvoiceStore, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': config.csrfToken
+                            },
+                            body: JSON.stringify(this.salesInvoicePayload())
+                        });
+                        let data = {};
+
+                        try {
+                            data = await response.json();
+                        } catch (error) {
+                            data = {};
+                        }
+
+                        if (!response.ok || !data.success) {
+                            const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
+                            this.showNotice('error', firstError || data.message || 'Unable to save the sales invoice.');
+                            return;
+                        }
+
+                        const assignedSiNumber = Number(data.invoice?.si_number || this.salesInvoice.si_number || 0);
+
+                        if (assignedSiNumber > 0) {
+                            this.salesInvoice.si_number = String(assignedSiNumber);
+                            this.nextSalesInvoiceNumber = assignedSiNumber + 1;
+                        }
+
+                        if (printAfterSave) {
+                            await new Promise(resolve => this.$nextTick(resolve));
+                            window.print();
+                        }
+
+                        this.salesInvoiceModalOpen = false;
+                        this.resetSalesInvoice();
+                        this.showToast(data.message || 'Sales invoice saved successfully.');
+                    } catch (error) {
+                        this.showNotice('error', 'An unexpected error occurred while saving the sales invoice.');
+                    } finally {
+                        this.savingSalesInvoice = false;
+                    }
                 },
                 resetSale() {
                     this.sale = {

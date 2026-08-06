@@ -59,6 +59,10 @@ class StaffPumpController extends Controller
                 ->get()
             : collect();
 
+        $nextSalesInvoiceNumber = $this->hasTable('sales_invoice_number_counters')
+            ? max(1, (int) DB::table('sales_invoice_number_counters')->where('id', 1)->value('last_number') + 1)
+            : 1;
+
         return view('pages.staff.pumpstation', [
             'title' => 'Pump Station',
             'prices' => $prices,
@@ -66,6 +70,7 @@ class StaffPumpController extends Controller
             'recentSales' => $recentSales,
             'tanks' => $tanks,
             'missingPumpTables' => $missingTables,
+            'nextSalesInvoiceNumber' => $nextSalesInvoiceNumber,
         ]);
     }
 
