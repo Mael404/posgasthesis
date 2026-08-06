@@ -7,7 +7,9 @@
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
+        $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
+        $smallButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-theme-xs font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.03]';
         $dangerButtonClass = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-error-200 bg-white px-3 py-2 text-theme-xs font-medium text-error-600 shadow-theme-xs transition hover:bg-error-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-error-500/30 dark:bg-gray-900 dark:text-error-400 dark:hover:bg-error-500/10';
         $thClass = 'whitespace-nowrap px-4 py-3 text-left text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $thNumberClass = 'whitespace-nowrap px-4 py-3 text-right text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -23,18 +25,20 @@
     <div
         x-data="officialReceiptsModule({
             cancelUrlTemplate: @js(route('admin.official-receipts.cancel', ['receipt' => '__RECEIPT__'])),
+            updateUrlTemplate: @js(route('admin.official-receipts.update', ['receipt' => '__RECEIPT__'])),
             csrfToken: @js(csrf_token()),
             flashMessage: @js(session('success'))
         })"
         x-init="init()"
-        x-effect="document.body.classList.toggle('overflow-hidden', cancellation.open)"
+        x-effect="document.body.classList.toggle('overflow-hidden', cancellation.open || salesInvoiceModalOpen)"
         class="space-y-6">
 
         <div
             x-show="toast.open"
             x-cloak
             x-transition
-            class="fixed right-4 top-20 z-[100200] w-[calc(100%-2rem)] max-w-sm rounded-xl bg-success-700 p-4 text-white shadow-theme-lg sm:right-6"
+            class="fixed right-4 top-20 z-[100200] w-[calc(100%-2rem)] max-w-sm rounded-xl p-4 text-white shadow-theme-lg sm:right-6"
+            :class="toast.type === 'error' ? 'bg-error-600' : 'bg-success-700'"
             role="status">
             <div class="flex items-start gap-3">
                 <svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.25 4.25L19 7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -160,7 +164,32 @@
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             @forelse ($receipts as $receipt)
-                                @php($isCanceled = $receipt->status === \App\Models\SalesInvoice::STATUS_CANCELED)
+                                @php
+                                    $isCanceled = $receipt->status === \App\Models\SalesInvoice::STATUS_CANCELED;
+                                    $editReceiptPayload = [
+                                        'id' => (int) $receipt->id,
+                                        'invoice_date' => $receipt->invoice_date?->format('Y-m-d'),
+                                        'sold_to' => $receipt->sold_to,
+                                        'tin' => $receipt->tin,
+                                        'terms' => $receipt->terms,
+                                        'address' => $receipt->address,
+                                        'discount_id_no' => $receipt->discount_id_no,
+                                        'signature' => $receipt->signature,
+                                        'si_number' => (string) $receipt->si_number,
+                                        'authorized_representative' => $receipt->authorized_representative,
+                                        'vat_exempt_sales' => (float) $receipt->vat_exempt_sales,
+                                        'zero_rated_sales' => (float) $receipt->zero_rated_sales,
+                                        'sc_pwd_discount' => (float) $receipt->sc_pwd_discount,
+                                        'withholding_tax' => (float) $receipt->withholding_tax,
+                                        'items' => $receipt->items->map(fn ($item) => [
+                                            'item_type' => $item->item_type,
+                                            'other_description' => $item->item_type === 'Others' ? $item->description : '',
+                                            'quantity' => (float) $item->quantity,
+                                            'price' => (float) $item->price,
+                                            'amount' => (float) $item->amount,
+                                        ])->values()->all(),
+                                    ];
+                                @endphp
                                 <tr class="{{ $isCanceled ? 'bg-error-50/50 dark:bg-error-500/[0.04]' : '' }}">
                                     <td class="{{ $tdClass }}">
                                         <span class="inline-flex min-w-16 items-center justify-center rounded-lg border px-3 py-1.5 text-base font-black tabular-nums {{ $isCanceled ? 'border-error-200 bg-error-50 text-error-600 line-through dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400' : 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400' }}">
@@ -219,16 +248,25 @@
                                         @endif
                                     </td>
                                     <td class="{{ $tdClass }}">
-                                        @if ($isCanceled)
-                                            <span class="text-theme-xs font-medium text-gray-400">Receipt retained</span>
-                                        @else
+                                        <div class="flex min-w-36 flex-col items-start gap-2">
                                             <button
                                                 type="button"
-                                                x-on:click="openCancellation({{ $receipt->id }}, @js((string) $receipt->si_number), @js($receipt->sold_to))"
-                                                class="{{ $dangerButtonClass }} whitespace-nowrap">
-                                                Cancel Receipt
+                                                x-on:click="openReceiptEdit(@js($editReceiptPayload))"
+                                                class="{{ $smallButtonClass }} whitespace-nowrap">
+                                                <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14.75 5.25 4 4M5 19l2.75-.5L18.25 8a1.768 1.768 0 0 0-2.5-2.5L5.25 16 5 19Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                                                Edit Receipt
                                             </button>
-                                        @endif
+                                            @if ($isCanceled)
+                                                <span class="text-theme-xs font-medium text-gray-400">Canceled receipt retained</span>
+                                            @else
+                                                <button
+                                                    type="button"
+                                                    x-on:click="openCancellation({{ $receipt->id }}, @js((string) $receipt->si_number), @js($receipt->sold_to))"
+                                                    class="{{ $dangerButtonClass }} whitespace-nowrap">
+                                                    Cancel Receipt
+                                                </button>
+                                            @endif
+                                        </div>
                                     </td>
                                 </tr>
                             @empty
@@ -248,6 +286,8 @@
                 <div class="mt-5">{{ $receipts->links() }}</div>
             @endif
         </section>
+
+        @include('pages.staff.partials.sales-invoice-modal', ['editingOfficialReceipt' => true])
 
         <template x-teleport="body">
             <div x-show="cancellation.open" x-cloak x-on:keydown.escape.window="closeCancellation" class="fixed inset-0 z-[100300] flex items-center justify-center p-4">
@@ -288,7 +328,10 @@
     <script>
         function officialReceiptsModule(config) {
             return {
-                toast: { open: false, message: '', timer: null },
+                toast: { open: false, type: 'success', message: '', timer: null },
+                salesInvoiceModalOpen: false,
+                savingSalesInvoice: false,
+                salesInvoice: {},
                 cancellation: {
                     open: false,
                     id: null,
@@ -299,6 +342,7 @@
                     loading: false
                 },
                 init() {
+                    this.resetSalesInvoice();
                     let message = config.flashMessage || '';
 
                     try {
@@ -310,6 +354,221 @@
 
                     if (message) {
                         this.$nextTick(() => this.showToast(message));
+                    }
+                },
+                blankSalesInvoiceItem() {
+                    return {
+                        item_type: '',
+                        other_description: '',
+                        quantity: '',
+                        price: '',
+                        amount: ''
+                    };
+                },
+                resetSalesInvoice() {
+                    this.salesInvoice = {
+                        id: null,
+                        invoice_date: '',
+                        sold_to: '',
+                        tin: '',
+                        terms: '',
+                        address: '',
+                        discount_id_no: '',
+                        signature: '',
+                        si_number: '',
+                        authorized_representative: '',
+                        vat_exempt_sales: '',
+                        zero_rated_sales: '',
+                        sc_pwd_discount: '',
+                        withholding_tax: '',
+                        items: Array.from({ length: 7 }, () => this.blankSalesInvoiceItem())
+                    };
+                    this.savingSalesInvoice = false;
+                },
+                openReceiptEdit(receipt) {
+                    this.resetSalesInvoice();
+                    const items = Array.isArray(receipt.items)
+                        ? receipt.items.slice(0, 7).map(item => ({
+                            item_type: item.item_type || '',
+                            other_description: item.other_description || '',
+                            quantity: item.quantity ?? '',
+                            price: item.price ?? '',
+                            amount: item.amount ?? ''
+                        }))
+                        : [];
+
+                    while (items.length < 7) {
+                        items.push(this.blankSalesInvoiceItem());
+                    }
+
+                    this.salesInvoice = {
+                        id: receipt.id,
+                        invoice_date: receipt.invoice_date || '',
+                        sold_to: receipt.sold_to || '',
+                        tin: receipt.tin || '',
+                        terms: receipt.terms || '',
+                        address: receipt.address || '',
+                        discount_id_no: receipt.discount_id_no || '',
+                        signature: receipt.signature || '',
+                        si_number: String(receipt.si_number || ''),
+                        authorized_representative: receipt.authorized_representative || '',
+                        vat_exempt_sales: receipt.vat_exempt_sales ?? '',
+                        zero_rated_sales: receipt.zero_rated_sales ?? '',
+                        sc_pwd_discount: receipt.sc_pwd_discount ?? '',
+                        withholding_tax: receipt.withholding_tax ?? '',
+                        items
+                    };
+                    this.salesInvoiceModalOpen = true;
+                },
+                closeSalesInvoiceModal() {
+                    if (this.savingSalesInvoice) {
+                        return;
+                    }
+
+                    this.salesInvoiceModalOpen = false;
+                    this.resetSalesInvoice();
+                },
+                invoiceNumber(value, precision = 2) {
+                    const number = Number(value || 0);
+
+                    if (!Number.isFinite(number) || number < 0) {
+                        return 0;
+                    }
+
+                    const multiplier = 10 ** precision;
+
+                    return Math.round((number + Number.EPSILON) * multiplier) / multiplier;
+                },
+                invoiceTotalSales() {
+                    return this.invoiceNumber((this.salesInvoice.items || []).reduce((total, item) => {
+                        return total + this.invoiceNumber(item.amount);
+                    }, 0));
+                },
+                invoiceLessVat() {
+                    return this.invoiceNumber((this.invoiceTotalSales() / 1.12) * 0.12);
+                },
+                invoiceAmountNetOfVat() {
+                    return this.invoiceNumber(this.invoiceTotalSales() - this.invoiceLessVat());
+                },
+                invoiceVatableSales() {
+                    return this.invoiceAmountNetOfVat();
+                },
+                invoiceVatAmount() {
+                    return this.invoiceLessVat();
+                },
+                invoiceAddVat() {
+                    return this.invoiceLessVat();
+                },
+                invoiceTotalAmountDue() {
+                    return this.invoiceNumber(this.invoiceAmountNetOfVat() + this.invoiceAddVat());
+                },
+                invoiceMoney(value) {
+                    return this.invoiceNumber(value).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                },
+                invoiceItemHasInput(item) {
+                    return ['item_type', 'other_description', 'quantity', 'price', 'amount'].some((field) => {
+                        return item[field] !== null && item[field] !== undefined && String(item[field]).trim() !== '';
+                    });
+                },
+                fillSalesInvoiceDefaults() {
+                    const defaults = {
+                        sold_to: 'No Name Inputted',
+                        tin: 'No TIN Inputted',
+                        terms: 'No Terms Inputted',
+                        address: 'No Address Inputted',
+                        discount_id_no: 'No ID Number Inputted',
+                        signature: 'No Signature Inputted',
+                        authorized_representative: 'No Authorized Representative Inputted'
+                    };
+
+                    Object.entries(defaults).forEach(([field, fallback]) => {
+                        this.salesInvoice[field] = String(this.salesInvoice[field] || '').trim() || fallback;
+                    });
+
+                    this.salesInvoice.sold_to = this.salesInvoice.sold_to.toUpperCase();
+                    this.salesInvoice.address = this.salesInvoice.address.toUpperCase();
+                    this.salesInvoice.authorized_representative = this.salesInvoice.authorized_representative.toUpperCase();
+
+                    this.salesInvoice.items.forEach((item) => {
+                        if (item.item_type === 'Others' && !String(item.other_description || '').trim()) {
+                            item.other_description = 'No Item Description Inputted';
+                        }
+                    });
+                },
+                salesInvoicePayload() {
+                    return {
+                        invoice_date: this.salesInvoice.invoice_date || null,
+                        sold_to: this.salesInvoice.sold_to,
+                        tin: this.salesInvoice.tin,
+                        terms: this.salesInvoice.terms,
+                        address: this.salesInvoice.address,
+                        discount_id_no: this.salesInvoice.discount_id_no,
+                        signature: this.salesInvoice.signature,
+                        authorized_representative: this.salesInvoice.authorized_representative,
+                        vat_exempt_sales: this.invoiceNumber(this.salesInvoice.vat_exempt_sales),
+                        zero_rated_sales: this.invoiceNumber(this.salesInvoice.zero_rated_sales),
+                        sc_pwd_discount: this.invoiceNumber(this.salesInvoice.sc_pwd_discount),
+                        withholding_tax: this.invoiceNumber(this.salesInvoice.withholding_tax),
+                        items: this.salesInvoice.items
+                            .filter((item) => this.invoiceItemHasInput(item))
+                            .map((item) => ({
+                                item_type: item.item_type || null,
+                                other_description: item.other_description || null,
+                                quantity: this.invoiceNumber(item.quantity, 3),
+                                price: this.invoiceNumber(item.price),
+                                amount: this.invoiceNumber(item.amount)
+                            }))
+                    };
+                },
+                async submitSalesInvoice() {
+                    if (!this.salesInvoice.id || this.savingSalesInvoice) {
+                        return;
+                    }
+
+                    this.fillSalesInvoiceDefaults();
+                    this.savingSalesInvoice = true;
+
+                    try {
+                        const response = await fetch(
+                            config.updateUrlTemplate.replace('__RECEIPT__', this.salesInvoice.id),
+                            {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json',
+                                    'X-CSRF-TOKEN': config.csrfToken
+                                },
+                                body: JSON.stringify(this.salesInvoicePayload())
+                            }
+                        );
+                        let data = {};
+
+                        try {
+                            data = await response.json();
+                        } catch (error) {
+                            data = {};
+                        }
+
+                        if (!response.ok || !data.success) {
+                            const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
+                            this.showToast(firstError || data.message || 'Unable to update this receipt.', 'error');
+                            return;
+                        }
+
+                        try {
+                            window.sessionStorage.setItem('official-receipts-toast', data.message || 'Receipt updated.');
+                        } catch (error) {
+                            // The register still reloads correctly without a stored toast.
+                        }
+
+                        window.location.reload();
+                    } catch (error) {
+                        this.showToast('An unexpected error occurred while updating the receipt.', 'error');
+                    } finally {
+                        this.savingSalesInvoice = false;
                     }
                 },
                 openCancellation(id, siNumber, customer) {
@@ -378,9 +637,10 @@
                         this.cancellation.loading = false;
                     }
                 },
-                showToast(message) {
+                showToast(message, type = 'success') {
                     this.closeToast();
                     this.toast.message = message;
+                    this.toast.type = type;
                     this.toast.open = true;
                     this.toast.timer = window.setTimeout(() => this.closeToast(), 4000);
                 },
@@ -389,7 +649,7 @@
                         window.clearTimeout(this.toast.timer);
                     }
 
-                    this.toast = { open: false, message: '', timer: null };
+                    this.toast = { open: false, type: 'success', message: '', timer: null };
                 }
             };
         }

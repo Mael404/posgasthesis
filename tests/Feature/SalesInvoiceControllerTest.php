@@ -188,3 +188,11 @@ test('sales invoice item types and nonnegative amounts are validated', function 
 
     expect(DB::table('sales_invoices')->count())->toBe(0);
 });
+
+test('the staff sales invoice asks for confirmation before saving', function () {
+    $this->actingAs($this->staff)
+        ->get(route('staff.pump.index'))
+        ->assertOk()
+        ->assertSee('Are you sure you want to submit this sales invoice?', false)
+        ->assertSee("cancelText: 'No'", false);
+});

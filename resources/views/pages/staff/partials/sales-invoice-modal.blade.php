@@ -1,3 +1,5 @@
+@php($editingOfficialReceipt = (bool) ($editingOfficialReceipt ?? false))
+
 @once
     <style>
         .sales-invoice-paper {
@@ -117,8 +119,8 @@
             class="sales-invoice-modal-panel relative flex h-[96dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-gray-100 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
             <div data-sales-invoice-no-print class="flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 sm:px-5">
                 <div>
-                    <p class="text-theme-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">New document</p>
-                    <h2 class="mt-0.5 text-lg font-semibold text-gray-800 dark:text-white/90">Sales Invoice</h2>
+                    <p class="text-theme-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">{{ $editingOfficialReceipt ? 'Admin correction' : 'New document' }}</p>
+                    <h2 class="mt-0.5 text-lg font-semibold text-gray-800 dark:text-white/90">{{ $editingOfficialReceipt ? 'Edit Sales Invoice' : 'Sales Invoice' }}</h2>
                 </div>
                 <button type="button" x-on:click="closeSalesInvoiceModal" class="inline-flex size-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400" aria-label="Close sales invoice">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -300,16 +302,22 @@
             </div>
 
             <div data-sales-invoice-no-print class="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                <button type="button" x-on:click="resetSalesInvoice" class="{{ $secondaryButtonClass }} !h-10">Clear Fields</button>
+                @if ($editingOfficialReceipt)
+                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">SI number and cancellation status cannot be changed here.</p>
+                @else
+                    <button type="button" x-on:click="resetSalesInvoice" class="{{ $secondaryButtonClass }} !h-10">Clear Fields</button>
+                @endif
                 <div class="flex flex-col-reverse gap-2 sm:flex-row">
                     <button type="button" x-on:click="closeSalesInvoiceModal" class="{{ $secondaryButtonClass }} !h-10">Cancel</button>
                     <button type="submit" class="{{ $primaryButtonClass }} !h-10" :disabled="savingSalesInvoice">
-                        <span x-text="savingSalesInvoice ? 'Saving...' : 'Save Invoice'"></span>
+                        <span x-text="savingSalesInvoice ? 'Saving...' : '{{ $editingOfficialReceipt ? 'Save Changes' : 'Save Invoice' }}'"></span>
                     </button>
-                    <button type="button" x-on:click="submitSalesInvoice(true)" class="{{ $primaryButtonClass }} !h-10 bg-slate-900 hover:bg-slate-700" :disabled="savingSalesInvoice">
-                        <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8V4.75C7 4.336 7.336 4 7.75 4h8.5c.414 0 .75.336.75.75V8M7 17.5H5.75A2.75 2.75 0 0 1 3 14.75v-3A2.75 2.75 0 0 1 5.75 9h12.5A2.75 2.75 0 0 1 21 11.75v3a2.75 2.75 0 0 1-2.75 2.75H17M7.75 14h8.5c.414 0 .75.336.75.75v4.5a.75.75 0 0 1-.75.75h-8.5a.75.75 0 0 1-.75-.75v-4.5c0-.414.336-.75.75-.75Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                        <span x-text="savingSalesInvoice ? 'Saving...' : 'Save & Print'"></span>
-                    </button>
+                    @unless ($editingOfficialReceipt)
+                        <button type="button" x-on:click="submitSalesInvoice(true)" class="{{ $primaryButtonClass }} !h-10 bg-slate-900 hover:bg-slate-700" :disabled="savingSalesInvoice">
+                            <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8V4.75C7 4.336 7.336 4 7.75 4h8.5c.414 0 .75.336.75.75V8M7 17.5H5.75A2.75 2.75 0 0 1 3 14.75v-3A2.75 2.75 0 0 1 5.75 9h12.5A2.75 2.75 0 0 1 21 11.75v3a2.75 2.75 0 0 1-2.75 2.75H17M7.75 14h8.5c.414 0 .75.336.75.75v4.5a.75.75 0 0 1-.75.75h-8.5a.75.75 0 0 1-.75-.75v-4.5c0-.414.336-.75.75-.75Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                            <span x-text="savingSalesInvoice ? 'Saving...' : 'Save & Print'"></span>
+                        </button>
+                    @endunless
                 </div>
             </div>
         </form>

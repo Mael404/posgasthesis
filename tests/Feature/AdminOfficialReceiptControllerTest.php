@@ -88,6 +88,7 @@ test('the receipt register filters by date product name and SI number range', fu
         ->assertSee('ALPHA CUSTOMER')
         ->assertDontSee('BETA CUSTOMER')
         ->assertDontSee('GAMMA CUSTOMER')
+        ->assertSee('Edit Receipt')
         ->assertSee('x-on:input.debounce.450ms', false);
 
     $totals = $response->viewData('totals');
@@ -163,6 +164,69 @@ test('canceling a receipt retains its SI number and the next save advances the s
 
     $nextReceipt->assertJsonPath('invoice.si_number', '2');
     expect(SalesInvoice::count())->toBe(2);
+});
+
+test('an admin can edit the actual receipt form while preserving its SI number and status', function () {
+    $receipt = createOfficialReceiptForTest([
+        'si_number' => '1',
+        'sold_to' => 'ORIGINAL CUSTOMER',
+        'total_sales_vat_inclusive' => 112,
+        'vatable_sales' => 100,
+        'vat_amount' => 12,
+        'amount_net_of_vat' => 100,
+        'total_amount_due' => 112,
+    ], [['item_type' => 'Diesel', 'description' => 'Diesel', 'amount' => 112]]);
+
+    $this->actingAs($this->admin)
+        ->putJson(route('admin.official-receipts.update', $receipt), [
+            'si_number' => '999',
+            'invoice_date' => '2026-08-07',
+            'sold_to' => 'Edited Customer',
+            'tin' => '123-456-789',
+            'terms' => '30 Days',
+            'address' => 'Edited Address',
+            'discount_id_no' => 'PWD-10',
+            'signature' => 'Edited Signature',
+            'authorized_representative' => 'Admin Representative',
+            'vat_exempt_sales' => 10,
+            'zero_rated_sales' => 5,
+            'sc_pwd_discount' => 2,
+            'withholding_tax' => 1,
+            'items' => [[
+                'item_type' => 'Others',
+                'other_description' => 'Edited Service',
+                'quantity' => 2,
+                'price' => 100,
+                'amount' => 224,
+            ]],
+        ])
+        ->assertOk()
+        ->assertJsonPath('receipt.si_number', '1')
+        ->assertJsonPath('receipt.status', 'Active')
+        ->assertJsonPath('receipt.total_amount_due', 224);
+
+    $this->assertDatabaseHas('sales_invoices', [
+        'id' => $receipt->id,
+        'si_number' => '1',
+        'status' => 'Active',
+        'sold_to' => 'EDITED CUSTOMER',
+        'total_sales_vat_inclusive' => 224,
+        'vatable_sales' => 200,
+        'vat_amount' => 24,
+        'amount_net_of_vat' => 200,
+        'total_amount_due' => 224,
+    ]);
+
+    $this->assertDatabaseMissing('sales_invoice_items', [
+        'sales_invoice_id' => $receipt->id,
+        'description' => 'Diesel',
+    ]);
+    $this->assertDatabaseHas('sales_invoice_items', [
+        'sales_invoice_id' => $receipt->id,
+        'item_type' => 'Others',
+        'description' => 'Edited Service',
+        'amount' => 224,
+    ]);
 });
 
 function createOfficialReceiptForTest(array $overrides = [], array $items = []): SalesInvoice

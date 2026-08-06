@@ -119,6 +119,9 @@ Route::middleware('auth')->group(function () {
 
         Route::prefix('admin/official-receipts')->name('admin.official-receipts.')->group(function () {
             Route::get('/', [AdminOfficialReceiptController::class, 'index'])->name('index');
+            Route::put('/{receipt}', [AdminOfficialReceiptController::class, 'update'])
+                ->whereNumber('receipt')
+                ->name('update');
             Route::post('/{receipt}/cancel', [AdminOfficialReceiptController::class, 'cancel'])
                 ->whereNumber('receipt')
                 ->name('cancel');

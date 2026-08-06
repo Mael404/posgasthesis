@@ -1640,7 +1640,22 @@
                     };
                 },
                 async submitSalesInvoice(printAfterSave = false) {
-                    if (this.savingSalesInvoice) {
+                    if (this.savingSalesInvoice || this.confirmation.open) {
+                        return;
+                    }
+
+                    const confirmed = await this.askConfirmation({
+                        title: printAfterSave ? 'Save and Print Sales Invoice?' : 'Save Sales Invoice?',
+                        message: printAfterSave
+                            ? 'Are you sure you want to save and print this sales invoice?'
+                            : 'Are you sure you want to submit this sales invoice?',
+                        details: 'SI No. ' + this.salesInvoice.si_number + ' / Total Amount Due: ' + this.invoiceMoney(this.invoiceTotalAmountDue()),
+                        confirmText: printAfterSave ? 'Yes, Save & Print' : 'Yes, Save Invoice',
+                        cancelText: 'No',
+                        tone: 'success'
+                    });
+
+                    if (!confirmed) {
                         return;
                     }
 
