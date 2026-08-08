@@ -16,6 +16,7 @@
         $tdClass = 'px-4 py-4 align-top text-theme-sm text-gray-700 dark:text-gray-300';
         $tdNumberClass = 'whitespace-nowrap px-4 py-4 text-right align-top text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $quantity = fn ($value) => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
+        $isStaff = auth()->user()?->role === \App\Models\User::ROLE_STAFF;
     @endphp
 
     <style>[x-cloak] { display: none !important; }</style>
@@ -26,6 +27,7 @@
         x-data="officialReceiptsModule({
             cancelUrlTemplate: @js(route('admin.official-receipts.cancel', ['receipt' => '__RECEIPT__'])),
             updateUrlTemplate: @js(route('admin.official-receipts.update', ['receipt' => '__RECEIPT__'])),
+            authorizedRepresentative: @js(auth()->user()?->name ?? ''),
             csrfToken: @js(csrf_token()),
             flashMessage: @js(session('success'))
         })"
@@ -49,17 +51,19 @@
             </div>
         </div>
 
-        <section class="{{ $cardClass }}">
-            <div class="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Official Receipt Register</h1>
-                    <p class="mt-1 {{ $captionClass }}">VAT receipt records patterned after the workbook register. Canceled receipts remain visible.</p>
+        @unless ($isStaff)
+            <section class="{{ $cardClass }}">
+                <div class="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Official Receipt Register</h1>
+                        <p class="mt-1 {{ $captionClass }}">VAT receipt records patterned after the workbook register. Canceled receipts remain visible.</p>
+                    </div>
+                    <div class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-theme-xs font-medium text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
+                        Financial totals always exclude canceled receipts.
+                    </div>
                 </div>
-                <div class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-theme-xs font-medium text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
-                    Financial totals always exclude canceled receipts.
-                </div>
-            </div>
-        </section>
+            </section>
+        @endunless
 
         <section class="{{ $cardClass }}">
             <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -113,28 +117,30 @@
             </form>
         </section>
 
-        <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <article class="{{ $cardClass }} min-w-0">
-                <p class="{{ $labelClass }}">Active Receipts</p>
-                <p class="mt-2 text-title-sm font-bold text-gray-800 dark:text-white/90">{{ number_format((int) ($totals->active_receipts ?? 0)) }}</p>
-            </article>
-            <article class="{{ $cardClass }} min-w-0">
-                <p class="{{ $labelClass }}">Total Sales (VAT Inc.)</p>
-                <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->total_sales_vat_inclusive ?? 0), 2) }}</p>
-            </article>
-            <article class="{{ $cardClass }} min-w-0">
-                <p class="{{ $labelClass }}">VATable Sales</p>
-                <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->vatable_sales ?? 0), 2) }}</p>
-            </article>
-            <article class="{{ $cardClass }} min-w-0">
-                <p class="{{ $labelClass }}">VAT Amount</p>
-                <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->vat_amount ?? 0), 2) }}</p>
-            </article>
-            <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500">
-                <p class="{{ $labelClass }}">Total Amount Due</p>
-                <p class="mt-2 break-words text-title-sm font-bold text-brand-600 dark:text-brand-400">&#8369;{{ number_format((float) ($totals->total_amount_due ?? 0), 2) }}</p>
-            </article>
-        </section>
+        @unless ($isStaff)
+            <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                <article class="{{ $cardClass }} min-w-0">
+                    <p class="{{ $labelClass }}">Active Receipts</p>
+                    <p class="mt-2 text-title-sm font-bold text-gray-800 dark:text-white/90">{{ number_format((int) ($totals->active_receipts ?? 0)) }}</p>
+                </article>
+                <article class="{{ $cardClass }} min-w-0">
+                    <p class="{{ $labelClass }}">Total Sales (VAT Inc.)</p>
+                    <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->total_sales_vat_inclusive ?? 0), 2) }}</p>
+                </article>
+                <article class="{{ $cardClass }} min-w-0">
+                    <p class="{{ $labelClass }}">VATable Sales</p>
+                    <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->vatable_sales ?? 0), 2) }}</p>
+                </article>
+                <article class="{{ $cardClass }} min-w-0">
+                    <p class="{{ $labelClass }}">VAT Amount</p>
+                    <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->vat_amount ?? 0), 2) }}</p>
+                </article>
+                <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500">
+                    <p class="{{ $labelClass }}">Total Amount Due</p>
+                    <p class="mt-2 break-words text-title-sm font-bold text-brand-600 dark:text-brand-400">&#8369;{{ number_format((float) ($totals->total_amount_due ?? 0), 2) }}</p>
+                </article>
+            </section>
+        @endunless
 
         <section class="{{ $cardClass }}">
             <div class="mb-5">
@@ -176,7 +182,6 @@
                                         'discount_id_no' => $receipt->discount_id_no,
                                         'signature' => $receipt->signature,
                                         'si_number' => (string) $receipt->si_number,
-                                        'authorized_representative' => $receipt->authorized_representative,
                                         'vat_exempt_sales' => (float) $receipt->vat_exempt_sales,
                                         'zero_rated_sales' => (float) $receipt->zero_rated_sales,
                                         'sc_pwd_discount' => (float) $receipt->sc_pwd_discount,
@@ -376,7 +381,7 @@
                         discount_id_no: '',
                         signature: '',
                         si_number: '',
-                        authorized_representative: '',
+                        authorized_representative: String(config.authorizedRepresentative || ''),
                         vat_exempt_sales: '',
                         zero_rated_sales: '',
                         sc_pwd_discount: '',
@@ -411,7 +416,7 @@
                         discount_id_no: receipt.discount_id_no || '',
                         signature: receipt.signature || '',
                         si_number: String(receipt.si_number || ''),
-                        authorized_representative: receipt.authorized_representative || '',
+                        authorized_representative: String(config.authorizedRepresentative || ''),
                         vat_exempt_sales: receipt.vat_exempt_sales ?? '',
                         zero_rated_sales: receipt.zero_rated_sales ?? '',
                         sc_pwd_discount: receipt.sc_pwd_discount ?? '',
@@ -460,10 +465,16 @@
                     return this.invoiceLessVat();
                 },
                 invoiceTotalAmountDue() {
-                    return this.invoiceNumber(this.invoiceAmountNetOfVat() + this.invoiceAddVat());
+                    const amountBeforeWithholdingTax = this.invoiceAmountNetOfVat() + this.invoiceAddVat();
+                    const withholdingTax = this.invoiceNumber(this.salesInvoice.withholding_tax);
+
+                    return Math.round((amountBeforeWithholdingTax - withholdingTax + Number.EPSILON) * 100) / 100;
                 },
                 invoiceMoney(value) {
-                    return this.invoiceNumber(value).toLocaleString('en-US', {
+                    const number = Number(value || 0);
+                    const amount = Number.isFinite(number) ? number : 0;
+
+                    return amount.toLocaleString('en-US', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                     });
@@ -480,8 +491,7 @@
                         terms: 'No Terms Inputted',
                         address: 'No Address Inputted',
                         discount_id_no: 'No ID Number Inputted',
-                        signature: 'No Signature Inputted',
-                        authorized_representative: 'No Authorized Representative Inputted'
+                        signature: 'No Signature Inputted'
                     };
 
                     Object.entries(defaults).forEach(([field, fallback]) => {
@@ -490,7 +500,6 @@
 
                     this.salesInvoice.sold_to = this.salesInvoice.sold_to.toUpperCase();
                     this.salesInvoice.address = this.salesInvoice.address.toUpperCase();
-                    this.salesInvoice.authorized_representative = this.salesInvoice.authorized_representative.toUpperCase();
 
                     this.salesInvoice.items.forEach((item) => {
                         if (item.item_type === 'Others' && !String(item.other_description || '').trim()) {
@@ -507,7 +516,6 @@
                         address: this.salesInvoice.address,
                         discount_id_no: this.salesInvoice.discount_id_no,
                         signature: this.salesInvoice.signature,
-                        authorized_representative: this.salesInvoice.authorized_representative,
                         vat_exempt_sales: this.invoiceNumber(this.salesInvoice.vat_exempt_sales),
                         zero_rated_sales: this.invoiceNumber(this.salesInvoice.zero_rated_sales),
                         sc_pwd_discount: this.invoiceNumber(this.salesInvoice.sc_pwd_discount),

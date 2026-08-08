@@ -341,6 +341,12 @@ class MenuHelper
                 'activePatterns' => ['/staff/printed-transactions', '/staff/printed-transactions/*'],
             ],
             [
+                'icon' => 'tables',
+                'name' => 'Official Receipts',
+                'path' => self::routePath('admin.official-receipts.index', '/admin/official-receipts'),
+                'activePatterns' => ['/admin/official-receipts', '/admin/official-receipts/*'],
+            ],
+            [
                 'icon' => 'forms',
                 'name' => 'Billing',
                 'path' => self::routePath('staff.billing.index', '/staff/billing'),

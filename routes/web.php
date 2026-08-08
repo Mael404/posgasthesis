@@ -1,7 +1,6 @@
 <?php
 
 use App\Helpers\MenuHelper;
-use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminInventoryReportController;
 use App\Http\Controllers\AdminOfficialReceiptController;
@@ -10,6 +9,7 @@ use App\Http\Controllers\AdminReportController;
 use App\Http\Controllers\AdminStockInController;
 use App\Http\Controllers\AdminTankManagementController;
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -65,6 +65,19 @@ Route::middleware('auth')->group(function () {
         return redirect()->route('staff.pump.index');
     })->name('staff.staff_db');
 
+    Route::prefix('admin/official-receipts')
+        ->name('admin.official-receipts.')
+        ->middleware('role:vp_admin,staff')
+        ->group(function () {
+            Route::get('/', [AdminOfficialReceiptController::class, 'index'])->name('index');
+            Route::put('/{receipt}', [AdminOfficialReceiptController::class, 'update'])
+                ->whereNumber('receipt')
+                ->name('update');
+            Route::post('/{receipt}/cancel', [AdminOfficialReceiptController::class, 'cancel'])
+                ->whereNumber('receipt')
+                ->name('cancel');
+        });
+
     Route::middleware('role:vp_admin')->group(function () {
         Route::get('/api/dashboard-data', [AdminDashboardController::class, 'getDashboardData'])
             ->name('dashboard.admin.data');
@@ -115,16 +128,6 @@ Route::middleware('auth')->group(function () {
             Route::post('/{batch}/print/signatories', [PrintedTransactionController::class, 'savePrintSignatories'])->name('print.signatories');
             Route::post('/{batch}/mark', [PrintedTransactionController::class, 'mark'])->name('mark');
             Route::delete('/{batch}', [PrintedTransactionController::class, 'destroy'])->name('destroy');
-        });
-
-        Route::prefix('admin/official-receipts')->name('admin.official-receipts.')->group(function () {
-            Route::get('/', [AdminOfficialReceiptController::class, 'index'])->name('index');
-            Route::put('/{receipt}', [AdminOfficialReceiptController::class, 'update'])
-                ->whereNumber('receipt')
-                ->name('update');
-            Route::post('/{receipt}/cancel', [AdminOfficialReceiptController::class, 'cancel'])
-                ->whereNumber('receipt')
-                ->name('cancel');
         });
 
         Route::prefix('admin/announcements')->name('admin.announcements.')->group(function () {

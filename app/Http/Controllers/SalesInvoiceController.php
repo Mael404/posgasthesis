@@ -23,7 +23,6 @@ class SalesInvoiceController extends Controller
             'address' => ['nullable', 'string', 'max:1000'],
             'discount_id_no' => ['nullable', 'string', 'max:255'],
             'signature' => ['nullable', 'string', 'max:255'],
-            'authorized_representative' => ['nullable', 'string', 'max:255'],
             'vat_exempt_sales' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'zero_rated_sales' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'sc_pwd_discount' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
@@ -59,9 +58,12 @@ class SalesInvoiceController extends Controller
         $lessVat = round(($totalSales / 1.12) * 0.12, 2);
         $amountNetOfVat = round($totalSales - $lessVat, 2);
         $addVat = $lessVat;
-        $totalAmountDue = round($amountNetOfVat + $addVat, 2);
+        $withholdingTax = round((float) ($validated['withholding_tax'] ?? 0), 2);
+        $amountBeforeWithholdingTax = round($amountNetOfVat + $addVat, 2);
+        $totalAmountDue = round($amountBeforeWithholdingTax - $withholdingTax, 2);
+        $authorizedRepresentative = trim((string) $request->user()->name);
 
-        $invoice = DB::transaction(function () use ($validated, $items, $totalSales, $lessVat, $amountNetOfVat, $addVat, $totalAmountDue) {
+        $invoice = DB::transaction(function () use ($validated, $items, $totalSales, $lessVat, $amountNetOfVat, $addVat, $withholdingTax, $totalAmountDue, $authorizedRepresentative) {
             $siNumber = $this->nextSiNumber();
 
             $invoice = SalesInvoice::create([
@@ -74,10 +76,7 @@ class SalesInvoiceController extends Controller
                 'discount_id_no' => $this->textOrDefault($validated['discount_id_no'] ?? null, 'No ID Number Inputted'),
                 'signature' => $this->textOrDefault($validated['signature'] ?? null, 'No Signature Inputted'),
                 'si_number' => (string) $siNumber,
-                'authorized_representative' => Str::upper($this->textOrDefault(
-                    $validated['authorized_representative'] ?? null,
-                    'No Authorized Representative Inputted'
-                )),
+                'authorized_representative' => $authorizedRepresentative,
                 'status' => SalesInvoice::STATUS_ACTIVE,
                 'vatable_sales' => $amountNetOfVat,
                 'vat_exempt_sales' => round((float) ($validated['vat_exempt_sales'] ?? 0), 2),
@@ -88,7 +87,7 @@ class SalesInvoiceController extends Controller
                 'amount_net_of_vat' => $amountNetOfVat,
                 'sc_pwd_discount' => round((float) ($validated['sc_pwd_discount'] ?? 0), 2),
                 'add_vat' => $addVat,
-                'withholding_tax' => round((float) ($validated['withholding_tax'] ?? 0), 2),
+                'withholding_tax' => $withholdingTax,
                 'total_amount_due' => $totalAmountDue,
             ]);
 

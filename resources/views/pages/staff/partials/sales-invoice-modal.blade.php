@@ -287,14 +287,10 @@
 
                     <div class="mt-10 min-h-[90px] px-1 py-2 text-[15px] font-black">
                         <div class="w-80 max-w-full">
-                            <input
-                                x-model="salesInvoice.authorized_representative"
-                                x-on:input="salesInvoice.authorized_representative = $event.target.value.toUpperCase()"
-                                class="sales-invoice-input sales-invoice-line-input text-center uppercase"
-                                type="text"
-                                maxlength="255"
-                                placeholder="NO AUTHORIZED REPRESENTATIVE INPUTTED"
-                                aria-label="Authorized representative name">
+                            <output
+                                class="sales-invoice-readonly block min-h-7 w-full border-b border-black px-1 py-0.5 text-center"
+                                x-text="salesInvoice.authorized_representative"
+                                aria-label="Authorized representative from the logged-in user"></output>
                             <div class="pt-1 text-center">Authorized Representative</div>
                         </div>
                     </div>

@@ -76,8 +76,8 @@
             margin: 0;
             color: #222;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 7.4px;
-            line-height: 1.18;
+            font-size: 9px;
+            line-height: 1.15;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
@@ -162,32 +162,32 @@
         }
         .company-name {
             color: #465fff;
-            font-size: 9.4px;
+            font-size: 12px;
             font-weight: 900;
             margin: 0;
         }
         .company-details {
             color: #475467;
-            font-size: 6.2px;
+            font-size: 7.6px;
             margin: 2px 0 0;
         }
         .statement-title {
             color: #98a2b3;
-            font-size: 8.5px;
+            font-size: 10.5px;
             font-weight: 900;
             text-align: right;
             text-transform: uppercase;
         }
         .statement-number {
             color: #d92d20;
-            font-size: 7.4px;
+            font-size: 9px;
             font-weight: 900;
             margin-top: 1mm;
             text-align: right;
         }
         .status-stamp {
             color: rgba(28, 200, 138, 0.15);
-            font-size: 23px;
+            font-size: 26px;
             font-weight: 900;
             left: 50%;
             pointer-events: none;
@@ -212,14 +212,14 @@
         .bill-to-label {
             color: #667085;
             display: block;
-            font-size: 6.2px;
+            font-size: 7.5px;
             font-weight: 700;
             margin-bottom: 2px;
             text-transform: uppercase;
         }
         .bill-to h3 {
             color: #101828;
-            font-size: 8px;
+            font-size: 10px;
             font-weight: 900;
             margin: 0 0 1mm;
             text-transform: uppercase;
@@ -230,7 +230,7 @@
         }
         .meta-table td {
             border: 0;
-            font-size: 6.6px;
+            font-size: 8px;
             padding: 0.35mm 1mm;
         }
         .meta-table td:first-child {
@@ -245,7 +245,7 @@
         }
         .table-title {
             color: #465fff;
-            font-size: 7px;
+            font-size: 8.5px;
             font-weight: 800;
             margin-bottom: 1mm;
             text-transform: uppercase;
@@ -253,14 +253,14 @@
         .data-table th, .data-table td {
             border: 1px solid #d0d5dd;
             overflow-wrap: anywhere;
-            padding: 0.75mm 1mm;
+            padding: 0.65mm 1mm;
             vertical-align: top;
         }
         .data-table tr { page-break-inside: avoid; }
         .data-table th {
             background: #f2f4f7;
             color: #344054;
-            font-size: 6.2px;
+            font-size: 7.5px;
             font-weight: 800;
             text-align: left;
             text-transform: uppercase;
@@ -281,7 +281,7 @@
         .summary-table td {
             border: 0;
             border-bottom: 1px solid #e4e7ec;
-            font-size: 6.6px;
+            font-size: 8px;
             padding: 0.55mm 0.9mm;
         }
         .summary-table td:first-child {
@@ -292,7 +292,7 @@
         .grand-total td {
             border: 0 !important;
             color: #fff !important;
-            font-size: 7.2px !important;
+            font-size: 9px !important;
             font-weight: 900 !important;
             padding: 0.8mm 1mm !important;
         }
@@ -304,7 +304,7 @@
             background: #f8f9fc;
             border-left: 2px solid #465fff;
             color: #475467;
-            font-size: 6.1px;
+            font-size: 7.3px;
             margin-bottom: 2mm;
             padding: 1mm 1.5mm;
         }
@@ -312,7 +312,7 @@
         .footer {
             border-top: 1px solid #e4e7ec;
             color: #98a2b3;
-            font-size: 5.9px;
+            font-size: 7px;
             margin-top: 2mm;
             padding-top: 1mm;
             text-align: center;

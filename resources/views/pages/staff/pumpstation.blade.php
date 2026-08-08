@@ -284,6 +284,7 @@
             },
             today: @js(now()->format('Y-m-d')),
             nextSalesInvoiceNumber: @js($nextSalesInvoiceNumber ?? 1),
+            authorizedRepresentative: @js(auth()->user()?->name ?? ''),
             csrfToken: @js(csrf_token())
         })"
         x-init="init()"
@@ -1522,7 +1523,7 @@
                         discount_id_no: '',
                         signature: '',
                         si_number: String(this.nextSalesInvoiceNumber || 1),
-                        authorized_representative: '',
+                        authorized_representative: String(config.authorizedRepresentative || ''),
                         vat_exempt_sales: '',
                         zero_rated_sales: '',
                         sc_pwd_discount: '',
@@ -1575,10 +1576,16 @@
                     return this.invoiceLessVat();
                 },
                 invoiceTotalAmountDue() {
-                    return this.invoiceNumber(this.invoiceAmountNetOfVat() + this.invoiceAddVat());
+                    const amountBeforeWithholdingTax = this.invoiceAmountNetOfVat() + this.invoiceAddVat();
+                    const withholdingTax = this.invoiceNumber(this.salesInvoice.withholding_tax);
+
+                    return Math.round((amountBeforeWithholdingTax - withholdingTax + Number.EPSILON) * 100) / 100;
                 },
                 invoiceMoney(value) {
-                    return this.invoiceNumber(value).toLocaleString('en-US', {
+                    const number = Number(value || 0);
+                    const amount = Number.isFinite(number) ? number : 0;
+
+                    return amount.toLocaleString('en-US', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                     });
@@ -1595,8 +1602,7 @@
                         terms: 'No Terms Inputted',
                         address: 'No Address Inputted',
                         discount_id_no: 'No ID Number Inputted',
-                        signature: 'No Signature Inputted',
-                        authorized_representative: 'No Authorized Representative Inputted'
+                        signature: 'No Signature Inputted'
                     };
 
                     Object.entries(defaults).forEach(([field, fallback]) => {
@@ -1606,7 +1612,6 @@
                     this.salesInvoice.invoice_date = this.salesInvoice.invoice_date || config.today || new Date().toISOString().slice(0, 10);
                     this.salesInvoice.sold_to = this.salesInvoice.sold_to.toUpperCase();
                     this.salesInvoice.address = this.salesInvoice.address.toUpperCase();
-                    this.salesInvoice.authorized_representative = this.salesInvoice.authorized_representative.toUpperCase();
 
                     this.salesInvoice.items.forEach((item) => {
                         if (item.item_type === 'Others' && !String(item.other_description || '').trim()) {
@@ -1623,7 +1628,6 @@
                         address: this.salesInvoice.address,
                         discount_id_no: this.salesInvoice.discount_id_no,
                         signature: this.salesInvoice.signature,
-                        authorized_representative: this.salesInvoice.authorized_representative,
                         vat_exempt_sales: this.invoiceNumber(this.salesInvoice.vat_exempt_sales),
                         zero_rated_sales: this.invoiceNumber(this.salesInvoice.zero_rated_sales),
                         sc_pwd_discount: this.invoiceNumber(this.salesInvoice.sc_pwd_discount),

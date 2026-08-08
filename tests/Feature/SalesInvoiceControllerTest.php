@@ -70,7 +70,7 @@ test('a staff user can store a sales invoice with workbook calculations', functi
     $response
         ->assertCreated()
         ->assertJsonPath('success', true)
-        ->assertJsonPath('invoice.total_amount_due', 336);
+        ->assertJsonPath('invoice.total_amount_due', 333);
 
     $invoiceId = $response->json('invoice.id');
 
@@ -79,7 +79,7 @@ test('a staff user can store a sales invoice with workbook calculations', functi
         'staff_id' => $this->staff->id,
         'sold_to' => 'ALFIE ANDRES MIRANBUENO',
         'address' => 'PILAR, SORSOGON',
-        'authorized_representative' => 'JUAN DELA CRUZ',
+        'authorized_representative' => 'Pump Staff',
         'si_number' => '1',
         'status' => 'Active',
         'total_sales_vat_inclusive' => 336,
@@ -88,7 +88,7 @@ test('a staff user can store a sales invoice with workbook calculations', functi
         'vatable_sales' => 300,
         'vat_amount' => 36,
         'add_vat' => 36,
-        'total_amount_due' => 336,
+        'total_amount_due' => 333,
         'vat_exempt_sales' => 20,
         'zero_rated_sales' => 10,
         'sc_pwd_discount' => 5,
@@ -128,11 +128,50 @@ test('blank optional sales invoice fields receive readable defaults', function (
         'discount_id_no' => 'No ID Number Inputted',
         'signature' => 'No Signature Inputted',
         'si_number' => '1',
-        'authorized_representative' => 'NO AUTHORIZED REPRESENTATIVE INPUTTED',
+        'authorized_representative' => 'Pump Staff',
         'total_amount_due' => 0,
     ]);
 
     expect(DB::table('sales_invoice_items')->count())->toBe(0);
+});
+
+test('withholding tax reduces the saved total amount due', function () {
+    $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
+        'withholding_tax' => 20,
+        'items' => [[
+            'item_type' => 'Diesel',
+            'amount' => 1000,
+        ]],
+    ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('invoice.total_amount_due', 980);
+
+    $this->assertDatabaseHas('sales_invoices', [
+        'id' => $response->json('invoice.id'),
+        'total_sales_vat_inclusive' => 1000,
+        'withholding_tax' => 20,
+        'total_amount_due' => 980,
+    ]);
+});
+
+test('the withholding tax migration corrects totals on existing sales invoices', function () {
+    $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
+        'withholding_tax' => 20,
+        'items' => [[
+            'item_type' => 'Diesel',
+            'amount' => 1000,
+        ]],
+    ])->assertCreated();
+
+    DB::table('sales_invoices')
+        ->where('id', $response->json('invoice.id'))
+        ->update(['total_amount_due' => 1000]);
+
+    (require database_path('migrations/2026_08_08_000001_apply_withholding_tax_to_sales_invoice_totals.php'))->up();
+
+    expect((float) SalesInvoice::findOrFail($response->json('invoice.id'))->total_amount_due)->toBe(980.0);
 });
 
 test('SI numbers increment on every committed invoice and cannot be supplied by the client', function () {
@@ -194,5 +233,9 @@ test('the staff sales invoice asks for confirmation before saving', function () 
         ->get(route('staff.pump.index'))
         ->assertOk()
         ->assertSee('Are you sure you want to submit this sales invoice?', false)
+        ->assertSee('authorizedRepresentative:', false)
+        ->assertSee('Authorized representative from the logged-in user', false)
+        ->assertDontSee('x-model="salesInvoice.authorized_representative"', false)
+        ->assertSee('amountBeforeWithholdingTax - withholdingTax', false)
         ->assertSee("cancelText: 'No'", false);
 });

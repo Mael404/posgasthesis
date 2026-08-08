@@ -94,7 +94,7 @@ class AdminOfficialReceiptController extends Controller
 
             $lockedReceipt->markCanceled(
                 auth()->id(),
-                trim((string) ($validated['reason'] ?? '')) ?: 'Canceled by administrator.'
+                trim((string) ($validated['reason'] ?? '')) ?: 'Canceled by authorized user.'
             );
 
             return $lockedReceipt->fresh();
@@ -129,7 +129,6 @@ class AdminOfficialReceiptController extends Controller
             'address' => ['nullable', 'string', 'max:1000'],
             'discount_id_no' => ['nullable', 'string', 'max:255'],
             'signature' => ['nullable', 'string', 'max:255'],
-            'authorized_representative' => ['nullable', 'string', 'max:255'],
             'vat_exempt_sales' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'zero_rated_sales' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'sc_pwd_discount' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
@@ -164,9 +163,12 @@ class AdminOfficialReceiptController extends Controller
         $totalSales = round((float) $items->sum('amount'), 2);
         $lessVat = round(($totalSales / 1.12) * 0.12, 2);
         $amountNetOfVat = round($totalSales - $lessVat, 2);
-        $totalAmountDue = round($amountNetOfVat + $lessVat, 2);
+        $withholdingTax = round((float) ($validated['withholding_tax'] ?? 0), 2);
+        $amountBeforeWithholdingTax = round($amountNetOfVat + $lessVat, 2);
+        $totalAmountDue = round($amountBeforeWithholdingTax - $withholdingTax, 2);
+        $authorizedRepresentative = trim((string) $request->user()->name);
 
-        $receipt = DB::transaction(function () use ($receipt, $validated, $items, $totalSales, $lessVat, $amountNetOfVat, $totalAmountDue) {
+        $receipt = DB::transaction(function () use ($receipt, $validated, $items, $totalSales, $lessVat, $amountNetOfVat, $withholdingTax, $totalAmountDue, $authorizedRepresentative) {
             $lockedReceipt = SalesInvoice::query()->lockForUpdate()->findOrFail($receipt->id);
 
             $lockedReceipt->fill([
@@ -177,10 +179,7 @@ class AdminOfficialReceiptController extends Controller
                 'address' => Str::upper($this->textOrDefault($validated['address'] ?? null, 'No Address Inputted')),
                 'discount_id_no' => $this->textOrDefault($validated['discount_id_no'] ?? null, 'No ID Number Inputted'),
                 'signature' => $this->textOrDefault($validated['signature'] ?? null, 'No Signature Inputted'),
-                'authorized_representative' => Str::upper($this->textOrDefault(
-                    $validated['authorized_representative'] ?? null,
-                    'No Authorized Representative Inputted'
-                )),
+                'authorized_representative' => $authorizedRepresentative,
                 'vatable_sales' => $amountNetOfVat,
                 'vat_exempt_sales' => round((float) ($validated['vat_exempt_sales'] ?? 0), 2),
                 'zero_rated_sales' => round((float) ($validated['zero_rated_sales'] ?? 0), 2),
@@ -190,7 +189,7 @@ class AdminOfficialReceiptController extends Controller
                 'amount_net_of_vat' => $amountNetOfVat,
                 'sc_pwd_discount' => round((float) ($validated['sc_pwd_discount'] ?? 0), 2),
                 'add_vat' => $lessVat,
-                'withholding_tax' => round((float) ($validated['withholding_tax'] ?? 0), 2),
+                'withholding_tax' => $withholdingTax,
                 'total_amount_due' => $totalAmountDue,
             ])->save();
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Helpers\MenuHelper;
 use App\Models\SalesInvoice;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -37,6 +38,13 @@ beforeEach(function () {
         'email' => 'pump.staff@example.test',
         'password' => 'password',
         'role' => User::ROLE_STAFF,
+    ]);
+
+    $this->semiAdmin = User::create([
+        'name' => 'Semi Admin',
+        'email' => 'semi.admin@example.test',
+        'password' => 'password',
+        'role' => User::ROLE_SEMI_ADMIN,
     ]);
 });
 
@@ -88,6 +96,8 @@ test('the receipt register filters by date product name and SI number range', fu
         ->assertSee('ALPHA CUSTOMER')
         ->assertDontSee('BETA CUSTOMER')
         ->assertDontSee('GAMMA CUSTOMER')
+        ->assertSee('Official Receipt Register')
+        ->assertSee('Active Receipts')
         ->assertSee('Edit Receipt')
         ->assertSee('x-on:input.debounce.450ms', false);
 
@@ -203,7 +213,7 @@ test('an admin can edit the actual receipt form while preserving its SI number a
         ->assertOk()
         ->assertJsonPath('receipt.si_number', '1')
         ->assertJsonPath('receipt.status', 'Active')
-        ->assertJsonPath('receipt.total_amount_due', 224);
+        ->assertJsonPath('receipt.total_amount_due', 223);
 
     $this->assertDatabaseHas('sales_invoices', [
         'id' => $receipt->id,
@@ -214,7 +224,9 @@ test('an admin can edit the actual receipt form while preserving its SI number a
         'vatable_sales' => 200,
         'vat_amount' => 24,
         'amount_net_of_vat' => 200,
-        'total_amount_due' => 224,
+        'authorized_representative' => 'VP Admin',
+        'withholding_tax' => 1,
+        'total_amount_due' => 223,
     ]);
 
     $this->assertDatabaseMissing('sales_invoice_items', [
@@ -227,6 +239,110 @@ test('an admin can edit the actual receipt form while preserving its SI number a
         'description' => 'Edited Service',
         'amount' => 224,
     ]);
+});
+
+test('staff can access the receipt register from their navigation', function () {
+    $receipt = createOfficialReceiptForTest([
+        'sold_to' => 'STAFF ACCESS CUSTOMER',
+    ]);
+
+    $response = $this->actingAs($this->staff)
+        ->get(route('admin.official-receipts.index'));
+
+    $response
+        ->assertOk()
+        ->assertSee($receipt->sold_to)
+        ->assertSee('Automatic Filters')
+        ->assertSee('VAT Receipt Data')
+        ->assertSee('Edit Receipt')
+        ->assertSee('Cancel Receipt')
+        ->assertSee('authorizedRepresentative:', false)
+        ->assertSee('Authorized representative from the logged-in user', false)
+        ->assertDontSee('x-model="salesInvoice.authorized_representative"', false)
+        ->assertSee('amountBeforeWithholdingTax - withholdingTax', false)
+        ->assertDontSee('Official Receipt Register')
+        ->assertDontSee('VAT receipt records patterned after the workbook register.')
+        ->assertDontSee('Financial totals always exclude canceled receipts.')
+        ->assertDontSee('Active Receipts');
+
+    $menuItem = collect(MenuHelper::getMainNavItems())->firstWhere('name', 'Official Receipts');
+
+    expect($menuItem)->not->toBeNull()
+        ->and($menuItem['path'])->toBe('/admin/official-receipts');
+});
+
+test('staff can edit and cancel official receipts', function () {
+    $receipt = createOfficialReceiptForTest([
+        'sold_to' => 'ORIGINAL STAFF CUSTOMER',
+    ], [['item_type' => 'Diesel', 'description' => 'Diesel', 'amount' => 112]]);
+
+    $this->actingAs($this->staff)
+        ->putJson(route('admin.official-receipts.update', $receipt), [
+            'invoice_date' => '2026-08-07',
+            'sold_to' => 'Edited By Staff',
+            'items' => [[
+                'item_type' => 'Premium',
+                'quantity' => 1,
+                'price' => 224,
+                'amount' => 224,
+            ]],
+        ])
+        ->assertOk()
+        ->assertJsonPath('receipt.si_number', '1')
+        ->assertJsonPath('receipt.status', SalesInvoice::STATUS_ACTIVE)
+        ->assertJsonPath('receipt.total_amount_due', 224);
+
+    $this->actingAs($this->staff)
+        ->postJson(route('admin.official-receipts.cancel', $receipt), [])
+        ->assertOk()
+        ->assertJsonPath('receipt.status', SalesInvoice::STATUS_CANCELED);
+
+    $this->assertDatabaseHas('sales_invoices', [
+        'id' => $receipt->id,
+        'si_number' => '1',
+        'sold_to' => 'EDITED BY STAFF',
+        'authorized_representative' => 'Pump Staff',
+        'status' => SalesInvoice::STATUS_CANCELED,
+        'canceled_by' => $this->staff->id,
+        'cancellation_reason' => 'Canceled by authorized user.',
+    ]);
+});
+
+test('receipt validation still applies to staff users', function () {
+    $receipt = createOfficialReceiptForTest([
+        'sold_to' => 'UNCHANGED CUSTOMER',
+    ]);
+
+    $this->actingAs($this->staff)
+        ->putJson(route('admin.official-receipts.update', $receipt), [
+            'items' => array_fill(0, 8, ['item_type' => 'Diesel']),
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('items');
+
+    $this->actingAs($this->staff)
+        ->postJson(route('admin.official-receipts.cancel', $receipt), [
+            'reason' => str_repeat('x', 256),
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('reason');
+
+    $this->assertDatabaseHas('sales_invoices', [
+        'id' => $receipt->id,
+        'sold_to' => 'UNCHANGED CUSTOMER',
+        'status' => SalesInvoice::STATUS_ACTIVE,
+        'canceled_at' => null,
+    ]);
+});
+
+test('shared receipt access does not grant staff other admin permissions', function () {
+    $this->actingAs($this->staff)
+        ->get(route('admin.announcements.index'))
+        ->assertRedirect(route('staff.pump.index'));
+
+    $this->actingAs($this->semiAdmin)
+        ->get(route('admin.official-receipts.index'))
+        ->assertRedirect(route('dashboard.semi-admin'));
 });
 
 function createOfficialReceiptForTest(array $overrides = [], array $items = []): SalesInvoice
