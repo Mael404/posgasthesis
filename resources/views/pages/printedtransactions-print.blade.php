@@ -66,18 +66,18 @@
     @include('layouts.browser-icon')
     <style>
         :root {
-            --a6-paper-width: 148mm;
-            --a6-paper-height: 105mm;
-            --a6-page-margin: 3mm;
-            --a6-print-height: 99mm;
+            --a5-paper-width: 210mm;
+            --a5-paper-height: 148mm;
+            --a5-page-margin: 5mm;
+            --a5-print-height: 138mm;
         }
-        @page { margin: 3mm; size: 148mm 105mm; }
+        @page { margin: 5mm; size: A5 landscape; }
         body {
             margin: 0;
             color: #222;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 9px;
-            line-height: 1.15;
+            font-size: 12px;
+            line-height: 1.3;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
@@ -88,9 +88,10 @@
                 background: #fff;
                 box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
                 margin: 0 auto;
-                max-width: var(--a6-paper-width);
-                min-height: var(--a6-paper-height);
-                padding: var(--a6-page-margin);
+                max-width: var(--a5-paper-width);
+                min-height: var(--a5-paper-height);
+                padding: var(--a5-page-margin);
+                width: 100%;
             }
             .no-print {
                 position: fixed;
@@ -106,7 +107,7 @@
                 box-shadow: none;
                 margin: 0;
                 max-width: none;
-                min-height: var(--a6-print-height);
+                min-height: var(--a5-print-height);
                 padding: 0;
                 width: 100%;
             }
@@ -137,14 +138,14 @@
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            min-height: var(--a6-print-height);
+            min-height: var(--a5-print-height);
             position: relative;
         }
         .main-content { flex: 0 1 auto; }
         .report-header {
-            border-bottom: 1.5px solid #465fff;
-            margin-bottom: 3mm;
-            padding-bottom: 2mm;
+            border-bottom: 2px solid #465fff;
+            margin-bottom: 4mm;
+            padding-bottom: 3mm;
         }
         .header-table, .meta-table, .data-table, .summary-table {
             border-collapse: collapse;
@@ -158,36 +159,36 @@
         }
         .logo {
             height: auto;
-            max-width: 17mm;
+            max-width: 24mm;
         }
         .company-name {
             color: #465fff;
-            font-size: 12px;
+            font-size: 18px;
             font-weight: 900;
             margin: 0;
         }
         .company-details {
             color: #475467;
-            font-size: 7.6px;
-            margin: 2px 0 0;
+            font-size: 10px;
+            margin: 3px 0 0;
         }
         .statement-title {
             color: #98a2b3;
-            font-size: 10.5px;
+            font-size: 15px;
             font-weight: 900;
             text-align: right;
             text-transform: uppercase;
         }
         .statement-number {
             color: #d92d20;
-            font-size: 9px;
+            font-size: 11.5px;
             font-weight: 900;
-            margin-top: 1mm;
+            margin-top: 1.5mm;
             text-align: right;
         }
         .status-stamp {
             color: rgba(28, 200, 138, 0.15);
-            font-size: 26px;
+            font-size: 42px;
             font-weight: 900;
             left: 50%;
             pointer-events: none;
@@ -201,37 +202,38 @@
             align-items: flex-start;
             background: #f8f9fc;
             border: 1px solid #e4e7ec;
-            border-radius: 4px;
+            border-radius: 6px;
             display: flex;
-            gap: 2mm;
+            gap: 3mm;
             justify-content: space-between;
-            margin-bottom: 2mm;
-            padding: 1.4mm 2mm;
+            margin-bottom: 3mm;
+            padding: 2.2mm 3mm;
         }
         .bill-to { min-width: 0; }
         .bill-to-label {
             color: #667085;
             display: block;
-            font-size: 7.5px;
+            font-size: 8.5px;
             font-weight: 700;
             margin-bottom: 2px;
             text-transform: uppercase;
         }
         .bill-to h3 {
             color: #101828;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 900;
-            margin: 0 0 1mm;
+            margin: 0 0 0.9mm;
             text-transform: uppercase;
         }
         .bill-to p {
             color: #475467;
+            font-size: 10px;
             margin: 0;
         }
         .meta-table td {
             border: 0;
-            font-size: 8px;
-            padding: 0.35mm 1mm;
+            font-size: 9.5px;
+            padding: 0.5mm 1.2mm;
         }
         .meta-table td:first-child {
             color: #667085;
@@ -245,22 +247,24 @@
         }
         .table-title {
             color: #465fff;
-            font-size: 8.5px;
+            font-size: 10.5px;
             font-weight: 800;
-            margin-bottom: 1mm;
+            margin-bottom: 1.5mm;
             text-transform: uppercase;
         }
         .data-table th, .data-table td {
             border: 1px solid #d0d5dd;
+            font-size: 10px;
+            line-height: 1.2;
             overflow-wrap: anywhere;
-            padding: 0.65mm 1mm;
+            padding: 0.9mm 1.3mm;
             vertical-align: top;
         }
         .data-table tr { page-break-inside: avoid; }
         .data-table th {
             background: #f2f4f7;
             color: #344054;
-            font-size: 7.5px;
+            font-size: 9px;
             font-weight: 800;
             text-align: left;
             text-transform: uppercase;
@@ -274,15 +278,15 @@
         .summary-box {
             display: flex;
             justify-content: flex-end;
-            margin-top: 2mm;
+            margin-top: 4mm;
             page-break-inside: avoid;
         }
-        .summary-table { width: 48mm; }
+        .summary-table { width: 67mm; }
         .summary-table td {
             border: 0;
             border-bottom: 1px solid #e4e7ec;
-            font-size: 8px;
-            padding: 0.55mm 0.9mm;
+            font-size: 11px;
+            padding: 1mm 1.5mm;
         }
         .summary-table td:first-child {
             color: #475467;
@@ -292,36 +296,36 @@
         .grand-total td {
             border: 0 !important;
             color: #fff !important;
-            font-size: 9px !important;
+            font-size: 12px !important;
             font-weight: 900 !important;
-            padding: 0.8mm 1mm !important;
+            padding: 1.5mm !important;
         }
         .bottom-section {
             margin-top: auto;
-            padding-top: 0;
+            padding-top: 4mm;
         }
         .instructions {
             background: #f8f9fc;
             border-left: 2px solid #465fff;
             color: #475467;
-            font-size: 7.3px;
-            margin-bottom: 2mm;
-            padding: 1mm 1.5mm;
+            font-size: 10px;
+            margin-bottom: 3mm;
+            padding: 1.8mm 2.2mm;
         }
-        .instructions p { margin: 0.6mm 0; }
+        .instructions p { margin: 0.8mm 0; }
         .footer {
             border-top: 1px solid #e4e7ec;
             color: #98a2b3;
-            font-size: 7px;
-            margin-top: 2mm;
-            padding-top: 1mm;
+            font-size: 9px;
+            margin-top: 3mm;
+            padding-top: 1.5mm;
             text-align: center;
         }
         @media print {
             .sheet {
                 display: flex;
                 flex-direction: column;
-                min-height: var(--a6-print-height);
+                min-height: var(--a5-print-height);
                 padding: 0;
                 width: 100%;
             }
@@ -329,8 +333,8 @@
                 flex: 0 1 auto;
             }
             .report-header {
-                margin-bottom: 2mm;
-                padding-bottom: 1.4mm;
+                margin-bottom: 4mm;
+                padding-bottom: 3mm;
             }
             .bottom-section {
                 margin-top: auto;
