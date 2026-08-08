@@ -20,7 +20,7 @@ class LitersMovementTrackingService
     private const CORRECTION_CANCELLED = 'cancelled';
     private const MEMBERSHIP_INCLUDED = 'included';
     private const MEMBERSHIP_REMOVED = 'removed';
-    private const DEFAULT_FUEL_TYPES = ['Unleaded', 'Premium', 'Diesel'];
+    private const DEFAULT_FUEL_TYPES = ['Premium', 'Unleaded', 'Diesel'];
     private const DEFAULT_FUEL_LIMITS = [
         'regular' => 4000.0,
         'premium' => 4347.0,
@@ -2706,8 +2706,8 @@ class LitersMovementTrackingService
     private function fuelSortKey($fuelType): string
     {
         return match ($this->normalizeFuelKey($fuelType)) {
-            'regular' => '10',
-            'premium' => '20',
+            'premium' => '10',
+            'regular' => '20',
             'diesel' => '30',
             default => '90-' . strtolower((string) $fuelType),
         };

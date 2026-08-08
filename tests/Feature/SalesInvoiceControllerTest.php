@@ -117,7 +117,9 @@ test('a staff user can store a sales invoice with workbook calculations', functi
 });
 
 test('blank optional sales invoice fields receive readable defaults', function () {
-    $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), []);
+    $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
+        'items' => [['item_type' => 'Diesel']],
+    ]);
 
     $response->assertCreated()->assertJsonPath('invoice.total_amount_due', 0);
 
@@ -134,7 +136,26 @@ test('blank optional sales invoice fields receive readable defaults', function (
         'total_amount_due' => 0,
     ]);
 
-    expect(DB::table('sales_invoice_items')->count())->toBe(0);
+    expect(DB::table('sales_invoice_items')->count())->toBe(1);
+});
+
+test('unleaded uses the unleaded regular label throughout the sales invoice', function () {
+    $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
+        'items' => [['item_type' => 'Unleaded']],
+    ]);
+
+    $response->assertCreated();
+
+    $this->assertDatabaseHas('sales_invoice_items', [
+        'sales_invoice_id' => $response->json('invoice.id'),
+        'item_type' => 'Unleaded',
+        'description' => 'Unleaded/Regular',
+    ]);
+
+    $this->actingAs($this->staff)
+        ->get(route('staff.pump.index'))
+        ->assertOk()
+        ->assertSee('<option value="Unleaded">Unleaded/Regular</option>', false);
 });
 
 test('withholding tax reduces the saved total amount due', function () {
@@ -180,6 +201,7 @@ test('SI numbers increment on every committed invoice and cannot be supplied by 
     $first = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
         'si_number' => '500',
         'sold_to' => 'First Customer',
+        'items' => [['item_type' => 'Diesel']],
     ]);
 
     SalesInvoice::findOrFail($first->json('invoice.id'))->markCanceled($this->staff->id, 'Test cancellation');
@@ -187,6 +209,7 @@ test('SI numbers increment on every committed invoice and cannot be supplied by 
     $second = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
         'si_number' => '1',
         'sold_to' => 'Second Customer',
+        'items' => [['item_type' => 'Premium']],
     ]);
 
     $first->assertCreated()->assertJsonPath('invoice.si_number', '1');
@@ -206,6 +229,7 @@ test('SI numbers increment on every committed invoice and cannot be supplied by 
 test('an assigned SI number is immutable', function () {
     $response = $this->actingAs($this->staff)->postJson(route('staff.sales-invoices.store'), [
         'sold_to' => 'Immutable Number Customer',
+        'items' => [['item_type' => 'Diesel']],
     ]);
 
     $invoice = SalesInvoice::findOrFail($response->json('invoice.id'));
@@ -230,11 +254,46 @@ test('sales invoice item types and nonnegative amounts are validated', function 
     expect(DB::table('sales_invoices')->count())->toBe(0);
 });
 
-test('the staff sales invoice asks for confirmation before saving', function () {
+test('a sales invoice requires a valid selected item', function () {
     $this->actingAs($this->staff)
+        ->postJson(route('staff.sales-invoices.store'), [])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['items'])
+        ->assertJsonPath('errors.items.0', 'Please select an item before continuing.');
+
+    $blankItemResponse = $this->actingAs($this->staff)
+        ->postJson(route('staff.sales-invoices.store'), [
+            'items' => [[
+                'item_type' => '',
+                'amount' => 100,
+            ]],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['items.0.item_type']);
+
+    expect($blankItemResponse->json('errors')['items.0.item_type'][0])
+        ->toBe('Please select an item before continuing.');
+
+    $placeholderResponse = $this->actingAs($this->staff)
+        ->postJson(route('staff.sales-invoices.store'), [
+            'items' => [['item_type' => 'Select item']],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['items.0.item_type']);
+
+    expect($placeholderResponse->json('errors')['items.0.item_type'][0])
+        ->toBe('Please select a valid item before continuing.');
+
+    expect(DB::table('sales_invoices')->count())->toBe(0);
+});
+
+test('the staff sales invoice asks for confirmation before saving', function () {
+    $response = $this->actingAs($this->staff)
         ->get(route('staff.pump.index'))
         ->assertOk()
         ->assertSee('Are you sure you want to submit this sales invoice?', false)
+        ->assertSee('Please select an item before continuing.', false)
+        ->assertSee('validateSalesInvoiceItems()', false)
         ->assertSee('authorizedRepresentative:', false)
         ->assertSee('Authorized representative from the logged-in user', false)
         ->assertDontSee('x-model="salesInvoice.authorized_representative"', false)
@@ -243,4 +302,12 @@ test('the staff sales invoice asks for confirmation before saving', function () 
         ->assertSee("siNumber.padStart(3, '0')", false)
         ->assertSee("details: 'SI No. ' + this.formatSiNumber(this.salesInvoice.si_number)", false)
         ->assertSee("cancelText: 'No'", false);
+
+    preg_match('/openSalesInvoiceModal\(\)\s*\{(.*?)\n\s*\},\s*closeSalesInvoiceModal/s', $response->getContent(), $openMethod);
+    preg_match('/closeSalesInvoiceModal\(\)\s*\{(.*?)\n\s*\},\s*invoiceNumber/s', $response->getContent(), $closeMethod);
+
+    expect($openMethod)->toHaveCount(2)
+        ->and($closeMethod)->toHaveCount(2)
+        ->and($openMethod[1])->not->toContain('resetSalesInvoice')
+        ->and($closeMethod[1])->not->toContain('resetSalesInvoice');
 });

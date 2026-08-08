@@ -11,6 +11,7 @@ beforeEach(function () {
     Schema::dropIfExists('sales_invoice_items');
     Schema::dropIfExists('sales_invoice_number_counters');
     Schema::dropIfExists('sales_invoices');
+    Schema::dropIfExists('tanks');
     Schema::dropIfExists('users');
 
     Schema::create('users', function (Blueprint $table) {
@@ -22,6 +23,19 @@ beforeEach(function () {
         $table->rememberToken();
         $table->timestamps();
     });
+
+    Schema::create('tanks', function (Blueprint $table) {
+        $table->id();
+        $table->string('name');
+        $table->string('fuel_type');
+        $table->string('status')->nullable();
+    });
+
+    DB::table('tanks')->insert([
+        ['id' => 1, 'name' => 'Tank 1 (Premium)', 'fuel_type' => 'Premium', 'status' => 'Active'],
+        ['id' => 2, 'name' => 'Tank 2 (Unleaded)', 'fuel_type' => 'Unleaded', 'status' => 'Active'],
+        ['id' => 3, 'name' => 'Tank 3 (Diesel)', 'fuel_type' => 'Diesel', 'status' => 'Active'],
+    ]);
 
     (require database_path('migrations/2026_08_06_000001_create_sales_invoices_tables.php'))->up();
     (require database_path('migrations/2026_08_06_000002_add_sales_invoice_number_sequence.php'))->up();
@@ -57,8 +71,9 @@ test('the receipt register filters by date product name and SI number range', fu
         'vatable_sales' => 100,
         'vat_amount' => 12,
         'amount_net_of_vat' => 100,
-        'total_amount_due' => 112,
-    ], [['item_type' => 'Diesel', 'description' => 'Diesel']]);
+        'withholding_tax' => 7.25,
+        'total_amount_due' => 104.75,
+    ], [['item_type' => 'Diesel', 'description' => 'Diesel', 'quantity' => 2, 'amount' => 112]]);
 
     createOfficialReceiptForTest([
         'si_number' => '2',
@@ -98,13 +113,111 @@ test('the receipt register filters by date product name and SI number range', fu
         ->assertDontSee('GAMMA CUSTOMER')
         ->assertSee('Official Receipt Register')
         ->assertSee('Active Receipts')
+        ->assertSee('<select name="product"', false)
+        ->assertSee('Unleaded/Regular')
+        ->assertSee('All Tanks / Products')
+        ->assertSee('Diesel / Tank 3')
+        ->assertSee('Total Liters')
+        ->assertDontSee('Changing any field refreshes the register automatically.')
+        ->assertSee('Withholding Tax')
+        ->assertDontSee('Net of VAT')
+        ->assertSee('&#8369;7.25', false)
+        ->assertSee('Total Withholding Tax')
         ->assertSee('Edit Receipt')
         ->assertSee('x-on:input.debounce.450ms', false);
 
     $totals = $response->viewData('totals');
 
     expect((int) $totals->active_receipts)->toBe(1)
-        ->and((float) $totals->total_amount_due)->toBe(112.0);
+        ->and((float) $totals->total_liters)->toBe(2.0)
+        ->and((float) $totals->total_sales_vat_inclusive)->toBe(112.0)
+        ->and((float) $totals->vatable_sales)->toBe(100.0)
+        ->and((float) $totals->vat_amount)->toBe(12.0)
+        ->and((float) $totals->withholding_tax)->toBe(7.25)
+        ->and((float) $totals->total_amount_due)->toBe(104.75);
+});
+
+test('tank product filtering scopes receipt counts liters and financial totals to matching active items', function () {
+    createOfficialReceiptForTest([
+        'si_number' => '1',
+        'sold_to' => 'PREMIUM CUSTOMER ONE',
+        'total_sales_vat_inclusive' => 240,
+        'vatable_sales' => 214.29,
+        'vat_amount' => 25.71,
+        'amount_net_of_vat' => 214.29,
+        'total_amount_due' => 240,
+    ], [['item_type' => 'Premium', 'description' => 'Premium', 'quantity' => 4, 'amount' => 240]]);
+
+    createOfficialReceiptForTest([
+        'si_number' => '2',
+        'sold_to' => 'PREMIUM CUSTOMER TWO',
+        'total_sales_vat_inclusive' => 360,
+        'vatable_sales' => 321.43,
+        'vat_amount' => 38.57,
+        'amount_net_of_vat' => 321.43,
+        'withholding_tax' => 12,
+        'total_amount_due' => 348,
+    ], [['item_type' => 'Premium', 'description' => 'Premium', 'quantity' => 6, 'amount' => 360]]);
+
+    createOfficialReceiptForTest([
+        'si_number' => '3',
+        'sold_to' => 'DIESEL CUSTOMER',
+        'total_sales_vat_inclusive' => 500,
+        'vatable_sales' => 446.43,
+        'vat_amount' => 53.57,
+        'amount_net_of_vat' => 446.43,
+        'total_amount_due' => 500,
+    ], [['item_type' => 'Diesel', 'description' => 'Diesel', 'quantity' => 8, 'amount' => 500]]);
+
+    $canceledPremium = createOfficialReceiptForTest([
+        'si_number' => '4',
+        'sold_to' => 'CANCELED PREMIUM CUSTOMER',
+        'total_sales_vat_inclusive' => 100,
+        'vatable_sales' => 89.29,
+        'vat_amount' => 10.71,
+        'amount_net_of_vat' => 89.29,
+        'total_amount_due' => 100,
+    ], [['item_type' => 'Premium', 'description' => 'Premium', 'quantity' => 2, 'amount' => 100]]);
+    $canceledPremium->markCanceled($this->admin->id, 'Canceled premium receipt');
+
+    $response = $this->actingAs($this->admin)->get(route('admin.official-receipts.index', [
+        'product' => 'Premium',
+    ]));
+
+    $response
+        ->assertOk()
+        ->assertSee('Premium / Tank 1')
+        ->assertSee('PREMIUM CUSTOMER ONE')
+        ->assertSee('PREMIUM CUSTOMER TWO')
+        ->assertSee('CANCELED PREMIUM CUSTOMER')
+        ->assertDontSee('DIESEL CUSTOMER');
+
+    $receiptSummary = $response->viewData('receiptSummary');
+    $totals = $response->viewData('totals');
+
+    expect((int) $receiptSummary->total_receipts)->toBe(4)
+        ->and((int) $receiptSummary->active_receipts)->toBe(2)
+        ->and((int) $receiptSummary->canceled_receipts)->toBe(1)
+        ->and((int) $totals->active_receipts)->toBe(2)
+        ->and((float) $totals->total_liters)->toBe(10.0)
+        ->and((float) $totals->total_sales_vat_inclusive)->toBe(600.0)
+        ->and((float) $totals->vatable_sales)->toBe(535.71)
+        ->and((float) $totals->vat_amount)->toBe(64.29)
+        ->and((float) $totals->withholding_tax)->toBe(12.0)
+        ->and((float) $totals->total_amount_due)->toBe(588.0);
+});
+
+test('legacy unleaded receipt items display the current product name', function () {
+    createOfficialReceiptForTest([
+        'si_number' => '1',
+        'sold_to' => 'LEGACY UNLEADED CUSTOMER',
+    ], [['item_type' => 'Unleaded', 'description' => 'Unleaded']]);
+
+    $response = $this->actingAs($this->admin)
+        ->get(route('admin.official-receipts.index'))
+        ->assertOk();
+
+    expect(substr_count($response->getContent(), 'Unleaded/Regular'))->toBe(3);
 });
 
 test('canceled receipts remain listed but are excluded from register totals', function () {
@@ -115,7 +228,8 @@ test('canceled receipts remain listed but are excluded from register totals', fu
         'vatable_sales' => 100,
         'vat_amount' => 12,
         'amount_net_of_vat' => 100,
-        'total_amount_due' => 112,
+        'withholding_tax' => 5,
+        'total_amount_due' => 107,
     ]);
 
     $canceled = createOfficialReceiptForTest([
@@ -125,11 +239,23 @@ test('canceled receipts remain listed but are excluded from register totals', fu
         'vatable_sales' => 200,
         'vat_amount' => 24,
         'amount_net_of_vat' => 200,
-        'total_amount_due' => 224,
+        'withholding_tax' => 20,
+        'total_amount_due' => 204,
     ]);
     $canceled->markCanceled($this->admin->id, 'Duplicate receipt');
 
-    DB::table('sales_invoice_number_counters')->where('id', 1)->update(['last_number' => 2]);
+    $latestActive = createOfficialReceiptForTest([
+        'si_number' => '3',
+        'sold_to' => 'LATEST ACTIVE CUSTOMER',
+        'total_sales_vat_inclusive' => 336,
+        'vatable_sales' => 300,
+        'vat_amount' => 36,
+        'amount_net_of_vat' => 300,
+        'withholding_tax' => 7,
+        'total_amount_due' => 329,
+    ]);
+
+    DB::table('sales_invoice_number_counters')->where('id', 1)->update(['last_number' => 3]);
 
     $response = $this->actingAs($this->admin)->get(route('admin.official-receipts.index'));
 
@@ -137,14 +263,24 @@ test('canceled receipts remain listed but are excluded from register totals', fu
         ->assertOk()
         ->assertSee($active->sold_to)
         ->assertSee($canceled->sold_to)
-        ->assertSee('Duplicate receipt');
+        ->assertSee($latestActive->sold_to)
+        ->assertSee('Duplicate receipt')
+        ->assertSee('Receipt Summary')
+        ->assertSee('Total Receipts')
+        ->assertSee('Active Receipts')
+        ->assertSee('Canceled Receipts');
 
     $totals = $response->viewData('totals');
+    $receiptSummary = $response->viewData('receiptSummary');
 
-    expect((int) $totals->active_receipts)->toBe(1)
-        ->and((float) $totals->total_sales_vat_inclusive)->toBe(112.0)
-        ->and((float) $totals->total_amount_due)->toBe(112.0)
-        ->and(SalesInvoice::count())->toBe(2);
+    expect((int) $receiptSummary->total_receipts)->toBe(3)
+        ->and((int) $receiptSummary->active_receipts)->toBe(2)
+        ->and((int) $receiptSummary->canceled_receipts)->toBe(1)
+        ->and((int) $totals->active_receipts)->toBe(2)
+        ->and((float) $totals->withholding_tax)->toBe(12.0)
+        ->and((float) $totals->total_sales_vat_inclusive)->toBe(448.0)
+        ->and((float) $totals->total_amount_due)->toBe(436.0)
+        ->and(SalesInvoice::count())->toBe(3);
 });
 
 test('SI numbers display with at least three digits without changing stored values', function () {
@@ -176,34 +312,37 @@ test('SI numbers display with at least three digits without changing stored valu
         ->and($thousand->fresh()->si_number)->toBe('1000');
 });
 
-test('canceling a receipt retains its SI number and the next save advances the sequence', function () {
-    $receipt = createOfficialReceiptForTest([
-        'si_number' => '1',
-        'sold_to' => 'RECEIPT TO CANCEL',
-    ]);
+test('canceling a receipt retains its SI number and the next save advances past the latest issued sequence', function () {
+    createOfficialReceiptForTest(['si_number' => '1', 'sold_to' => 'FIRST ACTIVE RECEIPT']);
+    $receipt = createOfficialReceiptForTest(['si_number' => '2', 'sold_to' => 'RECEIPT TO CANCEL']);
+    createOfficialReceiptForTest(['si_number' => '3', 'sold_to' => 'LATEST ACTIVE RECEIPT']);
 
+    // Simulate an out-of-sync counter: receipt history must remain authoritative.
     DB::table('sales_invoice_number_counters')->where('id', 1)->update(['last_number' => 1]);
 
     $this->actingAs($this->admin)
         ->postJson(route('admin.official-receipts.cancel', $receipt), ['reason' => 'Incorrect customer'])
         ->assertOk()
-        ->assertJsonPath('message', 'Official receipt SI No. 001 canceled. Its number and record were retained.')
-        ->assertJsonPath('receipt.si_number', '1')
+        ->assertJsonPath('message', 'Official receipt SI No. 002 canceled. Its number and record were retained.')
+        ->assertJsonPath('receipt.si_number', '2')
         ->assertJsonPath('receipt.status', 'Canceled');
 
     $this->assertDatabaseHas('sales_invoices', [
         'id' => $receipt->id,
-        'si_number' => '1',
+        'si_number' => '2',
         'status' => 'Canceled',
         'cancellation_reason' => 'Incorrect customer',
     ]);
 
     $nextReceipt = $this->actingAs($this->staff)
-        ->postJson(route('staff.sales-invoices.store'), [])
+        ->postJson(route('staff.sales-invoices.store'), [
+            'items' => [['item_type' => 'Diesel']],
+        ])
         ->assertCreated();
 
-    $nextReceipt->assertJsonPath('invoice.si_number', '2');
-    expect(SalesInvoice::count())->toBe(2);
+    $nextReceipt->assertJsonPath('invoice.si_number', '4');
+    expect(SalesInvoice::count())->toBe(4);
+    $this->assertDatabaseHas('sales_invoice_number_counters', ['id' => 1, 'last_number' => 4]);
 });
 
 test('an admin can edit the actual receipt form while preserving its SI number and status', function () {

@@ -1408,6 +1408,7 @@
                 saleModalOpen: false,
                 paymentModalOpen: false,
                 salesInvoiceModalOpen: false,
+                salesInvoiceItemError: '',
                 savingSale: false,
                 savingPayment: false,
                 savingSalesInvoice: false,
@@ -1530,10 +1531,10 @@
                         withholding_tax: '',
                         items: Array.from({ length: 7 }, () => this.blankSalesInvoiceItem())
                     };
+                    this.salesInvoiceItemError = '';
                     this.savingSalesInvoice = false;
                 },
                 openSalesInvoiceModal() {
-                    this.resetSalesInvoice();
                     this.salesInvoiceModalOpen = true;
                 },
                 closeSalesInvoiceModal() {
@@ -1542,7 +1543,6 @@
                     }
 
                     this.salesInvoiceModalOpen = false;
-                    this.resetSalesInvoice();
                 },
                 invoiceNumber(value, precision = 2) {
                     const number = Number(value || 0);
@@ -1600,6 +1600,26 @@
                         return item[field] !== null && item[field] !== undefined && String(item[field]).trim() !== '';
                     });
                 },
+                salesInvoiceItemTypeIsValid(itemType) {
+                    return ['Diesel', 'Premium', 'Unleaded', 'Others'].includes(String(itemType || '').trim());
+                },
+                salesInvoiceHasValidItem() {
+                    return (this.salesInvoice.items || []).some((item) => this.salesInvoiceItemTypeIsValid(item.item_type));
+                },
+                validateSalesInvoiceItems() {
+                    const enteredItems = (this.salesInvoice.items || []).filter((item) => this.invoiceItemHasInput(item));
+                    const hasInvalidEnteredItem = enteredItems.some((item) => !this.salesInvoiceItemTypeIsValid(item.item_type));
+
+                    if (!this.salesInvoiceHasValidItem() || hasInvalidEnteredItem) {
+                        this.salesInvoiceItemError = 'Please select an item before continuing.';
+                        this.showNotice('error', this.salesInvoiceItemError);
+                        return false;
+                    }
+
+                    this.salesInvoiceItemError = '';
+
+                    return true;
+                },
                 fillSalesInvoiceDefaults() {
                     const defaults = {
                         sold_to: 'No Name Inputted',
@@ -1650,6 +1670,10 @@
                 },
                 async submitSalesInvoice(printAfterSave = false) {
                     if (this.savingSalesInvoice || this.confirmation.open) {
+                        return;
+                    }
+
+                    if (!this.validateSalesInvoiceItems()) {
                         return;
                     }
 

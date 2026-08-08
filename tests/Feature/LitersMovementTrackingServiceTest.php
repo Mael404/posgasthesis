@@ -247,6 +247,8 @@ test('shared liters movement totals pending and verified shift reading pump delt
     expect($state['summary']['total_liters'])->toBe(500.0)
         ->and($state['summary']['submission_count'])->toBe(2)
         ->and($state['summary']['pump_entry_count'])->toBe(3)
+        ->and(collect($state['summary']['tank_breakdown'])->pluck('id')->all())->toBe([1, 2, 3])
+        ->and(collect($state['summary']['tank_breakdown'])->pluck('fuel_type')->all())->toBe(['Premium', 'Unleaded', 'Diesel'])
         ->and($diesel['liters'])->toBe(500.0)
         ->and($diesel['remaining_liters'])->toBe(500.0)
         ->and($diesel['status']['key'])->toBe('normal')

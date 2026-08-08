@@ -201,11 +201,20 @@
                             <template x-for="(item, index) in salesInvoice.items" :key="index">
                                 <tr class="h-12">
                                     <td>
-                                        <select x-model="item.item_type" class="sales-invoice-input cursor-pointer" :aria-label="'Item type row ' + (index + 1)">
+                                        <select
+                                            x-model="item.item_type"
+                                            class="sales-invoice-input cursor-pointer"
+                                            @unless ($editingOfficialReceipt)
+                                                x-on:change="salesInvoiceItemError = ''"
+                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemError && !salesInvoiceItemTypeIsValid(item.item_type) && (invoiceItemHasInput(item) || !salesInvoiceHasValidItem()) }"
+                                                :aria-invalid="salesInvoiceItemError && !salesInvoiceItemTypeIsValid(item.item_type) ? 'true' : 'false'"
+                                                aria-describedby="sales-invoice-item-error"
+                                            @endunless
+                                            :aria-label="'Item type row ' + (index + 1)">
                                             <option value="">Select item</option>
                                             <option value="Diesel">Diesel</option>
                                             <option value="Premium">Premium</option>
-                                            <option value="Unleaded">Unleaded</option>
+                                            <option value="Unleaded">{{ \App\Models\SalesInvoiceItem::UNLEADED_DISPLAY_NAME }}</option>
                                             <option value="Others">Others</option>
                                         </select>
                                         <input
@@ -225,6 +234,16 @@
                             </template>
                         </tbody>
                     </table>
+                    @unless ($editingOfficialReceipt)
+                        <p
+                            id="sales-invoice-item-error"
+                            data-sales-invoice-no-print
+                            x-show="salesInvoiceItemError"
+                            x-cloak
+                            class="border-x border-b border-red-500 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                            role="alert"
+                            x-text="salesInvoiceItemError"></p>
+                    @endunless
 
                     <div class="grid grid-cols-[42%_58%] text-[14px] font-bold">
                         <div class="border-r border-black">

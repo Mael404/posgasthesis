@@ -69,7 +69,6 @@
             <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Automatic Filters</h2>
-                    <p class="mt-1 {{ $captionClass }}">Changing any field refreshes the register automatically.</p>
                 </div>
                 @if ($hasActiveFilters)
                     <a href="{{ route('admin.official-receipts.index') }}" class="{{ $secondaryButtonClass }} !h-10">Reset Filters</a>
@@ -86,13 +85,14 @@
                     <input type="date" name="end_date" value="{{ $filters['end_date'] }}" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $inputClass }} mt-1.5">
                 </label>
                 <label class="block">
-                    <span class="{{ $labelClass }}">Product / Item</span>
-                    <input type="text" name="product" value="{{ $filters['product'] }}" list="official-receipt-products" placeholder="Diesel, Premium..." x-on:input.debounce.450ms="$refs.filterForm.requestSubmit()" class="{{ $inputClass }} mt-1.5">
-                    <datalist id="official-receipt-products">
-                        @foreach ($productOptions as $product)
-                            <option value="{{ $product }}"></option>
+                    <span class="{{ $labelClass }}">Tank / Product</span>
+                    <select name="product" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $selectClass }} mt-1.5">
+                        <option value="">All Tanks / Products</option>
+                        @foreach ($tankProductOptions as $option)
+                            <option value="{{ $option['product'] }}" @selected($filters['product'] === $option['product'])>{{ $option['label'] }}</option>
                         @endforeach
-                    </datalist>
+                        <option value="Others" @selected($filters['product'] === 'Others')>Others</option>
+                    </select>
                 </label>
                 <label class="block">
                     <span class="{{ $labelClass }}">Customer Name</span>
@@ -118,10 +118,31 @@
         </section>
 
         @unless ($isStaff)
-            <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <section aria-labelledby="receipt-summary-heading">
+                <div class="mb-3">
+                    <h2 id="receipt-summary-heading" class="text-lg font-semibold text-gray-800 dark:text-white/90">Receipt Summary</h2>
+                    <p class="mt-1 {{ $captionClass }}">The total follows the latest issued SI sequence, including canceled receipts.</p>
+                </div>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500">
+                        <p class="{{ $labelClass }}">Total Receipts</p>
+                        <p class="mt-2 text-title-sm font-bold text-brand-600 dark:text-brand-400">{{ number_format((int) ($receiptSummary->total_receipts ?? 0)) }}</p>
+                    </article>
+                    <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-success-500">
+                        <p class="{{ $labelClass }}">Active Receipts</p>
+                        <p class="mt-2 text-title-sm font-bold text-success-600 dark:text-success-400">{{ number_format((int) ($receiptSummary->active_receipts ?? 0)) }}</p>
+                    </article>
+                    <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-error-500">
+                        <p class="{{ $labelClass }}">Canceled Receipts</p>
+                        <p class="mt-2 text-title-sm font-bold text-error-600 dark:text-error-400">{{ number_format((int) ($receiptSummary->canceled_receipts ?? 0)) }}</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label="Active receipt financial totals">
                 <article class="{{ $cardClass }} min-w-0">
-                    <p class="{{ $labelClass }}">Active Receipts</p>
-                    <p class="mt-2 text-title-sm font-bold text-gray-800 dark:text-white/90">{{ number_format((int) ($totals->active_receipts ?? 0)) }}</p>
+                    <p class="{{ $labelClass }}">Total Liters</p>
+                    <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">{{ $quantity($totals->total_liters ?? 0) }} L</p>
                 </article>
                 <article class="{{ $cardClass }} min-w-0">
                     <p class="{{ $labelClass }}">Total Sales (VAT Inc.)</p>
@@ -135,9 +156,17 @@
                     <p class="{{ $labelClass }}">VAT Amount</p>
                     <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->vat_amount ?? 0), 2) }}</p>
                 </article>
-                <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500">
-                    <p class="{{ $labelClass }}">Total Amount Due</p>
-                    <p class="mt-2 break-words text-title-sm font-bold text-brand-600 dark:text-brand-400">&#8369;{{ number_format((float) ($totals->total_amount_due ?? 0), 2) }}</p>
+                <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500 sm:col-span-2">
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+                        <div class="min-w-0">
+                            <p class="{{ $labelClass }}">Total Amount Due</p>
+                            <p class="mt-2 break-words text-title-sm font-bold text-brand-600 dark:text-brand-400">&#8369;{{ number_format((float) ($totals->total_amount_due ?? 0), 2) }}</p>
+                        </div>
+                        <div class="min-w-0 border-t border-gray-100 pt-4 dark:border-gray-800 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+                            <p class="{{ $labelClass }}">Total Withholding Tax</p>
+                            <p class="mt-2 break-words text-title-sm font-bold text-gray-800 dark:text-white/90">&#8369;{{ number_format((float) ($totals->withholding_tax ?? 0), 2) }}</p>
+                        </div>
+                    </div>
                 </article>
             </section>
         @endunless
@@ -162,7 +191,7 @@
                                 <th class="{{ $thNumberClass }}">Total Sales (VAT Inc.)</th>
                                 <th class="{{ $thNumberClass }}">VATable Sales</th>
                                 <th class="{{ $thNumberClass }}">VAT Amount</th>
-                                <th class="{{ $thNumberClass }}">Net of VAT</th>
+                                <th class="{{ $thNumberClass }}">Withholding Tax</th>
                                 <th class="{{ $thNumberClass }}">Total Amount Due</th>
                                 <th class="{{ $thClass }}">Status</th>
                                 <th class="{{ $thClass }}">Action</th>
@@ -212,7 +241,7 @@
                                     </td>
                                     <td class="{{ $tdClass }} min-w-48">
                                         @forelse ($receipt->items as $item)
-                                            <div class="{{ $loop->first ? '' : 'mt-2 border-t border-gray-100 pt-2 dark:border-gray-800' }} font-medium text-gray-800 dark:text-white/90">{{ $item->description }}</div>
+                                            <div class="{{ $loop->first ? '' : 'mt-2 border-t border-gray-100 pt-2 dark:border-gray-800' }} font-medium text-gray-800 dark:text-white/90">{{ $item->displayDescription() }}</div>
                                         @empty
                                             <span class="text-gray-400">No items</span>
                                         @endforelse
@@ -234,7 +263,7 @@
                                     <td class="{{ $tdNumberClass }} font-semibold">&#8369;{{ number_format((float) $receipt->total_sales_vat_inclusive, 2) }}</td>
                                     <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->vatable_sales, 2) }}</td>
                                     <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->vat_amount, 2) }}</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->amount_net_of_vat, 2) }}</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->withholding_tax, 2) }}</td>
                                     <td class="{{ $tdNumberClass }} font-bold">&#8369;{{ number_format((float) $receipt->total_amount_due, 2) }}</td>
                                     <td class="{{ $tdClass }} min-w-44">
                                         @if ($isCanceled)

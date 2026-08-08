@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SalesInvoice;
+use App\Models\SalesInvoiceItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,22 +28,28 @@ class SalesInvoiceController extends Controller
             'zero_rated_sales' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'sc_pwd_discount' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'withholding_tax' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
-            'items' => ['nullable', 'array', 'max:7'],
-            'items.*.item_type' => ['nullable', 'string', Rule::in(self::ITEM_TYPES)],
+            'items' => ['required', 'array', 'min:1', 'max:7'],
+            'items.*.item_type' => ['required', 'string', Rule::in(self::ITEM_TYPES)],
             'items.*.other_description' => ['nullable', 'string', 'max:255'],
             'items.*.quantity' => ['nullable', 'numeric', 'min:0', 'max:999999999999.999'],
             'items.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
             'items.*.amount' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
+        ], [
+            'items.required' => 'Please select an item before continuing.',
+            'items.array' => 'Please select an item before continuing.',
+            'items.min' => 'Please select an item before continuing.',
+            'items.*.item_type.required' => 'Please select an item before continuing.',
+            'items.*.item_type.in' => 'Please select a valid item before continuing.',
         ]);
 
         $items = collect($validated['items'] ?? [])
             ->values()
             ->filter(fn (array $item) => $this->itemHasInput($item))
             ->map(function (array $item, int $index) {
-                $itemType = $this->textOrDefault($item['item_type'] ?? null, 'Others');
+                $itemType = $item['item_type'];
                 $description = $itemType === 'Others'
                     ? $this->textOrDefault($item['other_description'] ?? null, 'No Item Description Inputted')
-                    : $itemType;
+                    : SalesInvoiceItem::defaultDescription($itemType);
 
                 return [
                     'sort_order' => $index + 1,
@@ -128,17 +135,24 @@ class SalesInvoiceController extends Controller
             ->first();
 
         if (! $counter) {
-            DB::table('sales_invoice_number_counters')->insert([
+            DB::table('sales_invoice_number_counters')->insertOrIgnore([
                 'id' => 1,
                 'last_number' => 0,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
-            $lastNumber = 0;
-        } else {
-            $lastNumber = (int) $counter->last_number;
+            $counter = DB::table('sales_invoice_number_counters')
+                ->where('id', 1)
+                ->lockForUpdate()
+                ->first();
         }
+
+        $latestIssuedNumber = (int) DB::table('sales_invoices')
+            ->selectRaw('COALESCE(MAX('.$this->siNumberExpression().'), 0) as latest_number')
+            ->value('latest_number');
+
+        $lastNumber = max((int) $counter->last_number, $latestIssuedNumber);
 
         $nextNumber = $lastNumber + 1;
 
@@ -150,6 +164,15 @@ class SalesInvoiceController extends Controller
             ]);
 
         return $nextNumber;
+    }
+
+    private function siNumberExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'mysql', 'mariadb' => 'CAST(sales_invoices.si_number AS UNSIGNED)',
+            'pgsql' => 'CAST(sales_invoices.si_number AS BIGINT)',
+            default => 'CAST(sales_invoices.si_number AS INTEGER)',
+        };
     }
 
     private function textOrDefault(mixed $value, string $default): string

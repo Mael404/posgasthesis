@@ -3,22 +3,26 @@
 namespace App\Http\Controllers;
 
 use App\Models\SalesInvoice;
+use App\Models\SalesInvoiceItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class AdminOfficialReceiptController extends Controller
 {
+    private const FUEL_ITEM_TYPES = ['Premium', 'Unleaded', 'Diesel'];
+
     public function index(Request $request): View
     {
         $validated = $request->validate([
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date'],
-            'product' => ['nullable', 'string', 'max:255'],
+            'product' => ['nullable', Rule::in(['Diesel', 'Premium', 'Unleaded', 'Others'])],
             'name' => ['nullable', 'string', 'max:255'],
             'si_from' => ['nullable', 'integer', 'min:1'],
             'si_to' => ['nullable', 'integer', 'min:1'],
@@ -37,15 +41,19 @@ class AdminOfficialReceiptController extends Controller
 
         $filteredQuery = $this->filteredQuery($filters);
 
-        $totals = (clone $filteredQuery)
-            ->where('sales_invoices.status', SalesInvoice::STATUS_ACTIVE)
-            ->selectRaw('COUNT(*) as active_receipts')
-            ->selectRaw('COALESCE(SUM(total_sales_vat_inclusive), 0) as total_sales_vat_inclusive')
-            ->selectRaw('COALESCE(SUM(vatable_sales), 0) as vatable_sales')
-            ->selectRaw('COALESCE(SUM(vat_amount), 0) as vat_amount')
-            ->selectRaw('COALESCE(SUM(amount_net_of_vat), 0) as amount_net_of_vat')
-            ->selectRaw('COALESCE(SUM(total_amount_due), 0) as total_amount_due')
+        $receiptSummary = (clone $filteredQuery)
+            ->selectRaw('COALESCE(MAX('.$this->siNumberExpression().'), 0) as total_receipts')
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN sales_invoices.status = ? THEN 1 ELSE 0 END), 0) as active_receipts',
+                [SalesInvoice::STATUS_ACTIVE]
+            )
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN sales_invoices.status = ? THEN 1 ELSE 0 END), 0) as canceled_receipts',
+                [SalesInvoice::STATUS_CANCELED]
+            )
             ->first();
+
+        $totals = $this->financialTotals($filteredQuery, $filters['product']);
 
         $receipts = (clone $filteredQuery)
             ->with(['items', 'staff:id,name', 'canceledBy:id,name'])
@@ -53,22 +61,13 @@ class AdminOfficialReceiptController extends Controller
             ->paginate(20)
             ->withQueryString();
 
-        $productOptions = DB::table('sales_invoice_items')
-            ->orderBy('item_type')
-            ->orderBy('description')
-            ->get(['item_type', 'description'])
-            ->flatMap(fn (object $item) => [$item->item_type, $item->description])
-            ->filter(fn ($value) => trim((string) $value) !== '')
-            ->unique(fn ($value) => strtolower(trim((string) $value)))
-            ->sort()
-            ->values();
-
         return view('pages.admin.official-receipts', [
             'title' => 'Official Receipts',
             'receipts' => $receipts,
+            'receiptSummary' => $receiptSummary,
             'totals' => $totals,
+            'tankProductOptions' => $this->tankProductOptions(),
             'filters' => $filters,
-            'productOptions' => $productOptions,
             'hasActiveFilters' => collect($filters)->contains(fn ($value, $key) => $key === 'status'
                 ? $value !== 'all'
                 : trim((string) $value) !== ''),
@@ -148,7 +147,7 @@ class AdminOfficialReceiptController extends Controller
                 $itemType = $this->textOrDefault($item['item_type'] ?? null, 'Others');
                 $description = $itemType === 'Others'
                     ? $this->textOrDefault($item['other_description'] ?? null, 'No Item Description Inputted')
-                    : $itemType;
+                    : SalesInvoiceItem::defaultDescription($itemType);
 
                 return [
                     'sort_order' => $index + 1,
@@ -240,10 +239,7 @@ class AdminOfficialReceiptController extends Controller
             $product = trim($filters['product']);
 
             $query->whereHas('items', function ($itemQuery) use ($product) {
-                $itemQuery->where(function ($descriptionQuery) use ($product) {
-                    $descriptionQuery->where('item_type', 'like', '%'.$product.'%')
-                        ->orWhere('description', 'like', '%'.$product.'%');
-                });
+                $this->applyProductItemFilter($itemQuery, $product);
             });
         }
 
@@ -260,6 +256,137 @@ class AdminOfficialReceiptController extends Controller
         }
 
         return $query;
+    }
+
+    private function financialTotals($filteredQuery, string $product): object
+    {
+        $activeReceipts = (clone $filteredQuery)
+            ->where('sales_invoices.status', SalesInvoice::STATUS_ACTIVE);
+
+        if ($product === '') {
+            $totals = (clone $activeReceipts)
+                ->selectRaw('COUNT(*) as active_receipts')
+                ->selectRaw('COALESCE(SUM(total_sales_vat_inclusive), 0) as total_sales_vat_inclusive')
+                ->selectRaw('COALESCE(SUM(vatable_sales), 0) as vatable_sales')
+                ->selectRaw('COALESCE(SUM(vat_amount), 0) as vat_amount')
+                ->selectRaw('COALESCE(SUM(amount_net_of_vat), 0) as amount_net_of_vat')
+                ->selectRaw('COALESCE(SUM(withholding_tax), 0) as withholding_tax')
+                ->selectRaw('COALESCE(SUM(total_amount_due), 0) as total_amount_due')
+                ->first();
+
+            $totals->total_liters = (float) DB::table('sales_invoice_items')
+                ->whereIn('sales_invoice_id', (clone $activeReceipts)->select('sales_invoices.id'))
+                ->whereIn('item_type', self::FUEL_ITEM_TYPES)
+                ->sum('quantity');
+
+            return $totals;
+        }
+
+        $filteredInvoices = (clone $activeReceipts)->select([
+            'sales_invoices.id',
+            'sales_invoices.total_sales_vat_inclusive',
+            'sales_invoices.withholding_tax',
+        ]);
+
+        $filteredItems = DB::table('sales_invoice_items')
+            ->select('sales_invoice_id')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as total_liters')
+            ->selectRaw('COALESCE(SUM(amount), 0) as total_sales_vat_inclusive')
+            ->groupBy('sales_invoice_id');
+
+        $this->applyProductItemFilter($filteredItems, $product);
+
+        $totals = DB::query()
+            ->fromSub($filteredInvoices, 'filtered_receipts')
+            ->joinSub($filteredItems, 'filtered_items', function ($join) {
+                $join->on('filtered_items.sales_invoice_id', '=', 'filtered_receipts.id');
+            })
+            ->selectRaw('COUNT(*) as active_receipts')
+            ->selectRaw('COALESCE(SUM(filtered_items.total_liters), 0) as total_liters')
+            ->selectRaw('COALESCE(SUM(filtered_items.total_sales_vat_inclusive), 0) as total_sales_vat_inclusive')
+            ->selectRaw(<<<'SQL'
+                COALESCE(SUM(
+                    CASE
+                        WHEN filtered_receipts.total_sales_vat_inclusive > 0
+                        THEN filtered_receipts.withholding_tax
+                            * filtered_items.total_sales_vat_inclusive
+                            / filtered_receipts.total_sales_vat_inclusive
+                        ELSE 0
+                    END
+                ), 0) as withholding_tax
+                SQL)
+            ->first();
+
+        $totalSales = round((float) $totals->total_sales_vat_inclusive, 2);
+        $vatableSales = round($totalSales / 1.12, 2);
+        $vatAmount = round($totalSales - $vatableSales, 2);
+        $withholdingTax = round((float) $totals->withholding_tax, 2);
+
+        $totals->total_liters = in_array($product, self::FUEL_ITEM_TYPES, true)
+            ? round((float) $totals->total_liters, 3)
+            : 0.0;
+        $totals->total_sales_vat_inclusive = $totalSales;
+        $totals->vatable_sales = $vatableSales;
+        $totals->vat_amount = $vatAmount;
+        $totals->amount_net_of_vat = $vatableSales;
+        $totals->withholding_tax = $withholdingTax;
+        $totals->total_amount_due = round($totalSales - $withholdingTax, 2);
+
+        return $totals;
+    }
+
+    private function applyProductItemFilter($query, string $product): void
+    {
+        $query->where(function ($itemQuery) use ($product) {
+            $itemQuery->where('item_type', $product)
+                ->orWhere('description', 'like', '%'.$product.'%');
+        });
+    }
+
+    private function tankProductOptions()
+    {
+        if (! Schema::hasTable('tanks')) {
+            return collect(self::FUEL_ITEM_TYPES)->map(fn (string $product) => [
+                'product' => $product,
+                'label' => SalesInvoiceItem::defaultDescription($product),
+            ]);
+        }
+
+        $tanksByProduct = DB::table('tanks')
+            ->orderBy('id')
+            ->get(['id', 'name', 'fuel_type', 'status'])
+            ->filter(fn (object $tank) => in_array($this->normalizeTankProduct($tank->fuel_type), self::FUEL_ITEM_TYPES, true))
+            ->filter(fn (object $tank) => ! isset($tank->status) || in_array(trim((string) $tank->status), ['', 'Active'], true))
+            ->groupBy(fn (object $tank) => $this->normalizeTankProduct($tank->fuel_type));
+
+        return collect(self::FUEL_ITEM_TYPES)->map(function (string $product) use ($tanksByProduct) {
+            $tanks = $tanksByProduct->get($product, collect());
+
+            if ($tanks->isEmpty()) {
+                return null;
+            }
+
+            $tankLabels = $tanks->map(function (object $tank) {
+                preg_match('/\bTank\s*\d+\b/i', trim((string) $tank->name), $matches);
+
+                return isset($matches[0]) ? Str::title($matches[0]) : trim((string) $tank->name);
+            })->filter()->unique()->implode(', ');
+
+            return [
+                'product' => $product,
+                'label' => SalesInvoiceItem::defaultDescription($product).' / '.$tankLabels,
+            ];
+        })->filter()->values();
+    }
+
+    private function normalizeTankProduct(mixed $fuelType): ?string
+    {
+        return match (strtolower(trim((string) $fuelType))) {
+            'premium' => 'Premium',
+            'unleaded', 'regular', 'unleaded/regular' => 'Unleaded',
+            'diesel' => 'Diesel',
+            default => null,
+        };
     }
 
     private function siNumberExpression(): string
