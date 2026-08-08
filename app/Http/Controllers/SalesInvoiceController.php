@@ -100,7 +100,7 @@ class SalesInvoiceController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => "Sales invoice SI No. {$invoice->si_number} saved successfully.",
+            'message' => "Sales invoice SI No. {$invoice->formattedSiNumber()} saved successfully.",
             'invoice' => [
                 'id' => $invoice->id,
                 'si_number' => $invoice->si_number,

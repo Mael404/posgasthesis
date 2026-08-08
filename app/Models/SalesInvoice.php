@@ -74,6 +74,11 @@ class SalesInvoice extends Model
         return $this->hasMany(SalesInvoiceItem::class)->orderBy('sort_order');
     }
 
+    public function formattedSiNumber(): string
+    {
+        return str_pad((string) $this->si_number, 3, '0', STR_PAD_LEFT);
+    }
+
     public function markCanceled(?int $canceledBy = null, ?string $reason = null): bool
     {
         if ($this->status === self::STATUS_CANCELED) {

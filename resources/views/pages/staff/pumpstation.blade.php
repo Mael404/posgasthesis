@@ -1555,6 +1555,11 @@
 
                     return Math.round((number + Number.EPSILON) * multiplier) / multiplier;
                 },
+                formatSiNumber(value) {
+                    const siNumber = String(value ?? '').trim();
+
+                    return siNumber === '' ? '' : siNumber.padStart(3, '0');
+                },
                 invoiceTotalSales() {
                     return this.invoiceNumber((this.salesInvoice.items || []).reduce((total, item) => {
                         return total + this.invoiceNumber(item.amount);
@@ -1653,7 +1658,7 @@
                         message: printAfterSave
                             ? 'Are you sure you want to save and print this sales invoice?'
                             : 'Are you sure you want to submit this sales invoice?',
-                        details: 'SI No. ' + this.salesInvoice.si_number + ' / Total Amount Due: ' + this.invoiceMoney(this.invoiceTotalAmountDue()),
+                        details: 'SI No. ' + this.formatSiNumber(this.salesInvoice.si_number) + ' / Total Amount Due: ' + this.invoiceMoney(this.invoiceTotalAmountDue()),
                         confirmText: printAfterSave ? 'Yes, Save & Print' : 'Yes, Save Invoice',
                         cancelText: 'No',
                         tone: 'success'

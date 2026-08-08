@@ -70,6 +70,8 @@ test('a staff user can store a sales invoice with workbook calculations', functi
     $response
         ->assertCreated()
         ->assertJsonPath('success', true)
+        ->assertJsonPath('message', 'Sales invoice SI No. 001 saved successfully.')
+        ->assertJsonPath('invoice.si_number', '1')
         ->assertJsonPath('invoice.total_amount_due', 333);
 
     $invoiceId = $response->json('invoice.id');
@@ -237,5 +239,8 @@ test('the staff sales invoice asks for confirmation before saving', function () 
         ->assertSee('Authorized representative from the logged-in user', false)
         ->assertDontSee('x-model="salesInvoice.authorized_representative"', false)
         ->assertSee('amountBeforeWithholdingTax - withholdingTax', false)
+        ->assertSee('x-text="formatSiNumber(salesInvoice.si_number)"', false)
+        ->assertSee("siNumber.padStart(3, '0')", false)
+        ->assertSee("details: 'SI No. ' + this.formatSiNumber(this.salesInvoice.si_number)", false)
         ->assertSee("cancelText: 'No'", false);
 });

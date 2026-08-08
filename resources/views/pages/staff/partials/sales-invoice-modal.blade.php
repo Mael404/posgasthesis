@@ -248,7 +248,7 @@
                                 <span class="pt-1 text-[16px] font-black">SI NO.</span>
                                 <output
                                     class="inline-flex min-w-28 items-center justify-center rounded-lg border-2 border-red-500 bg-red-50 px-4 py-1.5 text-[24px] font-black leading-none tracking-wider text-red-600 tabular-nums"
-                                    x-text="salesInvoice.si_number"
+                                    x-text="formatSiNumber(salesInvoice.si_number)"
                                     aria-label="Automatically assigned sales invoice number"></output>
                             </div>
                         </div>

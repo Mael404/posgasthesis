@@ -147,6 +147,35 @@ test('canceled receipts remain listed but are excluded from register totals', fu
         ->and(SalesInvoice::count())->toBe(2);
 });
 
+test('SI numbers display with at least three digits without changing stored values', function () {
+    $one = createOfficialReceiptForTest(['si_number' => '1', 'sold_to' => 'ONE DIGIT']);
+    $ten = createOfficialReceiptForTest(['si_number' => '10', 'sold_to' => 'TWO DIGITS']);
+    $hundred = createOfficialReceiptForTest(['si_number' => '100', 'sold_to' => 'THREE DIGITS']);
+    $thousand = createOfficialReceiptForTest(['si_number' => '1000', 'sold_to' => 'FOUR DIGITS']);
+
+    $response = $this->actingAs($this->admin)->get(route('admin.official-receipts.index'));
+
+    $response
+        ->assertOk()
+        ->assertSee('001')
+        ->assertSee('010')
+        ->assertSee('100')
+        ->assertSee('1000')
+        ->assertDontSee('00100')
+        ->assertDontSee('01000')
+        ->assertSee('x-text="formatSiNumber(salesInvoice.si_number)"', false)
+        ->assertSee('x-text="formatSiNumber(cancellation.siNumber)"', false);
+
+    expect($one->formattedSiNumber())->toBe('001')
+        ->and($ten->formattedSiNumber())->toBe('010')
+        ->and($hundred->formattedSiNumber())->toBe('100')
+        ->and($thousand->formattedSiNumber())->toBe('1000')
+        ->and($one->fresh()->si_number)->toBe('1')
+        ->and($ten->fresh()->si_number)->toBe('10')
+        ->and($hundred->fresh()->si_number)->toBe('100')
+        ->and($thousand->fresh()->si_number)->toBe('1000');
+});
+
 test('canceling a receipt retains its SI number and the next save advances the sequence', function () {
     $receipt = createOfficialReceiptForTest([
         'si_number' => '1',
@@ -158,6 +187,7 @@ test('canceling a receipt retains its SI number and the next save advances the s
     $this->actingAs($this->admin)
         ->postJson(route('admin.official-receipts.cancel', $receipt), ['reason' => 'Incorrect customer'])
         ->assertOk()
+        ->assertJsonPath('message', 'Official receipt SI No. 001 canceled. Its number and record were retained.')
         ->assertJsonPath('receipt.si_number', '1')
         ->assertJsonPath('receipt.status', 'Canceled');
 
@@ -252,6 +282,7 @@ test('staff can access the receipt register from their navigation', function () 
     $response
         ->assertOk()
         ->assertSee($receipt->sold_to)
+        ->assertSee('001')
         ->assertSee('Automatic Filters')
         ->assertSee('VAT Receipt Data')
         ->assertSee('Edit Receipt')

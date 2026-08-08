@@ -198,7 +198,7 @@
                                 <tr class="{{ $isCanceled ? 'bg-error-50/50 dark:bg-error-500/[0.04]' : '' }}">
                                     <td class="{{ $tdClass }}">
                                         <span class="inline-flex min-w-16 items-center justify-center rounded-lg border px-3 py-1.5 text-base font-black tabular-nums {{ $isCanceled ? 'border-error-200 bg-error-50 text-error-600 line-through dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400' : 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400' }}">
-                                            {{ $receipt->si_number }}
+                                            {{ $receipt->formattedSiNumber() }}
                                         </span>
                                     </td>
                                     <td class="{{ $tdClass }} whitespace-nowrap">
@@ -305,7 +305,7 @@
                         <div>
                             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Cancel Official Receipt</h2>
                             <p class="mt-2 text-theme-sm leading-6 text-gray-500 dark:text-gray-400">
-                                SI No. <strong x-text="cancellation.siNumber"></strong> for <strong x-text="cancellation.customer"></strong> will remain in the register, but will be excluded from every financial total.
+                                SI No. <strong x-text="formatSiNumber(cancellation.siNumber)"></strong> for <strong x-text="cancellation.customer"></strong> will remain in the register, but will be excluded from every financial total.
                             </p>
                         </div>
                     </div>
@@ -443,6 +443,11 @@
                     const multiplier = 10 ** precision;
 
                     return Math.round((number + Number.EPSILON) * multiplier) / multiplier;
+                },
+                formatSiNumber(value) {
+                    const siNumber = String(value ?? '').trim();
+
+                    return siNumber === '' ? '' : siNumber.padStart(3, '0');
                 },
                 invoiceTotalSales() {
                     return this.invoiceNumber((this.salesInvoice.items || []).reduce((total, item) => {

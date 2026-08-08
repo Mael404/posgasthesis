@@ -101,8 +101,8 @@ class AdminOfficialReceiptController extends Controller
         });
 
         $message = $wasAlreadyCanceled
-            ? "Official receipt SI No. {$receipt->si_number} is already canceled."
-            : "Official receipt SI No. {$receipt->si_number} canceled. Its number and record were retained.";
+            ? "Official receipt SI No. {$receipt->formattedSiNumber()} is already canceled."
+            : "Official receipt SI No. {$receipt->formattedSiNumber()} canceled. Its number and record were retained.";
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -202,7 +202,7 @@ class AdminOfficialReceiptController extends Controller
             return $lockedReceipt->fresh(['items']);
         });
 
-        $message = "Official receipt SI No. {$receipt->si_number} updated successfully.";
+        $message = "Official receipt SI No. {$receipt->formattedSiNumber()} updated successfully.";
 
         if ($request->expectsJson()) {
             return response()->json([
