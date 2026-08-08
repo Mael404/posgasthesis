@@ -6,6 +6,7 @@
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
         $captionClass = 'text-theme-sm text-gray-500 dark:text-gray-400';
         $inputClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
+        $dateInputClass = 'h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent py-2.5 pl-3 pr-11 text-theme-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800';
         $selectClass = 'h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2.5 text-theme-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800';
         $primaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-theme-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60';
         $secondaryButtonClass = 'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-theme-sm font-medium text-gray-700 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200';
@@ -17,6 +18,17 @@
         $tdNumberClass = 'whitespace-nowrap px-4 py-4 text-right align-top text-theme-sm tabular-nums text-gray-700 dark:text-gray-300';
         $quantity = fn ($value) => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
         $isStaff = auth()->user()?->role === \App\Models\User::ROLE_STAFF;
+        $productFilterClass = match ($filters['product']) {
+            'Premium' => '!border-error-300 !bg-error-50 !text-error-700 dark:!border-error-500/40 dark:!bg-error-500/15 dark:!text-error-400',
+            'Unleaded' => '!border-success-300 !bg-success-50 !text-success-700 dark:!border-success-500/40 dark:!bg-success-500/15 dark:!text-success-400',
+            'Diesel' => '!border-warning-300 !bg-warning-50 !text-warning-800 dark:!border-warning-500/40 dark:!bg-warning-500/15 dark:!text-warning-400',
+            default => '',
+        };
+        $productOptionClasses = [
+            'Premium' => 'bg-error-50 text-error-700 dark:bg-error-500/20 dark:text-error-300',
+            'Unleaded' => 'bg-success-50 text-success-700 dark:bg-success-500/20 dark:text-success-300',
+            'Diesel' => 'bg-warning-50 text-warning-800 dark:bg-warning-500/20 dark:text-warning-300',
+        ];
     @endphp
 
     <style>[x-cloak] { display: none !important; }</style>
@@ -56,10 +68,6 @@
                 <div class="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Official Receipt Register</h1>
-                        <p class="mt-1 {{ $captionClass }}">VAT receipt records patterned after the workbook register. Canceled receipts remain visible.</p>
-                    </div>
-                    <div class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-theme-xs font-medium text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
-                        Financial totals always exclude canceled receipts.
                     </div>
                 </div>
             </section>
@@ -78,18 +86,28 @@
             <form x-ref="filterForm" method="GET" action="{{ route('admin.official-receipts.index') }}" class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
                 <label class="block">
                     <span class="{{ $labelClass }}">From Date</span>
-                    <input type="date" name="start_date" value="{{ $filters['start_date'] }}" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $inputClass }} mt-1.5">
+                    <span class="relative mt-1.5 block custom-datepicker">
+                        <input type="text" name="start_date" value="{{ $filters['start_date'] }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-official-receipt-date>
+                        <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400" aria-hidden="true">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none"><path d="M8 2.75v2.5M16 2.75v2.5M4.75 8.25h14.5M6 4.25h12A2.25 2.25 0 0 1 20.25 6.5V19A2.25 2.25 0 0 1 18 21.25H6A2.25 2.25 0 0 1 3.75 19V6.5A2.25 2.25 0 0 1 6 4.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        </span>
+                    </span>
                 </label>
                 <label class="block">
                     <span class="{{ $labelClass }}">To Date</span>
-                    <input type="date" name="end_date" value="{{ $filters['end_date'] }}" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $inputClass }} mt-1.5">
+                    <span class="relative mt-1.5 block custom-datepicker">
+                        <input type="text" name="end_date" value="{{ $filters['end_date'] }}" placeholder="Select date" autocomplete="off" class="{{ $dateInputClass }}" data-official-receipt-date>
+                        <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400" aria-hidden="true">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none"><path d="M8 2.75v2.5M16 2.75v2.5M4.75 8.25h14.5M6 4.25h12A2.25 2.25 0 0 1 20.25 6.5V19A2.25 2.25 0 0 1 18 21.25H6A2.25 2.25 0 0 1 3.75 19V6.5A2.25 2.25 0 0 1 6 4.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        </span>
+                    </span>
                 </label>
                 <label class="block">
                     <span class="{{ $labelClass }}">Tank / Product</span>
-                    <select name="product" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $selectClass }} mt-1.5">
+                    <select name="product" x-on:change="$refs.filterForm.requestSubmit()" class="{{ $selectClass }} mt-1.5 {{ $productFilterClass }}">
                         <option value="">All Tanks / Products</option>
                         @foreach ($tankProductOptions as $option)
-                            <option value="{{ $option['product'] }}" @selected($filters['product'] === $option['product'])>{{ $option['label'] }}</option>
+                            <option value="{{ $option['product'] }}" class="{{ $productOptionClasses[$option['product']] ?? '' }}" @selected($filters['product'] === $option['product'])>{{ $option['label'] }}</option>
                         @endforeach
                         <option value="Others" @selected($filters['product'] === 'Others')>Others</option>
                     </select>
@@ -121,7 +139,6 @@
             <section aria-labelledby="receipt-summary-heading">
                 <div class="mb-3">
                     <h2 id="receipt-summary-heading" class="text-lg font-semibold text-gray-800 dark:text-white/90">Receipt Summary</h2>
-                    <p class="mt-1 {{ $captionClass }}">The total follows the latest issued SI sequence, including canceled receipts.</p>
                 </div>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <article class="{{ $cardClass }} min-w-0 border-l-4 border-l-brand-500">
@@ -377,6 +394,7 @@
                 },
                 init() {
                     this.resetSalesInvoice();
+                    this.initDatePickers();
                     let message = config.flashMessage || '';
 
                     try {
@@ -389,6 +407,32 @@
                     if (message) {
                         this.$nextTick(() => this.showToast(message));
                     }
+                },
+                initDatePickers() {
+                    if (!window.flatpickr) {
+                        return;
+                    }
+
+                    this.$nextTick(() => {
+                        document.querySelectorAll('[data-official-receipt-date]').forEach((input) => {
+                            if (input._officialReceiptDatePicker) {
+                                return;
+                            }
+
+                            input._officialReceiptDatePicker = window.flatpickr(input, {
+                                static: true,
+                                monthSelectorType: 'static',
+                                dateFormat: 'Y-m-d',
+                                defaultDate: input.value || null,
+                                allowInput: false,
+                                disableMobile: true,
+                                onChange: (selectedDates, dateStr) => {
+                                    input.value = dateStr;
+                                    input.form?.requestSubmit();
+                                }
+                            });
+                        });
+                    });
                 },
                 blankSalesInvoiceItem() {
                     return {
