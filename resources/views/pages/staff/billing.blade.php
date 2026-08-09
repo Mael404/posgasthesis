@@ -208,7 +208,6 @@
                 <div class="min-w-0">
                     <p class="{{ $labelClass }}">Staff Billing</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Billing</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Review unpaid and partially paid statements, print invoices, and log customer collections for shift verification.</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:min-w-[620px]">
@@ -249,7 +248,6 @@
             <div class="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $activeBillingTab === 'partial' ? 'Partially Paid' : 'Unpaid Bills' }}</h2>
-                    <p class="mt-1 {{ $captionClass }}">Search by invoice number, business name, or account owner.</p>
                 </div>
 
                 <form method="GET" action="{{ route('staff.billing.index') }}" class="w-full lg:w-[380px]">

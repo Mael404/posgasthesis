@@ -330,8 +330,7 @@
         <section class="{{ $cardClass }}">
             <div class="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pump Lanes</h2>
-                    <p class="mt-1 {{ $captionClass }}">Open a pump to log a credit or walk-in sale.</p>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pumps</h2>
                 </div>
                 <div class="flex flex-col gap-2 sm:flex-row lg:shrink-0">
                     <button type="button" x-on:click="openSalesInvoiceModal" class="{{ $secondaryButtonClass }}">
@@ -434,7 +433,6 @@
             <div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Recent Transactions & Logs</h2>
-                    <p class="mt-1 {{ $captionClass }}">Newest fuel sales and account collections from your shift.</p>
                 </div>
                 <button type="button" x-on:click="printSelected" class="{{ $secondaryButtonClass }}" :disabled="selectedIds.length === 0">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1006,7 +1004,7 @@
                                         <div class="flex items-center justify-between gap-3">
                                             <div>
                                                 <p class="{{ $labelClass }}">1. Select Credit Customer</p>
-                                                <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">Choose the account receiving the payment.</p>
+                                           
                                             </div>
                                         </div>
                                         <div class="relative mt-3" x-on:click.outside="paymentCustomerDropdownOpen = false">
@@ -1112,7 +1110,7 @@
                                             <div class="min-w-0">
                                                 <p class="{{ $labelClass }}">4. Invoice Link</p>
                                                 <h3 class="mt-0.5 text-theme-sm font-semibold text-gray-800 dark:text-white/90">Optional invoice selection</h3>
-                                                <p class="truncate text-theme-xs text-gray-500 dark:text-gray-400">Keep manual payment selected when this is not tied to a specific invoice.</p>
+                                            
                                             </div>
                                             <span x-show="loadingInvoices" class="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-theme-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">Loading...</span>
                                         </div>

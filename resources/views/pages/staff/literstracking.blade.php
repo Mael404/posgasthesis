@@ -241,9 +241,7 @@
                     <p class="{{ $labelClass }}">Staff Module</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Liters Tracking</h1>
                     <p class="mt-2 {{ $captionClass }}">
-                        Shared period {{ $period->period_code ?? 'Pending Migration' }} started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}. All staff see the same submitted shift-reading totals and limits.
-                    </p>
-                </div>
+                        Shared period {{ $period->period_code ?? 'Pending Migration' }} started {{ $period ? $dateLabel($period->started_at, 'M d, Y h:i A') : 'after migration' }}.
 
                 <span class="inline-flex w-fit rounded-full px-3 py-1 text-theme-xs font-medium {{ $summary['status']['badge_class'] }}">
                     {{ $summary['status']['label'] }}
@@ -277,7 +275,7 @@
         <section class="{{ $cardClass }}">
             <div class="mb-4">
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Shared Tank Limits</h2>
-                <p class="mt-1 {{ $captionClass }}">P1/P3 Premium, P2/P4 Unleaded, and P5/P6 Diesel are accumulated from every pending or verified shift submission.</p>
+            
             </div>
             <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 @foreach ($tankBreakdown as $tank)
@@ -331,7 +329,7 @@
             <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Included Shift Reading Submissions</h2>
-                    <p class="mt-1 {{ $captionClass }}">This view includes only your Pending and Verified submissions.</p>
+                  
                 </div>
                 <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
                     {{ number_format((int) $summary['submission_count']) }} submissions

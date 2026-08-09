@@ -329,7 +329,6 @@
                 <div class="min-w-0">
                     <p class="{{ $labelClass }}">Staff Module</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">Shift Readings</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Submit periodical settlement readings and track admin review status.</p>
                 </div>
 
                 <div class="flex flex-col gap-2 sm:flex-row xl:justify-end">
@@ -410,7 +409,6 @@
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement History</h2>
-                    <p class="mt-1 {{ $captionClass }}">{{ $hasReadingFilters ? 'Filtered readings appear first.' : 'Newest submitted readings appear first.' }}</p>
                 </div>
             </div>
 
@@ -571,7 +569,6 @@
                             <div class="min-w-0">
                                 <p class="text-theme-xs font-semibold uppercase text-brand-700 dark:text-brand-300">Time-Saving Tool</p>
                                 <h3 class="mt-1 text-theme-sm font-semibold text-gray-800 dark:text-white/90">Fetch Last Closing Data</h3>
-                                <p class="mt-1 text-theme-sm text-gray-600 dark:text-gray-400">Fill every Opening input with the latest submitted shift closing numbers before entering new closings.</p>
                                 <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">
                                     Latest source:
                                     <span class="font-medium text-gray-700 dark:text-gray-200" x-text="latestReadingLabel || 'No submitted settlement found yet'"></span>
@@ -644,7 +641,6 @@
                                 <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">3. Pump Meter Readings</h3>
-                                        <p class="{{ $captionClass }}">Upload each dispenser's meter photos before entering the two pump readings below it.</p>
                                     </div>
                                     <div class="flex flex-wrap gap-2 text-theme-xs font-medium tabular-nums text-gray-500 dark:text-gray-400">
                                         <span x-text="money(totalPumpSales()) + ' gross sales'"></span>
@@ -758,7 +754,6 @@
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Live Settlement Preview</h3>
-                                        <p class="{{ $captionClass }}">Computed from the current form values.</p>
                                     </div>
                                     <span class="rounded-full px-2.5 py-1 text-theme-xs font-medium" x-bind:class="varianceMeta().badge" x-text="varianceMeta().label"></span>
                                 </div>
@@ -810,7 +805,6 @@
                                 <div class="mb-3 flex items-center justify-between gap-3">
                                     <div>
                                         <h3 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Cash Denomination Count</h3>
-                                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">Enter the number of bills or coins physically remitted.</p>
                                     </div>
                                     <div class="text-right">
                                         <p class="{{ $labelClass }}">Cash Total</p>

@@ -89,7 +89,6 @@
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Notifications</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Station notices and updates from the admin team.</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3 sm:min-w-80">
