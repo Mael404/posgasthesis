@@ -111,7 +111,6 @@
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Staff Management</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Create staff accounts, manage access status, and reset credentials from one admin workspace.</p>
                 </div>
 
                 <div class="flex flex-wrap gap-2 xl:justify-end">
@@ -180,7 +179,6 @@
             <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,380px)] lg:items-end">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Active Staff</h2>
-                    <p class="mt-1 {{ $captionClass }}">Accounts that can sign in and use the system.</p>
                 </div>
                 <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                     <span>Search active staff</span>

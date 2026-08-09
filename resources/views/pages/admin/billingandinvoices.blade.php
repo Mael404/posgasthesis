@@ -228,7 +228,6 @@
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Billing & Invoices</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Generate billing statements, receive invoice payments, print statements, and track acknowledgement receipts.</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap xl:justify-end">
@@ -275,7 +274,6 @@
             <div class="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $invoiceTabTitles[$invoiceTableTab] ?? 'Unpaid Bills' }}</h2>
-                    <p class="mt-1 {{ $captionClass }}">Search invoices by invoice number or customer.</p>
                 </div>
                 <form method="GET" action="{{ route('admin.billing.index') }}" class="w-full lg:w-[380px]">
                     <input type="hidden" name="tab" value="{{ $invoiceTableTab }}">

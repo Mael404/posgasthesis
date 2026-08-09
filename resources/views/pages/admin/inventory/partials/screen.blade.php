@@ -238,7 +238,6 @@
                 <div class="min-w-0">
                     <p class="{{ $labelClass }}">Admin Inventory</p>
                     <h1 class="mt-2 text-title-sm font-semibold text-gray-800 dark:text-white/90">{{ $inventoryTitle }}</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">{{ $inventoryDescription }}</p>
                 </div>
 
                 <button type="button" onclick="window.print()" class="{{ $secondaryButtonClass }}">
@@ -342,7 +341,6 @@
             <section class="{{ $cardClass }}">
                 <div class="mb-5">
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tank Management</h2>
-                    <p class="mt-1 {{ $captionClass }}">Current tank volume and connected pump assignments.</p>
                 </div>
 
                 <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
@@ -406,7 +404,6 @@
                 <div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Pump Transaction History Per Tank</h2>
-                        <p class="mt-1 {{ $captionClass }}">Fuel sales grouped by each tank's connected pumps.</p>
                     </div>
                 </div>
 
@@ -601,7 +598,6 @@
                 <div class="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Recent Deliveries</h2>
-                        <p class="mt-1 {{ $captionClass }}">Latest tank replenishment logs.</p>
                     </div>
                     <button type="button" class="{{ $primaryButtonClass }}" x-on:click="openDeliveryModal">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -902,7 +898,6 @@
                 <div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Price Management</h2>
-                        <p class="mt-1 {{ $captionClass }}">Current pump and bulk prices used by the price guide and future transactions.</p>
                     </div>
                     <button type="button" x-on:click="updateAllPrices" class="{{ $primaryButtonClass }}" :disabled="savingPrices">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">

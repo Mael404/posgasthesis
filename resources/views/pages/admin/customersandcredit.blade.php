@@ -174,7 +174,6 @@
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Customers & Credit</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Manage customer profiles, credit limits, ledger activity, payments, and account balances.</p>
                 </div>
 
                 <div class="flex flex-wrap gap-2 xl:justify-end">
@@ -215,7 +214,6 @@
             <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,380px)] lg:items-end">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Customer List & Balances</h2>
-                    <p class="mt-1 {{ $captionClass }}">Active credit accounts and balance status.</p>
                 </div>
                 <form method="GET" action="{{ route('customers.index') }}" class="w-full">
                     <input type="hidden" name="tab" value="list">

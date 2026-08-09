@@ -114,7 +114,6 @@
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                 <div class="min-w-0">
                     <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Announcements</h1>
-                    <p class="mt-2 max-w-3xl {{ $captionClass }}">Post station updates for staff accounts and keep old notices editable from one place.</p>
                 </div>
 
                 <div class="grid grid-cols-1 gap-3 sm:min-w-[28rem] sm:grid-cols-3">
@@ -138,7 +137,6 @@
             <section class="{{ $cardClass }}">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">New Announcement</h2>
-                    <p class="mt-1 {{ $captionClass }}">Staff will see the notice in their announcements inbox.</p>
                 </div>
 
                 <form x-on:submit.prevent="submitCreate()" class="mt-5 space-y-4">
@@ -168,7 +166,6 @@
                 <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,340px)] lg:items-end">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Posted Announcements</h2>
-                        <p class="mt-1 {{ $captionClass }}">Newest announcements appear first. Staff comments are shown in each detail view.</p>
                     </div>
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                         <span>Search</span>

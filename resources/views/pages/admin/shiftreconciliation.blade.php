@@ -242,8 +242,7 @@
         <section class="{{ $cardClass }} p-5 lg:p-6">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,680px)] xl:items-end">
                 <div class="min-w-0">
-                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Shift Reconciliation</h1>
-                    <p class="mt-1 {{ $captionClass }}">Review remittances, pump readings, collections, discounts, and settlement variances.</p>
+                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Shift Validation</h1>
                 </div>
 
                 <div data-shift-reconciliation-summary class="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -281,7 +280,6 @@
             <div class="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Settlement Queue</h2>
-                    <p class="mt-1 {{ $captionClass }}">{{ $hasReconciliationFilters ? 'Filtered readings appear first.' : 'Newest readings appear first.' }}</p>
                 </div>
             </div>
 

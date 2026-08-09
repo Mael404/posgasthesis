@@ -126,7 +126,6 @@
                         <div class="{{ $metricValueClass }}" id="netSalesValue">
                             &#8369;{{ number_format($netSalesStats['shift_reading_verified_net_sales_with_credit'] ?? 0, 2) }}
                         </div>
-                        <p class="{{ $captionClass }}" id="netSalesCaption">Verified shift readings: pump totals less discounts, including credits</p>
                         <div class="{{ $metaClass }}" id="netSalesMeta">
                             Period: {{ $metricPeriodLabel('net-sales') }} | Verified readings: {{ number_format($netSalesStats['shift_reading_verified_count'] ?? 0) }}
                         </div>
@@ -348,7 +347,6 @@
                         <div class="{{ $cardHeaderClass }}">
                             <div class="min-w-0">
                                 <h2 class="{{ $cardTitleClass }}">Liters Movement</h2>
-                                <p class="mt-1 text-theme-sm text-gray-500 dark:text-gray-400">Shift-reading pump liters by status, tank, and pump.</p>
                             </div>
                             <div class="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:items-end">
                                 <div class="{{ $segmentGroupClass }}" aria-label="Liters movement status">
@@ -429,7 +427,6 @@
                         <div class="{{ $cardHeaderClass }}">
                             <div>
                                 <h2 class="{{ $cardTitleClass }}">Inventory Movement Per Tank</h2>
-                                <p class="mt-1 {{ $captionClass }}">Submitted pending and verified shift readings only; voided and rejected readings are excluded.</p>
                             </div>
                             <div class="{{ $segmentGroupClass }}" aria-label="Tank movement period">
                                 <button type="button" class="{{ $segmentButtonClass }}" data-period-target="tank-movements" data-period="today">Today</button>

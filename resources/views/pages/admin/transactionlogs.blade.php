@@ -3,14 +3,20 @@
 @section('content')
     @php
         $reportData = $reportData ?? [
-            'Diesel' => ['revenue' => 0, 'liters' => 0],
-            'Unleaded' => ['revenue' => 0, 'liters' => 0],
-            'Premium' => ['revenue' => 0, 'liters' => 0],
+            'Diesel' => ['gross_sales' => 0, 'discounts' => 0, 'net_sales' => 0, 'liters' => 0],
+            'Unleaded' => ['gross_sales' => 0, 'discounts' => 0, 'net_sales' => 0, 'liters' => 0],
+            'Premium' => ['gross_sales' => 0, 'discounts' => 0, 'net_sales' => 0, 'liters' => 0],
         ];
         $tanks = collect($tanks ?? []);
         $salesOut = collect($salesOut ?? []);
-        $financials = collect($financials ?? []);
-        $activeTab = in_array(request('tab'), ['sales', 'inventory', 'financial'], true) ? request('tab') : 'sales';
+        $shiftReadings = collect($shiftReadings ?? []);
+        $transactions = collect($transactions ?? []);
+        $transactionTotals = $transactionTotals ?? ['records' => 0, 'liters' => 0, 'discounts' => 0, 'amount' => 0];
+        $staffOptions = collect($staffOptions ?? []);
+        $staffId = isset($staffId) ? (int) $staffId : null;
+        $selectedStaff = $staffOptions->first(fn ($staff) => (int) $staff->id === $staffId);
+        $readingStatus = $readingStatus ?? 'all';
+        $activeTab = in_array(request('tab'), ['sales', 'inventory'], true) ? request('tab') : 'sales';
         $fuelNames = collect(array_keys($reportData))->values();
         $inventoryFuels = $tanks->keys()->merge($salesOut->keys())->unique()->values();
         $fuelStyle = function ($fuel) {
@@ -63,10 +69,12 @@
                 'dot_class' => $style['dot'],
             ];
         });
-        $totalRevenue = collect($reportData)->sum(fn ($row) => (float) ($row['revenue'] ?? 0));
-        $totalLiters = collect($reportData)->sum(fn ($row) => (float) ($row['liters'] ?? 0));
+        $totalGrossSales = (float) ($totalGrossSales ?? collect($reportData)->sum(fn ($row) => (float) ($row['gross_sales'] ?? 0)));
+        $totalDiscounts = (float) ($totalDiscounts ?? collect($reportData)->sum(fn ($row) => (float) ($row['discounts'] ?? 0)));
+        $totalNetSales = (float) ($totalNetSales ?? collect($reportData)->sum(fn ($row) => (float) ($row['net_sales'] ?? 0)));
+        $totalLiters = (float) ($totalLiters ?? collect($reportData)->sum(fn ($row) => (float) ($row['liters'] ?? 0)));
         $chartLabels = $fuelNames->all();
-        $chartSeries = $fuelNames->map(fn ($fuel) => (float) ($reportData[$fuel]['revenue'] ?? 0))->all();
+        $chartSeries = $fuelNames->map(fn ($fuel) => (float) ($reportData[$fuel]['net_sales'] ?? 0))->all();
         $chartColors = $fuelNames->map(fn ($fuel) => $fuelStyle($fuel)['chart'])->all();
         $cardClass = 'min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6';
         $labelClass = 'text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400';
@@ -96,15 +104,17 @@
         x-init="$nextTick(() => window.dispatchEvent(new CustomEvent('report-tab-changed', { detail: { tab: activeTab } })))"
         class="space-y-6">
         <section class="{{ $cardClass }}">
-            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,680px)] xl:items-end">
+            <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1040px)] xl:items-end">
                 <div class="min-w-0">
-                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Reports & Analytics</h1>
+                    <h1 class="text-title-sm font-semibold text-gray-800 dark:text-white/90">Shift Reading Transactions</h1>
                     <p class="{{ $captionClass }}">
                         {{ \Carbon\Carbon::parse($start)->format('M d, Y') }} to {{ \Carbon\Carbon::parse($end)->format('M d, Y') }}
+                        &middot; {{ $readingStatus === 'pending' ? 'Pending' : ($readingStatus === 'approved' ? 'Approved' : 'Pending & Approved') }}
+                        &middot; {{ $selectedStaff->name ?? 'All Staff' }}
                     </p>
                 </div>
 
-                <form method="GET" action="{{ route('admin.sales.index') }}" class="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+                <form method="GET" action="{{ route('admin.sales.index') }}" class="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,190px)_minmax(0,210px)_auto_auto]">
                     <input type="hidden" name="tab" :value="activeTab">
                     <label class="flex flex-col gap-1.5 text-theme-xs font-medium text-gray-500 dark:text-gray-400">
                         <span>From</span>
@@ -120,6 +130,23 @@
                             {!! $dateIcon !!}
                         </span>
                     </label>
+                    <label class="flex flex-col gap-1.5 text-theme-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span>Reading Status</span>
+                        <select name="reading_status" class="{{ $dateInputClass }} pr-10">
+                            <option value="all" @selected($readingStatus === 'all')>Pending &amp; Approved</option>
+                            <option value="pending" @selected($readingStatus === 'pending')>Pending</option>
+                            <option value="approved" @selected($readingStatus === 'approved')>Approved</option>
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1.5 text-theme-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span>Staff Name</span>
+                        <select name="staff_id" class="{{ $dateInputClass }} pr-10">
+                            <option value="">All Staff</option>
+                            @foreach ($staffOptions as $staff)
+                                <option value="{{ $staff->id }}" @selected($staffId === (int) $staff->id)>{{ $staff->name }}</option>
+                            @endforeach
+                        </select>
+                    </label>
                     <button type="submit" class="{{ $primaryButtonClass }}">Filter</button>
                     <a href="{{ route('admin.sales.index') }}" class="{{ $secondaryButtonClass }}">Reset</a>
                 </form>
@@ -127,7 +154,7 @@
         </section>
 
         <section class="{{ $cardClass }} p-2 md:p-2">
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button type="button" @click="switchTab('sales')" class="rounded-xl px-4 py-3 text-center text-theme-sm font-medium transition sm:text-left"
                     :class="activeTab === 'sales' ? 'bg-brand-500 text-white shadow-theme-xs' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white'">
                     Daily Sales
@@ -136,31 +163,32 @@
                     :class="activeTab === 'inventory' ? 'bg-brand-500 text-white shadow-theme-xs' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white'">
                     Inventory Movement
                 </button>
-                <button type="button" @click="switchTab('financial')" class="rounded-xl px-4 py-3 text-center text-theme-sm font-medium transition sm:text-left"
-                    :class="activeTab === 'financial' ? 'bg-brand-500 text-white shadow-theme-xs' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white'">
-                    Revenue Inflow
-                </button>
             </div>
         </section>
 
         <div x-show="activeTab === 'sales'" x-cloak class="space-y-6">
             <div class="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <article class="{{ $cardClass }} flex min-h-[154px] flex-col justify-between">
-                    <p class="{{ $labelClass }}">Total Revenue</p>
+                    <p class="{{ $labelClass }}">Total Net Sales</p>
                     <div>
-                        <p class="{{ $valueClass }}">&#8369;{{ number_format($totalRevenue, 2) }}</p>
-                        <p class="{{ $captionClass }}">{{ number_format($totalLiters, 2) }} liters sold</p>
+                        <p class="{{ $valueClass }}">&#8369;{{ number_format($totalNetSales, 2) }}</p>
+                        <p class="{{ $captionClass }}">
+                            Gross &#8369;{{ number_format($totalGrossSales, 2) }} &middot; Discounts &#8369;{{ number_format($totalDiscounts, 2) }}
+                        </p>
+                        <p class="{{ $captionClass }}">{{ number_format($totalLiters, 2) }} liters &middot; {{ number_format($shiftReadings->count()) }} readings</p>
                     </div>
                 </article>
 
                 @foreach ($reportData as $fuel => $data)
-                    @php($style = $fuelStyle($fuel))
+                    @php
+                        $style = $fuelStyle($fuel);
+                    @endphp
                     <article class="{{ $cardClass }} {{ $style['border'] }} flex min-h-[154px] flex-col justify-between">
                         <div class="flex h-full items-start justify-between gap-3">
                             <div class="flex min-w-0 flex-col justify-between">
                                 <p class="{{ $labelClass }}">{{ $fuel }}</p>
                                 <div>
-                                    <p class="{{ $valueClass }}">&#8369;{{ number_format((float) ($data['revenue'] ?? 0), 2) }}</p>
+                                    <p class="{{ $valueClass }}">&#8369;{{ number_format((float) ($data['net_sales'] ?? 0), 2) }}</p>
                                     <p class="{{ $captionClass }}">{{ number_format((float) ($data['liters'] ?? 0), 2) }} liters sold</p>
                                 </div>
                             </div>
@@ -174,11 +202,139 @@
 
             <section class="{{ $cardClass }}">
                 <div class="mb-5">
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Daily Revenue Breakdown</h2>
-                    <p class="{{ $captionClass }}">Sales grouped by fuel type for the selected period.</p>
+                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Net Sales Breakdown</h2>
                 </div>
                 <div class="mx-auto flex min-h-[340px] w-full max-w-[520px] items-center justify-center">
                     <div id="reportSalesChart" class="min-h-[320px] w-full"></div>
+                </div>
+            </section>
+
+            <section class="{{ $cardClass }}">
+                <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Transaction Log</h2>
+                        <p class="{{ $captionClass }}">Individual transactions from the selected pending and approved shifts. Voided and rejected shifts are excluded.</p>
+                    </div>
+                    <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
+                        {{ number_format((int) $transactionTotals['records']) }} transaction{{ (int) $transactionTotals['records'] === 1 ? '' : 's' }}
+                    </span>
+                </div>
+
+                <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-800 dark:bg-white/[0.02]">
+                        <p class="{{ $labelClass }}">Transactions</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ number_format((int) $transactionTotals['records']) }}</p>
+                    </div>
+                    <div class="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 dark:border-brand-500/20 dark:bg-brand-500/10">
+                        <p class="{{ $labelClass }}">Total Liters</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-brand-700 dark:text-brand-400">{{ number_format((float) $transactionTotals['liters'], 2) }} L</p>
+                    </div>
+                    <div class="rounded-xl border border-warning-100 bg-warning-50/60 px-4 py-3 dark:border-warning-500/20 dark:bg-warning-500/10">
+                        <p class="{{ $labelClass }}">Total Discounts</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-warning-700 dark:text-warning-400">&#8369;{{ number_format((float) $transactionTotals['discounts'], 2) }}</p>
+                    </div>
+                    <div class="rounded-xl border border-success-100 bg-success-50/60 px-4 py-3 dark:border-success-500/20 dark:bg-success-500/10">
+                        <p class="{{ $labelClass }}">Total Amount</p>
+                        <p class="mt-1 text-lg font-semibold tabular-nums text-success-700 dark:text-success-500">&#8369;{{ number_format((float) $transactionTotals['amount'], 2) }}</p>
+                    </div>
+                </div>
+
+                <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div class="max-w-full overflow-x-auto">
+                        <table class="min-w-[1500px] w-full table-fixed">
+                            <colgroup>
+                                <col class="w-[12%]">
+                                <col class="w-[12%]">
+                                <col class="w-[6%]">
+                                <col class="w-[13%]">
+                                <col class="w-[17%]">
+                                <col class="w-[12%]">
+                                <col class="w-[10%]">
+                                <col class="w-[7%]">
+                                <col class="w-[6%]">
+                                <col class="w-[7%]">
+                            </colgroup>
+                            <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
+                                <tr>
+                                    <th class="{{ $thClass }}">Date / Time</th>
+                                    <th class="{{ $thClass }}">Staff</th>
+                                    <th class="{{ $thClass }}">Shift</th>
+                                    <th class="{{ $thClass }}">Reference / Receipt</th>
+                                    <th class="{{ $thClass }}">Customer</th>
+                                    <th class="{{ $thClass }}">Pump / Product</th>
+                                    <th class="{{ $thClass }}">Payment</th>
+                                    <th class="{{ $thNumberClass }}">Liters</th>
+                                    <th class="{{ $thNumberClass }}">Discounts</th>
+                                    <th class="{{ $thNumberClass }}">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                @forelse ($transactions as $transaction)
+                                    @php
+                                        $transactionDate = !empty($transaction->created_at) ? \Carbon\Carbon::parse($transaction->created_at) : null;
+                                        $paymentType = strtolower(trim((string) ($transaction->payment_type ?? '')));
+                                        $isCollection = $paymentType === 'collection';
+                                        $productStyle = $fuelStyle($transaction->product_label ?? '');
+                                        $paymentClass = match ($paymentType) {
+                                            'credit' => 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400',
+                                            'collection' => 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500',
+                                            default => 'bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300',
+                                        };
+                                    @endphp
+                                    <tr>
+                                        <td class="{{ $tdClass }}">
+                                            @if ($transactionDate)
+                                                <div class="font-medium text-gray-800 dark:text-white/90">{{ $transactionDate->format('M d, Y') }}</div>
+                                                <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $transactionDate->format('h:i A') }}</div>
+                                            @else
+                                                N/A
+                                            @endif
+                                        </td>
+                                        <td class="{{ $tdPrimaryClass }}">{{ $transaction->staff_name }}</td>
+                                        <td class="{{ $tdClass }}">{{ $transaction->shift_reading_id ? '#' . $transaction->shift_reading_id : 'N/A' }}</td>
+                                        <td class="{{ $tdClass }}">
+                                            <div class="font-medium text-gray-800 dark:text-white/90">{{ $transaction->reference_no }}</div>
+                                            @if ($transaction->or_number !== '')
+                                                <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">OR: {{ $transaction->or_number }}</div>
+                                            @else
+                                                <div class="mt-1 text-theme-xs text-error-600 dark:text-error-400">No receipt</div>
+                                            @endif
+                                        </td>
+                                        <td class="{{ $tdClass }}">{{ $transaction->customer_display }}</td>
+                                        <td class="{{ $tdClass }}">
+                                            <div class="font-medium text-gray-800 dark:text-white/90">{{ $transaction->pump_label }}</div>
+                                            <span class="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $productStyle['badge'] }}">
+                                                <span class="h-1.5 w-1.5 rounded-full {{ $productStyle['dot'] }}"></span>
+                                                {{ $transaction->product_label }}
+                                            </span>
+                                        </td>
+                                        <td class="{{ $tdClass }}">
+                                            <span class="inline-flex rounded-full px-2.5 py-1 text-theme-xs font-medium {{ $paymentClass }}">{{ $transaction->payment_label }}</span>
+                                        </td>
+                                        <td class="{{ $tdNumberClass }}">{{ $isCollection ? '-' : number_format((float) $transaction->liters, 2) . ' L' }}</td>
+                                        <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $transaction->discounts, 2) }}</td>
+                                        <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">&#8369;{{ number_format((float) $transaction->amount, 2) }}</td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="10" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+                                            No individual transactions found for the selected date, staff, and shift status filters.
+                                        </td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                            @if ($transactions->isNotEmpty())
+                                <tfoot class="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-800 dark:bg-white/[0.02]">
+                                    <tr>
+                                        <td colspan="7" class="{{ $tdPrimaryClass }} text-right">Totals ({{ number_format((int) $transactionTotals['records']) }} transactions)</td>
+                                        <td class="{{ $tdNumberClass }}">{{ number_format((float) $transactionTotals['liters'], 2) }} L</td>
+                                        <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $transactionTotals['discounts'], 2) }}</td>
+                                        <td class="{{ $tdNumberClass }} text-success-600 dark:text-success-500">&#8369;{{ number_format((float) $transactionTotals['amount'], 2) }}</td>
+                                    </tr>
+                                </tfoot>
+                            @endif
+                        </table>
+                    </div>
                 </div>
             </section>
         </div>
@@ -186,7 +342,6 @@
         <section x-show="activeTab === 'inventory'" x-cloak class="{{ $cardClass }}">
             <div class="mb-5">
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Inventory Movement</h2>
-                <p class="{{ $captionClass }}">Sales outflow compared with current tank volume.</p>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
@@ -232,75 +387,6 @@
             </div>
         </section>
 
-        <div x-show="activeTab === 'financial'" x-cloak class="grid grid-cols-1 gap-6 xl:grid-cols-12">
-            <section class="{{ $cardClass }} xl:col-span-8">
-                <div class="mb-5">
-                    <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Revenue Inflow</h2>
-                    <p class="{{ $captionClass }}">Approved cash sales from verified shift readings.</p>
-                </div>
-
-                <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                    <div class="max-w-full overflow-x-auto">
-                        <table class="min-w-[820px] w-full table-fixed">
-                            <colgroup>
-                                <col class="w-[16%]">
-                                <col class="w-[18%]">
-                                <col class="w-[42%]">
-                                <col class="w-[24%]">
-                            </colgroup>
-                            <thead class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-white/[0.02]">
-                                <tr>
-                                    <th class="{{ $thClass }}">Date</th>
-                                    <th class="{{ $thClass }}">Category</th>
-                                    <th class="{{ $thClass }}">Description</th>
-                                    <th class="{{ $thNumberClass }}">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                                @forelse ($financials as $fin)
-                                    <tr>
-                                        <td class="{{ $tdClass }}">{{ \Carbon\Carbon::parse($fin->date)->format('Y-m-d') }}</td>
-                                        <td class="{{ $tdClass }}">
-                                            @if ($fin->category === 'Cash Sales')
-                                                <span class="inline-flex rounded-full bg-success-50 px-2.5 py-0.5 text-theme-xs font-medium text-success-700 dark:bg-success-500/15 dark:text-success-500">Cash Sales</span>
-                                            @else
-                                                <span class="inline-flex rounded-full bg-brand-50 px-2.5 py-0.5 text-theme-xs font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">Credit Payment</span>
-                                            @endif
-                                        </td>
-                                        <td class="{{ $tdClass }}">Shift Remittance - {{ $fin->description }}</td>
-                                        <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $fin->amount, 2) }}</td>
-                                    </tr>
-                                @empty
-                                    <tr>
-                                        <td colspan="4" class="px-5 py-8 text-center text-theme-sm text-gray-500 dark:text-gray-400">
-                                            No verified revenue inflow found.
-                                        </td>
-                                    </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <aside class="{{ $cardClass }} xl:col-span-4">
-                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Financial Summary</h2>
-                <div class="mt-5 space-y-4">
-                    <div class="flex items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-gray-800">
-                        <span class="text-theme-sm text-gray-500 dark:text-gray-400">Total Cash Sales</span>
-                        <span class="text-theme-sm font-semibold tabular-nums text-success-600 dark:text-success-500">&#8369;{{ number_format($totalCash, 2) }}</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-gray-800">
-                        <span class="text-theme-sm text-gray-500 dark:text-gray-400">Total Credit Collections</span>
-                        <span class="text-theme-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">&#8369;{{ number_format($totalCredit, 2) }}</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-4">
-                        <span class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Total Inflow</span>
-                        <span class="text-lg font-bold tabular-nums text-gray-800 dark:text-white/90">&#8369;{{ number_format($totalInflow, 2) }}</span>
-                    </div>
-                </div>
-            </aside>
-        </div>
     </div>
 @endsection
 
@@ -400,7 +486,7 @@
                                 show: true,
                                 total: {
                                     show: true,
-                                    label: 'Revenue',
+                                    label: 'Net Sales',
                                     formatter: function() {
                                         const total = series.reduce(function(sum, value) {
                                             return sum + (Number(value) || 0);
