@@ -1600,18 +1600,46 @@
                         return item[field] !== null && item[field] !== undefined && String(item[field]).trim() !== '';
                     });
                 },
+                invoicePositiveNumberIsValid(value) {
+                    if (value === null || value === undefined || String(value).trim() === '') {
+                        return false;
+                    }
+
+                    const number = Number(value);
+
+                    return Number.isFinite(number) && number > 0;
+                },
                 salesInvoiceItemTypeIsValid(itemType) {
                     return ['Diesel', 'Premium', 'Unleaded', 'Others'].includes(String(itemType || '').trim());
                 },
                 salesInvoiceHasValidItem() {
                     return (this.salesInvoice.items || []).some((item) => this.salesInvoiceItemTypeIsValid(item.item_type));
                 },
+                salesInvoiceItemFieldInvalid(item, field) {
+                    if (!this.salesInvoiceItemError || !this.invoiceItemHasInput(item) || !this.salesInvoiceItemTypeIsValid(item.item_type)) {
+                        return false;
+                    }
+
+                    return !this.invoicePositiveNumberIsValid(item[field]);
+                },
+                salesInvoiceItemIsComplete(item) {
+                    return this.salesInvoiceItemTypeIsValid(item.item_type)
+                        && this.invoicePositiveNumberIsValid(item.quantity)
+                        && this.invoicePositiveNumberIsValid(item.price)
+                        && this.invoicePositiveNumberIsValid(item.amount);
+                },
                 validateSalesInvoiceItems() {
                     const enteredItems = (this.salesInvoice.items || []).filter((item) => this.invoiceItemHasInput(item));
                     const hasInvalidEnteredItem = enteredItems.some((item) => !this.salesInvoiceItemTypeIsValid(item.item_type));
 
-                    if (!this.salesInvoiceHasValidItem() || hasInvalidEnteredItem) {
+                    if (enteredItems.length === 0 || hasInvalidEnteredItem) {
                         this.salesInvoiceItemError = 'Please select an item before continuing.';
+                        this.showNotice('error', this.salesInvoiceItemError);
+                        return false;
+                    }
+
+                    if (enteredItems.some((item) => !this.salesInvoiceItemIsComplete(item))) {
+                        this.salesInvoiceItemError = 'Please enter a valid QTY, PRICE, and Amount for every invoice item.';
                         this.showNotice('error', this.salesInvoiceItemError);
                         return false;
                     }

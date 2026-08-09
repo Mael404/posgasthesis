@@ -44,6 +44,10 @@
             background: #f9fafb;
         }
 
+        .sales-invoice-date-calendar {
+            z-index: 100080 !important;
+        }
+
         @page {
             size: A4 portrait;
             margin: 8mm;
@@ -142,7 +146,63 @@
                         </div>
                         <label class="flex items-center justify-end gap-2 text-[16px] font-bold">
                             <span>Date:</span>
-                            <input x-model="salesInvoice.invoice_date" class="sales-invoice-input sales-invoice-line-input max-w-[250px] text-center" type="date" aria-label="Invoice date">
+                            <span class="relative inline-flex w-[250px] max-w-full items-center">
+                                <input
+                                    x-model="salesInvoice.invoice_date"
+                                    x-init="
+                                        $nextTick(() => {
+                                            if (!window.flatpickr) {
+                                                $el.removeAttribute('readonly');
+                                                return;
+                                            }
+
+                                            if ($el._salesInvoiceDatePicker) {
+                                                return;
+                                            }
+
+                                            $el._salesInvoiceDatePicker = window.flatpickr($el, {
+                                                dateFormat: 'Y-m-d',
+                                                defaultDate: salesInvoice.invoice_date || null,
+                                                allowInput: false,
+                                                disableMobile: true,
+                                                clickOpens: true,
+                                                onReady: (selectedDates, dateStr, instance) => {
+                                                    instance.calendarContainer.classList.add('sales-invoice-date-calendar');
+                                                },
+                                                onChange: (selectedDates, dateStr) => {
+                                                    salesInvoice.invoice_date = dateStr;
+                                                }
+                                            });
+
+                                            $watch('salesInvoice.invoice_date', (value) => {
+                                                if (!$el._salesInvoiceDatePicker) {
+                                                    return;
+                                                }
+
+                                                if (($el._salesInvoiceDatePicker.input.value || '') !== (value || '')) {
+                                                    $el._salesInvoiceDatePicker.setDate(value || null, false);
+                                                }
+                                            });
+                                        })
+                                    "
+                                    x-on:click="$el._salesInvoiceDatePicker?.open()"
+                                    x-on:focus="$el._salesInvoiceDatePicker?.open()"
+                                    class="sales-invoice-input sales-invoice-line-input cursor-pointer pr-9 text-center"
+                                    type="text"
+                                    placeholder="YYYY-MM-DD"
+                                    readonly
+                                    aria-label="Invoice date">
+                                <button
+                                    type="button"
+                                    data-sales-invoice-no-print
+                                    x-on:click="$el.previousElementSibling._salesInvoiceDatePicker?.open()"
+                                    class="absolute right-0 top-1/2 inline-flex size-8 -translate-y-1/2 items-center justify-center text-gray-700 transition hover:text-brand-600"
+                                    aria-label="Open invoice date calendar">
+                                    <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M7.75 3.75v3M16.25 3.75v3M4.75 8.75h14.5M6.75 5.25h10.5A2.75 2.75 0 0 1 20 8v9.25A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25V8a2.75 2.75 0 0 1 2.75-2.75Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+                            </span>
                         </label>
                     </div>
 
@@ -227,9 +287,51 @@
                                             placeholder="Enter other item/service"
                                             :aria-label="'Other item description row ' + (index + 1)">
                                     </td>
-                                    <td><input x-model="item.quantity" class="sales-invoice-input text-center tabular-nums" type="number" min="0" step="0.001" :aria-label="'Quantity row ' + (index + 1)"></td>
-                                    <td><input x-model="item.price" class="sales-invoice-input text-right tabular-nums" type="number" min="0" step="0.01" :aria-label="'Price row ' + (index + 1)"></td>
-                                    <td><input x-model="item.amount" class="sales-invoice-input text-right tabular-nums" type="number" min="0" step="0.01" :aria-label="'Amount row ' + (index + 1)"></td>
+                                    <td>
+                                        <input
+                                            x-model="item.quantity"
+                                            class="sales-invoice-input text-center tabular-nums"
+                                            type="number"
+                                            min="{{ $editingOfficialReceipt ? '0' : '0.001' }}"
+                                            step="0.001"
+                                            @unless ($editingOfficialReceipt)
+                                                x-on:input="salesInvoiceItemError = ''"
+                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'quantity') }"
+                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'quantity') ? 'true' : 'false'"
+                                                aria-describedby="sales-invoice-item-error"
+                                            @endunless
+                                            :aria-label="'Quantity row ' + (index + 1)">
+                                    </td>
+                                    <td>
+                                        <input
+                                            x-model="item.price"
+                                            class="sales-invoice-input text-right tabular-nums"
+                                            type="number"
+                                            min="{{ $editingOfficialReceipt ? '0' : '0.01' }}"
+                                            step="0.01"
+                                            @unless ($editingOfficialReceipt)
+                                                x-on:input="salesInvoiceItemError = ''"
+                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'price') }"
+                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'price') ? 'true' : 'false'"
+                                                aria-describedby="sales-invoice-item-error"
+                                            @endunless
+                                            :aria-label="'Price row ' + (index + 1)">
+                                    </td>
+                                    <td>
+                                        <input
+                                            x-model="item.amount"
+                                            class="sales-invoice-input text-right tabular-nums"
+                                            type="number"
+                                            min="{{ $editingOfficialReceipt ? '0' : '0.01' }}"
+                                            step="0.01"
+                                            @unless ($editingOfficialReceipt)
+                                                x-on:input="salesInvoiceItemError = ''"
+                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'amount') }"
+                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'amount') ? 'true' : 'false'"
+                                                aria-describedby="sales-invoice-item-error"
+                                            @endunless
+                                            :aria-label="'Amount row ' + (index + 1)">
+                                    </td>
                                 </tr>
                             </template>
                         </tbody>
