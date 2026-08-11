@@ -296,9 +296,6 @@
                                             step="0.001"
                                             @unless ($editingOfficialReceipt)
                                                 x-on:input="salesInvoiceItemError = ''"
-                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'quantity') }"
-                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'quantity') ? 'true' : 'false'"
-                                                aria-describedby="sales-invoice-item-error"
                                             @endunless
                                             :aria-label="'Quantity row ' + (index + 1)">
                                     </td>
@@ -311,9 +308,6 @@
                                             step="0.01"
                                             @unless ($editingOfficialReceipt)
                                                 x-on:input="salesInvoiceItemError = ''"
-                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'price') }"
-                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'price') ? 'true' : 'false'"
-                                                aria-describedby="sales-invoice-item-error"
                                             @endunless
                                             :aria-label="'Price row ' + (index + 1)">
                                     </td>
@@ -326,9 +320,6 @@
                                             step="0.01"
                                             @unless ($editingOfficialReceipt)
                                                 x-on:input="salesInvoiceItemError = ''"
-                                                :class="{ '!bg-red-50 ring-2 ring-inset ring-red-500': salesInvoiceItemFieldInvalid(item, 'amount') }"
-                                                :aria-invalid="salesInvoiceItemFieldInvalid(item, 'amount') ? 'true' : 'false'"
-                                                aria-describedby="sales-invoice-item-error"
                                             @endunless
                                             :aria-label="'Amount row ' + (index + 1)">
                                     </td>
@@ -396,8 +387,18 @@
                                 <output class="sales-invoice-readonly px-2 py-1 text-right tabular-nums" x-text="invoiceMoney(invoiceAddVat())"></output>
                             </div>
                             <div class="grid grid-cols-[62%_38%] border-b border-black">
-                                <div class="border-r border-black px-1 py-1">Less: Withholding tax</div>
-                                <input x-model="salesInvoice.withholding_tax" class="sales-invoice-input text-right tabular-nums" type="number" min="0" step="0.01" placeholder="0.00">
+                                <div
+                                    class="border-r border-black px-1 py-1"
+                                    x-text="salesInvoice.product_filter_active ? 'Less: Withholding tax (Filtered 6%)' : 'Less: Withholding tax'"></div>
+                                <template x-if="salesInvoice.product_filter_active">
+                                    <output
+                                        class="sales-invoice-readonly px-2 py-1 text-right tabular-nums"
+                                        x-text="invoiceMoney(invoiceFilteredWithholdingTax())"
+                                        title="Temporary filtered value; it will not be saved to the database."></output>
+                                </template>
+                                <template x-if="!salesInvoice.product_filter_active">
+                                    <input x-model="salesInvoice.withholding_tax" class="sales-invoice-input text-right tabular-nums" type="number" min="0" step="0.01" placeholder="0.00">
+                                </template>
                             </div>
                             <div class="grid grid-cols-[62%_38%] border-b border-black text-[15px] font-black">
                                 <div class="border-r border-black px-1 py-1">TOTAL AMOUNT DUE</div>

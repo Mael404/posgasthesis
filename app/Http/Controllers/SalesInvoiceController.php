@@ -31,21 +31,15 @@ class SalesInvoiceController extends Controller
             'items' => ['required', 'array', 'min:1', 'max:7'],
             'items.*.item_type' => ['required', 'string', Rule::in(self::ITEM_TYPES)],
             'items.*.other_description' => ['nullable', 'string', 'max:255'],
-            'items.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999999999.999'],
-            'items.*.price' => ['required', 'numeric', 'gt:0', 'max:999999999999.99'],
-            'items.*.amount' => ['required', 'numeric', 'gt:0', 'max:999999999999.99'],
+            'items.*.quantity' => ['nullable', 'numeric', 'min:0', 'max:999999999999.999'],
+            'items.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
+            'items.*.amount' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99'],
         ], [
             'items.required' => 'Please select an item before continuing.',
             'items.array' => 'Please select an item before continuing.',
             'items.min' => 'Please select an item before continuing.',
             'items.*.item_type.required' => 'Please select an item before continuing.',
             'items.*.item_type.in' => 'Please select a valid item before continuing.',
-            'items.*.quantity.required' => 'QTY is required for every invoice item.',
-            'items.*.quantity.gt' => 'QTY must be greater than zero.',
-            'items.*.price.required' => 'PRICE is required for every invoice item.',
-            'items.*.price.gt' => 'PRICE must be greater than zero.',
-            'items.*.amount.required' => 'Amount is required for every invoice item.',
-            'items.*.amount.gt' => 'Amount must be greater than zero.',
         ]);
 
         $items = collect($validated['items'] ?? [])

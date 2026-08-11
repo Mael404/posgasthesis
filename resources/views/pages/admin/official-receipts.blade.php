@@ -218,6 +218,17 @@
                             @forelse ($receipts as $receipt)
                                 @php
                                     $isCanceled = $receipt->status === \App\Models\SalesInvoice::STATUS_CANCELED;
+                                    $display = $receiptDisplayData->get($receipt->id);
+                                    $displayItems = $display['items'];
+                                    $hiddenItems = $display['hidden_items'];
+                                    $itemPayload = fn ($item) => [
+                                        'sort_order' => (int) $item->sort_order,
+                                        'item_type' => $item->item_type,
+                                        'other_description' => $item->item_type === 'Others' ? $item->description : '',
+                                        'quantity' => (float) $item->quantity,
+                                        'price' => (float) $item->price,
+                                        'amount' => (float) $item->amount,
+                                    ];
                                     $editReceiptPayload = [
                                         'id' => (int) $receipt->id,
                                         'invoice_date' => $receipt->invoice_date?->format('Y-m-d'),
@@ -232,13 +243,9 @@
                                         'zero_rated_sales' => (float) $receipt->zero_rated_sales,
                                         'sc_pwd_discount' => (float) $receipt->sc_pwd_discount,
                                         'withholding_tax' => (float) $receipt->withholding_tax,
-                                        'items' => $receipt->items->map(fn ($item) => [
-                                            'item_type' => $item->item_type,
-                                            'other_description' => $item->item_type === 'Others' ? $item->description : '',
-                                            'quantity' => (float) $item->quantity,
-                                            'price' => (float) $item->price,
-                                            'amount' => (float) $item->amount,
-                                        ])->values()->all(),
+                                        'product_filter_active' => $display['product_filter_active'],
+                                        'items' => $displayItems->map($itemPayload)->values()->all(),
+                                        'hidden_items' => $hiddenItems->map($itemPayload)->values()->all(),
                                     ];
                                 @endphp
                                 <tr class="{{ $isCanceled ? 'bg-error-50/50 dark:bg-error-500/[0.04]' : '' }}">
@@ -257,31 +264,31 @@
                                         <div class="mt-1 max-w-80 text-theme-xs leading-5 text-gray-500 dark:text-gray-400">{{ $receipt->address }}</div>
                                     </td>
                                     <td class="{{ $tdClass }} min-w-48">
-                                        @forelse ($receipt->items as $item)
+                                        @forelse ($displayItems as $item)
                                             <div class="{{ $loop->first ? '' : 'mt-2 border-t border-gray-100 pt-2 dark:border-gray-800' }} font-medium text-gray-800 dark:text-white/90">{{ $item->displayDescription() }}</div>
                                         @empty
                                             <span class="text-gray-400">No items</span>
                                         @endforelse
                                     </td>
                                     <td class="{{ $tdNumberClass }}">
-                                        @forelse ($receipt->items as $item)
+                                        @forelse ($displayItems as $item)
                                             <div class="{{ $loop->first ? '' : 'mt-2 border-t border-gray-100 pt-2 dark:border-gray-800' }}">{{ $quantity($item->quantity) }}</div>
                                         @empty
                                             0
                                         @endforelse
                                     </td>
                                     <td class="{{ $tdNumberClass }}">
-                                        @forelse ($receipt->items as $item)
+                                        @forelse ($displayItems as $item)
                                             <div class="{{ $loop->first ? '' : 'mt-2 border-t border-gray-100 pt-2 dark:border-gray-800' }}">&#8369;{{ number_format((float) $item->price, 2) }}</div>
                                         @empty
                                             &#8369;0.00
                                         @endforelse
                                     </td>
-                                    <td class="{{ $tdNumberClass }} font-semibold">&#8369;{{ number_format((float) $receipt->total_sales_vat_inclusive, 2) }}</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->vatable_sales, 2) }}</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->vat_amount, 2) }}</td>
-                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $receipt->withholding_tax, 2) }}</td>
-                                    <td class="{{ $tdNumberClass }} font-bold">&#8369;{{ number_format((float) $receipt->total_amount_due, 2) }}</td>
+                                    <td class="{{ $tdNumberClass }} font-semibold">&#8369;{{ number_format((float) $display['total_sales_vat_inclusive'], 2) }}</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $display['vatable_sales'], 2) }}</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $display['vat_amount'], 2) }}</td>
+                                    <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $display['withholding_tax'], 2) }}</td>
+                                    <td class="{{ $tdNumberClass }} font-bold">&#8369;{{ number_format((float) $display['total_amount_due'], 2) }}</td>
                                     <td class="{{ $tdClass }} min-w-44">
                                         @if ($isCanceled)
                                             <span class="inline-flex rounded-full bg-error-50 px-2.5 py-1 text-theme-xs font-medium text-error-700 dark:bg-error-500/15 dark:text-error-400">Canceled</span>
@@ -436,6 +443,7 @@
                 },
                 blankSalesInvoiceItem() {
                     return {
+                        sort_order: null,
                         item_type: '',
                         other_description: '',
                         quantity: '',
@@ -459,6 +467,9 @@
                         zero_rated_sales: '',
                         sc_pwd_discount: '',
                         withholding_tax: '',
+                        persisted_withholding_tax: '',
+                        product_filter_active: false,
+                        hidden_items: [],
                         items: Array.from({ length: 7 }, () => this.blankSalesInvoiceItem())
                     };
                     this.savingSalesInvoice = false;
@@ -466,16 +477,14 @@
                 openReceiptEdit(receipt) {
                     this.resetSalesInvoice();
                     const items = Array.isArray(receipt.items)
-                        ? receipt.items.slice(0, 7).map(item => ({
-                            item_type: item.item_type || '',
-                            other_description: item.other_description || '',
-                            quantity: item.quantity ?? '',
-                            price: item.price ?? '',
-                            amount: item.amount ?? ''
-                        }))
+                        ? receipt.items.slice(0, 7).map((item, index) => this.normalizeReceiptItem(item, index))
                         : [];
+                    const hiddenItems = Array.isArray(receipt.hidden_items)
+                        ? receipt.hidden_items.map((item, index) => this.normalizeReceiptItem(item, index))
+                        : [];
+                    const visibleRowLimit = Math.max(items.length, 7 - hiddenItems.length);
 
-                    while (items.length < 7) {
+                    while (items.length < visibleRowLimit) {
                         items.push(this.blankSalesInvoiceItem());
                     }
 
@@ -494,9 +503,22 @@
                         zero_rated_sales: receipt.zero_rated_sales ?? '',
                         sc_pwd_discount: receipt.sc_pwd_discount ?? '',
                         withholding_tax: receipt.withholding_tax ?? '',
+                        persisted_withholding_tax: receipt.withholding_tax ?? '',
+                        product_filter_active: !!receipt.product_filter_active,
+                        hidden_items: hiddenItems,
                         items
                     };
                     this.salesInvoiceModalOpen = true;
+                },
+                normalizeReceiptItem(item, index = 0) {
+                    return {
+                        sort_order: Number(item.sort_order || 0) || (index + 1),
+                        item_type: item.item_type || '',
+                        other_description: item.other_description || '',
+                        quantity: item.quantity ?? '',
+                        price: item.price ?? '',
+                        amount: item.amount ?? ''
+                    };
                 },
                 closeSalesInvoiceModal() {
                     if (this.savingSalesInvoice) {
@@ -542,9 +564,17 @@
                 invoiceAddVat() {
                     return this.invoiceLessVat();
                 },
+                invoiceFilteredWithholdingTax() {
+                    return this.invoiceNumber((this.invoiceTotalSales() / 1.12) * 0.06);
+                },
+                invoiceWithholdingTax() {
+                    return this.salesInvoice.product_filter_active
+                        ? this.invoiceFilteredWithholdingTax()
+                        : this.invoiceNumber(this.salesInvoice.withholding_tax);
+                },
                 invoiceTotalAmountDue() {
                     const amountBeforeWithholdingTax = this.invoiceAmountNetOfVat() + this.invoiceAddVat();
-                    const withholdingTax = this.invoiceNumber(this.salesInvoice.withholding_tax);
+                    const withholdingTax = this.invoiceWithholdingTax();
 
                     return Math.round((amountBeforeWithholdingTax - withholdingTax + Number.EPSILON) * 100) / 100;
                 },
@@ -586,6 +616,25 @@
                     });
                 },
                 salesInvoicePayload() {
+                    const visibleItems = (this.salesInvoice.items || [])
+                        .filter((item) => this.invoiceItemHasInput(item));
+                    const hiddenItems = this.salesInvoice.product_filter_active
+                        ? (this.salesInvoice.hidden_items || [])
+                        : [];
+                    const items = [...visibleItems, ...hiddenItems]
+                        .map((item, index) => ({
+                            ...item,
+                            payload_sort_order: Number(item.sort_order || 0) || (1000 + index)
+                        }))
+                        .sort((left, right) => left.payload_sort_order - right.payload_sort_order)
+                        .map((item) => ({
+                            item_type: item.item_type || null,
+                            other_description: item.other_description || null,
+                            quantity: this.invoiceNumber(item.quantity, 3),
+                            price: this.invoiceNumber(item.price),
+                            amount: this.invoiceNumber(item.amount)
+                        }));
+
                     return {
                         invoice_date: this.salesInvoice.invoice_date || null,
                         sold_to: this.salesInvoice.sold_to,
@@ -597,16 +646,12 @@
                         vat_exempt_sales: this.invoiceNumber(this.salesInvoice.vat_exempt_sales),
                         zero_rated_sales: this.invoiceNumber(this.salesInvoice.zero_rated_sales),
                         sc_pwd_discount: this.invoiceNumber(this.salesInvoice.sc_pwd_discount),
-                        withholding_tax: this.invoiceNumber(this.salesInvoice.withholding_tax),
-                        items: this.salesInvoice.items
-                            .filter((item) => this.invoiceItemHasInput(item))
-                            .map((item) => ({
-                                item_type: item.item_type || null,
-                                other_description: item.other_description || null,
-                                quantity: this.invoiceNumber(item.quantity, 3),
-                                price: this.invoiceNumber(item.price),
-                                amount: this.invoiceNumber(item.amount)
-                            }))
+                        withholding_tax: this.invoiceNumber(
+                            this.salesInvoice.product_filter_active
+                                ? this.salesInvoice.persisted_withholding_tax
+                                : this.salesInvoice.withholding_tax
+                        ),
+                        items
                     };
                 },
                 async submitSalesInvoice() {

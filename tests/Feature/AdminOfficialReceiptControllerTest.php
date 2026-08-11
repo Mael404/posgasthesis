@@ -128,7 +128,7 @@ test('the receipt register filters by date product name and SI number range', fu
         ->assertDontSee('Changing any field refreshes the register automatically.')
         ->assertSee('Withholding Tax')
         ->assertDontSee('Net of VAT')
-        ->assertSee('&#8369;7.25', false)
+        ->assertSee('&#8369;6.00', false)
         ->assertSee('Total Withholding Tax')
         ->assertSee('Edit Receipt')
         ->assertSee('type="text" name="start_date" value="2026-08-01"', false)
@@ -145,8 +145,8 @@ test('the receipt register filters by date product name and SI number range', fu
         ->and((float) $totals->total_sales_vat_inclusive)->toBe(112.0)
         ->and((float) $totals->vatable_sales)->toBe(100.0)
         ->and((float) $totals->vat_amount)->toBe(12.0)
-        ->and((float) $totals->withholding_tax)->toBe(7.25)
-        ->and((float) $totals->total_amount_due)->toBe(104.75);
+        ->and((float) $totals->withholding_tax)->toBe(6.0)
+        ->and((float) $totals->total_amount_due)->toBe(106.0);
 });
 
 test('tank product filtering scopes receipt counts liters and financial totals to matching active items', function () {
@@ -215,8 +215,66 @@ test('tank product filtering scopes receipt counts liters and financial totals t
         ->and((float) $totals->total_sales_vat_inclusive)->toBe(600.0)
         ->and((float) $totals->vatable_sales)->toBe(535.71)
         ->and((float) $totals->vat_amount)->toBe(64.29)
-        ->and((float) $totals->withholding_tax)->toBe(12.0)
-        ->and((float) $totals->total_amount_due)->toBe(588.0);
+        ->and((float) $totals->withholding_tax)->toBe(32.14)
+        ->and((float) $totals->total_amount_due)->toBe(567.86);
+});
+
+test('tank product filtering displays only matching receipt items with temporary recalculated totals', function () {
+    $receipt = createOfficialReceiptForTest([
+        'si_number' => '879',
+        'sold_to' => 'WATER DISTRICT',
+        'total_sales_vat_inclusive' => 47385.33,
+        'vatable_sales' => 42308.33,
+        'vat_amount' => 5077,
+        'amount_net_of_vat' => 42308.33,
+        'withholding_tax' => 2538.50,
+        'total_amount_due' => 44846.83,
+    ], [
+        [
+            'item_type' => 'Unleaded',
+            'description' => 'Unleaded/Regular',
+            'quantity' => 39.29,
+            'price' => 0,
+            'amount' => 2898.40,
+        ],
+        [
+            'item_type' => 'Diesel',
+            'description' => 'Diesel',
+            'quantity' => 588.44,
+            'price' => 0,
+            'amount' => 44486.93,
+        ],
+    ]);
+
+    $response = $this->actingAs($this->admin)->get(route('admin.official-receipts.index', [
+        'product' => 'Unleaded',
+        'si_from' => 879,
+        'si_to' => 879,
+    ]))->assertOk();
+
+    $display = $response->viewData('receiptDisplayData')->get($receipt->id);
+    $totals = $response->viewData('totals');
+
+    expect($display['product_filter_active'])->toBeTrue()
+        ->and($display['items']->pluck('item_type')->all())->toBe(['Unleaded'])
+        ->and($display['hidden_items']->pluck('item_type')->all())->toBe(['Diesel'])
+        ->and($display['total_sales_vat_inclusive'])->toBe(2898.40)
+        ->and($display['vatable_sales'])->toBe(2587.86)
+        ->and($display['vat_amount'])->toBe(310.54)
+        ->and($display['withholding_tax'])->toBe(155.27)
+        ->and($display['total_amount_due'])->toBe(2743.13)
+        ->and((float) $totals->total_liters)->toBe(39.29)
+        ->and((float) $totals->total_sales_vat_inclusive)->toBe(2898.40)
+        ->and((float) $totals->withholding_tax)->toBe(155.27)
+        ->and((float) $totals->total_amount_due)->toBe(2743.13)
+        ->and((float) $receipt->fresh()->withholding_tax)->toBe(2538.50)
+        ->and($receipt->items()->count())->toBe(2);
+
+    $response
+        ->assertSee('Less: Withholding tax (Filtered 6%)', false)
+        ->assertSee('Temporary filtered value; it will not be saved to the database.', false)
+        ->assertSee('persisted_withholding_tax', false)
+        ->assertSee('hidden_items', false);
 });
 
 test('legacy unleaded receipt items display the current product name', function () {

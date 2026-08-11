@@ -61,11 +61,18 @@ class AdminOfficialReceiptController extends Controller
             ->paginate(20)
             ->withQueryString();
 
+        $receiptDisplayData = $receipts->getCollection()->mapWithKeys(function (SalesInvoice $receipt) use ($filters) {
+            return [
+                $receipt->id => $this->receiptDisplayData($receipt, $filters['product']),
+            ];
+        });
+
         return view('pages.admin.official-receipts', [
             'title' => 'Official Receipts',
             'receipts' => $receipts,
             'receiptSummary' => $receiptSummary,
             'totals' => $totals,
+            'receiptDisplayData' => $receiptDisplayData,
             'tankProductOptions' => $this->tankProductOptions(),
             'filters' => $filters,
             'hasActiveFilters' => collect($filters)->contains(fn ($value, $key) => $key === 'status'
@@ -282,11 +289,7 @@ class AdminOfficialReceiptController extends Controller
             return $totals;
         }
 
-        $filteredInvoices = (clone $activeReceipts)->select([
-            'sales_invoices.id',
-            'sales_invoices.total_sales_vat_inclusive',
-            'sales_invoices.withholding_tax',
-        ]);
+        $filteredInvoices = (clone $activeReceipts)->select('sales_invoices.id');
 
         $filteredItems = DB::table('sales_invoice_items')
             ->select('sales_invoice_id')
@@ -304,23 +307,12 @@ class AdminOfficialReceiptController extends Controller
             ->selectRaw('COUNT(*) as active_receipts')
             ->selectRaw('COALESCE(SUM(filtered_items.total_liters), 0) as total_liters')
             ->selectRaw('COALESCE(SUM(filtered_items.total_sales_vat_inclusive), 0) as total_sales_vat_inclusive')
-            ->selectRaw(<<<'SQL'
-                COALESCE(SUM(
-                    CASE
-                        WHEN filtered_receipts.total_sales_vat_inclusive > 0
-                        THEN filtered_receipts.withholding_tax
-                            * filtered_items.total_sales_vat_inclusive
-                            / filtered_receipts.total_sales_vat_inclusive
-                        ELSE 0
-                    END
-                ), 0) as withholding_tax
-                SQL)
             ->first();
 
         $totalSales = round((float) $totals->total_sales_vat_inclusive, 2);
         $vatableSales = round($totalSales / 1.12, 2);
         $vatAmount = round($totalSales - $vatableSales, 2);
-        $withholdingTax = round((float) $totals->withholding_tax, 2);
+        $withholdingTax = round(($totalSales / 1.12) * 0.06, 2);
 
         $totals->total_liters = in_array($product, self::FUEL_ITEM_TYPES, true)
             ? round((float) $totals->total_liters, 3)
@@ -333,6 +325,53 @@ class AdminOfficialReceiptController extends Controller
         $totals->total_amount_due = round($totalSales - $withholdingTax, 2);
 
         return $totals;
+    }
+
+    private function receiptDisplayData(SalesInvoice $receipt, string $product): array
+    {
+        $allItems = $receipt->items->values();
+        $productFilterActive = $product !== '';
+        $displayItems = $productFilterActive
+            ? $allItems->filter(fn (SalesInvoiceItem $item) => $this->itemMatchesProduct($item, $product))->values()
+            : $allItems;
+        $hiddenItems = $productFilterActive
+            ? $allItems->reject(fn (SalesInvoiceItem $item) => $this->itemMatchesProduct($item, $product))->values()
+            : collect();
+
+        if (! $productFilterActive) {
+            return [
+                'product_filter_active' => false,
+                'items' => $displayItems,
+                'hidden_items' => $hiddenItems,
+                'total_sales_vat_inclusive' => round((float) $receipt->total_sales_vat_inclusive, 2),
+                'vatable_sales' => round((float) $receipt->vatable_sales, 2),
+                'vat_amount' => round((float) $receipt->vat_amount, 2),
+                'withholding_tax' => round((float) $receipt->withholding_tax, 2),
+                'total_amount_due' => round((float) $receipt->total_amount_due, 2),
+            ];
+        }
+
+        $totalSales = round((float) $displayItems->sum('amount'), 2);
+        $vatAmount = round(($totalSales / 1.12) * 0.12, 2);
+        $vatableSales = round($totalSales - $vatAmount, 2);
+        $withholdingTax = round(($totalSales / 1.12) * 0.06, 2);
+
+        return [
+            'product_filter_active' => true,
+            'items' => $displayItems,
+            'hidden_items' => $hiddenItems,
+            'total_sales_vat_inclusive' => $totalSales,
+            'vatable_sales' => $vatableSales,
+            'vat_amount' => $vatAmount,
+            'withholding_tax' => $withholdingTax,
+            'total_amount_due' => round($totalSales - $withholdingTax, 2),
+        ];
+    }
+
+    private function itemMatchesProduct(SalesInvoiceItem $item, string $product): bool
+    {
+        return trim((string) $item->item_type) === $product
+            || Str::contains(Str::lower((string) $item->description), Str::lower($product));
     }
 
     private function applyProductItemFilter($query, string $product): void
