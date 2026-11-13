@@ -302,6 +302,18 @@ test('pump deduction subtracts both liters and submitted sales amount', function
         ->and($state['summary']['total_net_sales'])->toBe(29245.0);
 });
 
+test('pump deduction accepts zero liters and zero amount', function () {
+    $service = app(LitersMovementTrackingService::class);
+
+    $adjustment = $service->deductPumpLiters(10, 5, 0, 0, 1, 99, 'No movement adjustment');
+    $state = $service->state(null, 20, 'page', true);
+
+    expect((float) $adjustment->liters)->toBe(0.0)
+        ->and((float) $adjustment->amount)->toBe(0.0)
+        ->and($state['summary']['total_liters'])->toBe(500.0)
+        ->and($state['summary']['total_amount'])->toBe(30000.0);
+});
+
 test('full pump deduction clears net sales and voiding it restores every total', function () {
     DB::table('shift_readings')->where('id', 10)->update([
         'pump5_sales_end' => 62500,
@@ -363,7 +375,86 @@ test('generate record snapshots shift readings and carries ending stock into the
         ->and($newState['summary']['total_liters'])->toBe(0.0)
         ->and($newState['summary']['remaining_liters'])->toBe(2500.0)
         ->and($newState['summary']['submission_count'])->toBe(0)
-        ->and((int) $newState['period']->id)->not->toBe(1);
+        ->and((int) $newState['period']->id)->not->toBe(1)
+        ->and($service->activeLimitsAreGeneratedEndingCarryForward($result['new_period']))->toBeTrue();
+});
+
+test('admin display can use carried current stock without changing the active period', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $activePeriodId = (int) $generated['new_period']->id;
+    $storedLimits = (string) DB::table('liters_tracking_periods')->where('id', $activePeriodId)->value('tank_limits');
+    $state = $service->state(null, 20, 'page', false, [
+        'tank:1' => 1100,
+        'tank:2' => 1200,
+        'tank:3' => 1300,
+    ]);
+
+    expect($state['summary']['limit'])->toBe(3600.0)
+        ->and($state['summary']['remaining_liters'])->toBe(3600.0)
+        ->and((string) DB::table('liters_tracking_periods')->where('id', $activePeriodId)->value('tank_limits'))->toBe($storedLimits);
+});
+
+test('a new period excludes stale readings and memberships left by a reused period id', function () {
+    $service = app(LitersMovementTrackingService::class);
+    $generated = $service->generateAndReset(99);
+    $activePeriodId = (int) $generated['new_period']->id;
+    $staleMembershipCreatedAt = now()->subDays(2);
+    $currentMembershipCreatedAt = now();
+
+    $staleReading = (array) DB::table('shift_readings')->where('id', 10)->first();
+    $staleReading['id'] = 20;
+    $staleReading['liters_tracking_period_id'] = $activePeriodId;
+    $staleReading['period_from'] = now()->subMonth()->toDateString();
+    $staleReading['period_to'] = now()->subMonth()->toDateString();
+    $staleReading['status'] = 'Verified';
+    $staleReading['created_at'] = now()->subMonth();
+    $staleReading['updated_at'] = now()->subMonth();
+
+    $currentReading = $staleReading;
+    $currentReading['id'] = 21;
+    $currentReading['period_from'] = now()->toDateString();
+    $currentReading['period_to'] = now()->toDateString();
+    $currentReading['created_at'] = now();
+    $currentReading['updated_at'] = now();
+    $currentReading['pump5_liters_end'] = 1025;
+    $currentReading['pump5_sales_end'] = 51500;
+
+    DB::table('shift_readings')->insert([$staleReading, $currentReading]);
+    DB::table('liters_movement_period_readings')->insert([
+        [
+            'liters_tracking_period_id' => $activePeriodId,
+            'shift_reading_id' => 20,
+            'inclusion_status' => 'included',
+            'inclusion_source' => 'active_period_assignment',
+            'included_at' => $staleReading['created_at'],
+            'created_at' => $staleMembershipCreatedAt,
+            'updated_at' => $staleMembershipCreatedAt,
+        ],
+        [
+            'liters_tracking_period_id' => $activePeriodId,
+            'shift_reading_id' => 21,
+            'inclusion_status' => 'included',
+            'inclusion_source' => 'shift_reading_submission',
+            'included_at' => $currentReading['created_at'],
+            'created_at' => $currentMembershipCreatedAt,
+            'updated_at' => $currentMembershipCreatedAt,
+        ],
+    ]);
+
+    $state = $service->state();
+    $diesel = collect($state['summary']['tank_breakdown'])->firstWhere('fuel_type', 'Diesel');
+
+    expect($state['transactions']->pluck('id')->all())->toBe([21])
+        ->and($state['summary']['submission_count'])->toBe(1)
+        ->and($state['summary']['total_liters'])->toBe(25.0)
+        ->and(collect($diesel['entries'])->pluck('id')->unique()->values()->all())->toBe([21])
+        ->and(collect($state['summary']['staff_breakdown'])->sum('submission_count'))->toBe(1)
+        ->and((int) DB::table('shift_readings')->where('id', 20)->value('liters_tracking_period_id'))->toBe($activePeriodId)
+        ->and(DB::table('liters_movement_period_readings')
+            ->where('liters_tracking_period_id', $activePeriodId)
+            ->where('shift_reading_id', 20)
+            ->value('inclusion_status'))->toBe('included');
 });
 
 test('editing current stock and adding a delivery preserve live dispensing exactly once', function () {

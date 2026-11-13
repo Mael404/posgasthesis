@@ -27,6 +27,8 @@ beforeEach(function () {
         $table->id();
         $table->unsignedBigInteger('customer_id');
         $table->unsignedBigInteger('invoice_id')->nullable();
+        $table->unsignedBigInteger('source_sale_id')->nullable();
+        $table->unsignedBigInteger('reversal_of_ledger_id')->nullable();
         $table->date('transaction_date');
         $table->string('type', 50);
         $table->string('reference_no')->nullable();
@@ -195,12 +197,263 @@ test('older external reversals do not exclude later active charges with reused r
     expect($rows->pluck('id')->all())->toBe([2]);
 });
 
+test('billing excludes an edited charge that was voided before the replacement sale', function () {
+    insertBillingSoaLedgerRows([
+        [
+            'id' => 1,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-167146R2026',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 480L (Pump 6)',
+            'debit' => 41280,
+        ],
+        [
+            'id' => 2,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Edit Reversal',
+            'reference_no' => 'EDIT-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'Edit Reversal: Original transaction amount from TXN-167146R2026',
+            'credit' => 41280,
+        ],
+        [
+            'id' => 3,
+            'invoice_id' => 12,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'EDIT-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 464.67L (Pump 6) from TXN-167146R2026',
+            'debit' => 39961.62,
+        ],
+        [
+            'id' => 4,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Void',
+            'reference_no' => 'VOID-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'VOID Transaction: Ref TXN-167146R2026',
+            'credit' => 39961.62,
+        ],
+        [
+            'id' => 5,
+            'invoice_id' => 12,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-257898M2026',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 464.67L (Pump 6)',
+            'debit' => 39961.62,
+        ],
+    ]);
+
+    $invoice = (object) [
+        'id' => 12,
+        'customer_id' => 1,
+        'period_start' => '2026-08-21',
+        'period_end' => '2026-08-21',
+    ];
+
+    $rows = callPrivateBillingSoaMethod(new BillingController(), 'billingRowsForInvoice', [$invoice]);
+
+    expect($rows->pluck('id')->all())->toBe([5])
+        ->and((float) $rows->sum('debit'))->toBe(39961.62);
+});
+
+test('customer soa excludes an edited charge that was subsequently voided', function () {
+    insertBillingSoaLedgerRows([
+        [
+            'id' => 1,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-167146R2026',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 480L (Pump 6)',
+            'debit' => 41280,
+        ],
+        [
+            'id' => 2,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Edit Reversal',
+            'reference_no' => 'EDIT-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'Edit Reversal: Original transaction amount from TXN-167146R2026',
+            'credit' => 41280,
+        ],
+        [
+            'id' => 3,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'EDIT-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 464.67L (Pump 6) from TXN-167146R2026',
+            'debit' => 39961.62,
+        ],
+        [
+            'id' => 4,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Void',
+            'reference_no' => 'VOID-2044',
+            'or_number' => 'CBA 1831',
+            'description' => 'VOID Transaction: Ref TXN-167146R2026',
+            'credit' => 39961.62,
+        ],
+        [
+            'id' => 5,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-257898M2026',
+            'or_number' => 'CBA 1831',
+            'description' => 'Credit Charge: Diesel - 464.67L (Pump 6)',
+            'debit' => 39961.62,
+        ],
+    ]);
+
+    $view = (new CustomerController())->generateSOA(Request::create('/customers/soa', 'GET', [
+        'customer_id' => 1,
+        'start_date' => '2026-08-21',
+        'end_date' => '2026-08-21',
+    ]));
+    $data = $view->getData();
+
+    expect($data['transactions']->pluck('id')->all())->toBe([5])
+        ->and((float) $data['transactions']->sum('debit'))->toBe(39961.62);
+});
+
+test('billing uses an exact reversal link when multiple charges have the same amount', function () {
+    insertBillingSoaLedgerRows([
+        [
+            'id' => 1,
+            'invoice_id' => 13,
+            'source_sale_id' => 3001,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-VOIDED',
+            'debit' => 5000,
+        ],
+        [
+            'id' => 2,
+            'invoice_id' => 13,
+            'source_sale_id' => 3002,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-ACTIVE',
+            'debit' => 5000,
+        ],
+        [
+            'id' => 3,
+            'source_sale_id' => 3001,
+            'reversal_of_ledger_id' => 1,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Void',
+            'reference_no' => 'VOID-3001',
+            'description' => 'Legacy description without a usable transaction reference',
+            'credit' => 5000,
+        ],
+    ]);
+
+    $invoice = (object) [
+        'id' => 13,
+        'customer_id' => 1,
+        'period_start' => '2026-08-21',
+        'period_end' => '2026-08-21',
+    ];
+
+    $rows = callPrivateBillingSoaMethod(new BillingController(), 'billingRowsForInvoice', [$invoice]);
+
+    expect($rows->pluck('id')->all())->toBe([2])
+        ->and((float) $rows->sum('debit'))->toBe(5000.0);
+});
+
+test('billing follows exact links through repeated edits and a final void', function () {
+    insertBillingSoaLedgerRows([
+        [
+            'id' => 1,
+            'invoice_id' => 14,
+            'source_sale_id' => 4001,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-ORIGINAL',
+            'debit' => 10000,
+        ],
+        [
+            'id' => 2,
+            'source_sale_id' => 4001,
+            'reversal_of_ledger_id' => 1,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Edit Reversal',
+            'reference_no' => 'EDIT-4001',
+            'credit' => 10000,
+        ],
+        [
+            'id' => 3,
+            'invoice_id' => 14,
+            'source_sale_id' => 4001,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'EDIT-4001',
+            'debit' => 9000,
+        ],
+        [
+            'id' => 4,
+            'source_sale_id' => 4001,
+            'reversal_of_ledger_id' => 3,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Edit Reversal',
+            'reference_no' => 'EDIT-4001',
+            'credit' => 9000,
+        ],
+        [
+            'id' => 5,
+            'invoice_id' => 14,
+            'source_sale_id' => 4001,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'EDIT-4001',
+            'debit' => 8000,
+        ],
+        [
+            'id' => 6,
+            'source_sale_id' => 4001,
+            'reversal_of_ledger_id' => 5,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Void',
+            'reference_no' => 'VOID-4001',
+            'credit' => 8000,
+        ],
+        [
+            'id' => 7,
+            'invoice_id' => 14,
+            'source_sale_id' => 4002,
+            'transaction_date' => '2026-08-21',
+            'type' => 'Fuel Sale',
+            'reference_no' => 'TXN-REPROCESSED',
+            'debit' => 8000,
+        ],
+    ]);
+
+    $invoice = (object) [
+        'id' => 14,
+        'customer_id' => 1,
+        'period_start' => '2026-08-21',
+        'period_end' => '2026-08-21',
+    ];
+
+    $rows = callPrivateBillingSoaMethod(new BillingController(), 'billingRowsForInvoice', [$invoice]);
+
+    expect($rows->pluck('id')->all())->toBe([7])
+        ->and((float) $rows->sum('debit'))->toBe(8000.0);
+});
+
 function insertBillingSoaLedgerRows(array $rows): void
 {
     foreach ($rows as $row) {
         DB::table('customer_ledgers')->insert(array_merge([
             'customer_id' => 1,
             'invoice_id' => null,
+            'source_sale_id' => null,
+            'reversal_of_ledger_id' => null,
             'transaction_date' => '2026-07-14',
             'type' => 'Fuel Sale',
             'reference_no' => null,

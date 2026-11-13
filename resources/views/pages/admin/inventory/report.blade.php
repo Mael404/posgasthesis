@@ -140,7 +140,7 @@
                                                 <input type="number" min="0" step="0.001" value="{{ $openingLiters }}" class="{{ $input }} cursor-not-allowed bg-gray-50 text-right tabular-nums dark:bg-gray-800" readonly aria-label="{{ $definition['product_name'] }} opening quantity from tank">
                                             </td>
                                             <td class="px-4 py-3">
-                                                <input type="number" name="opening[{{ $fuel }}][unit_cost]" min="0" step="0.000001" value="{{ $openingCost }}" class="{{ $input }} text-right tabular-nums" required>
+                                                <input type="number" name="opening[{{ $fuel }}][unit_cost]" min="0" step="0.01" value="{{ number_format((float) $openingCost, 2, '.', '') }}" class="{{ $input }} text-right tabular-nums" required>
                                             </td>
                                             <td class="{{ $tdNumber }} font-semibold">{{ $money((float) $openingLiters * (float) $openingCost) }}</td>
                                         </tr>

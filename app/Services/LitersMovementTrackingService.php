@@ -41,7 +41,13 @@ class LitersMovementTrackingService
     private array $readingNetSalesCache = [];
     private array $lockedSalesPresence = [];
 
-    public function state(?int $staffId = null, int $perPage = 20, string $pageName = 'page', bool $includeNetSales = false): array
+    public function state(
+        ?int $staffId = null,
+        int $perPage = 20,
+        string $pageName = 'page',
+        bool $includeNetSales = false,
+        ?array $tankLimitsOverride = null
+    ): array
     {
         if (! $this->isReady()) {
             return [
@@ -54,13 +60,58 @@ class LitersMovementTrackingService
 
         $period = $this->ensureActivePeriod();
         $this->attachUntrackedShiftReadingsToPeriod($period);
+        $summaryPeriod = $period;
+
+        if ($tankLimitsOverride !== null) {
+            $summaryPeriod = clone $period;
+            $summaryPeriod->tank_limits = json_encode($this->sanitizeTankLimits($tankLimitsOverride));
+        }
 
         return [
             'period' => $period,
-            'summary' => $this->summaryForPeriod($period, $staffId, $includeNetSales),
+            'summary' => $this->summaryForPeriod($summaryPeriod, $staffId, $includeNetSales),
             'transactions' => $this->transactionsForPeriod($period, $staffId, $perPage, $pageName, $includeNetSales),
             'missingRequirements' => [],
         ];
+    }
+
+    public function activeLimitsAreGeneratedEndingCarryForward(?object $period = null): bool
+    {
+        $period ??= $this->activePeriod();
+
+        if (! $period
+            || strtolower(trim((string) ($period->status ?? ''))) !== self::ACTIVE_STATUS
+            || empty($period->started_at)) {
+            return false;
+        }
+
+        $previousPeriod = DB::table('liters_tracking_periods')
+            ->where('status', self::GENERATED_STATUS)
+            ->whereNotNull('ended_at')
+            ->where('ended_at', '<=', $period->started_at)
+            ->where('id', '<>', (int) $period->id)
+            ->orderByDesc('ended_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $previousPeriod) {
+            return false;
+        }
+
+        $expectedLimits = $this->sanitizeTankLimits(
+            $this->decodeSnapshot($previousPeriod->totals_snapshot ?? null)['ending_tank_limits'] ?? []
+        );
+
+        if ($expectedLimits === []) {
+            return false;
+        }
+
+        $storedLimits = $this->storedTankLimitsForPeriod($period, $this->preparedTanks());
+
+        return collect($expectedLimits)->every(
+            fn (float $limit, string $key): bool => array_key_exists($key, $storedLimits)
+                && abs((float) $storedLimits[$key] - $limit) < 0.005
+        );
     }
 
     public function reportSummary(int|object $period): array
@@ -602,12 +653,12 @@ class LitersMovementTrackingService
             throw new \RuntimeException('Choose a valid pump.');
         }
 
-        if ($liters <= 0) {
-            throw new \RuntimeException('Enter liters greater than zero.');
+        if ($liters < 0) {
+            throw new \RuntimeException('Liters cannot be negative.');
         }
 
-        if ($amount <= 0) {
-            throw new \RuntimeException('Enter amount greater than zero.');
+        if ($amount < 0) {
+            throw new \RuntimeException('Amount cannot be negative.');
         }
 
         return DB::transaction(function () use ($shiftReadingId, $pumpNumber, $liters, $amount, $createdBy, $authorizedBy, $reason, $allowedStaffId) {
@@ -1638,11 +1689,9 @@ class LitersMovementTrackingService
     private function shiftReadingsQuery(object $period, ?int $staffId)
     {
         $query = DB::table('shift_readings');
+        $periodStatus = strtolower((string) ($period->status ?? ''));
 
-        if (
-            strtolower((string) ($period->status ?? '')) === self::GENERATED_STATUS
-            && $this->hasTable('liters_movement_period_readings')
-        ) {
+        if ($this->hasTable('liters_movement_period_readings')) {
             $query->join(
                 'liters_movement_period_readings as period_memberships',
                 'shift_readings.id',
@@ -1651,6 +1700,17 @@ class LitersMovementTrackingService
             )
                 ->where('period_memberships.liters_tracking_period_id', (int) $period->id)
                 ->where('period_memberships.inclusion_status', self::MEMBERSHIP_INCLUDED);
+
+            if (
+                $periodStatus === self::ACTIVE_STATUS
+                && ! empty($period->created_at)
+                && $this->hasColumn('liters_movement_period_readings', 'created_at')
+            ) {
+                // A reused period ID can leave old readings and memberships pointing
+                // at a newly-created active period. Only memberships created during
+                // this active period belong in its ledgers and breakdowns.
+                $query->where('period_memberships.created_at', '>=', $period->created_at);
+            }
         } else {
             $query->where('shift_readings.liters_tracking_period_id', (int) $period->id);
         }

@@ -85,6 +85,15 @@ class FuelInventoryReportService
             return $storedOpening;
         }
 
+        if (strtolower(trim((string) ($period->status ?? ''))) === 'active') {
+            $previousPeriod = $this->previousGeneratedPeriod($period);
+            $previousOpening = $previousPeriod ? $this->storedInitialOpening($previousPeriod) : [];
+
+            if ($previousOpening !== []) {
+                return $previousOpening;
+            }
+        }
+
         [$start, $end] = $this->reportWindow(
             $period,
             $period->started_at,
@@ -118,18 +127,7 @@ class FuelInventoryReportService
 
     private function previousGeneratedCurrentStockCosts(object $period): array
     {
-        if (! Schema::hasTable('liters_tracking_periods') || empty($period->started_at)) {
-            return [];
-        }
-
-        $previousPeriod = DB::table('liters_tracking_periods')
-            ->whereRaw('LOWER(TRIM(status)) = ?', ['generated'])
-            ->whereNotNull('ended_at')
-            ->where('ended_at', '<=', Carbon::parse($period->started_at))
-            ->where('id', '!=', (int) $period->id)
-            ->orderByDesc('ended_at')
-            ->orderByDesc('id')
-            ->first();
+        $previousPeriod = $this->previousGeneratedPeriod($period);
 
         if (! $previousPeriod) {
             return [];
@@ -153,6 +151,59 @@ class FuelInventoryReportService
                 (string) $line['fuel_type'] => max(0, (float) ($line['periodic_average_cost'] ?? 0)),
             ])
             ->all();
+    }
+
+    public function previousGeneratedCurrentStockTankLimits(int|object $period): array
+    {
+        if (! is_object($period)) {
+            $period = $this->trackingPeriod($period);
+        }
+
+        if (! $period) {
+            return [];
+        }
+
+        $previousPeriod = $this->previousGeneratedPeriod($period);
+
+        if (! $previousPeriod) {
+            return [];
+        }
+
+        $opening = $this->storedInitialOpening($previousPeriod);
+
+        if ($opening === []) {
+            $opening = $this->initialOpeningFromTrackingPeriod($previousPeriod);
+        }
+
+        $calculation = $this->calculate(
+            $previousPeriod->started_at,
+            $previousPeriod->ended_at,
+            $opening,
+            (int) $previousPeriod->id
+        );
+
+        return collect($calculation['lines'] ?? [])
+            ->filter(fn (array $line): bool => (int) ($line['tank_id'] ?? 0) > 0)
+            ->mapWithKeys(fn (array $line): array => [
+                'tank:' . (int) $line['tank_id'] => $this->rounded(max(0, (float) ($line['available_liters'] ?? 0))),
+            ])
+            ->all();
+    }
+
+    private function previousGeneratedPeriod(object $period): ?object
+    {
+        if (! Schema::hasTable('liters_tracking_periods') || empty($period->started_at)) {
+            return null;
+        }
+
+        return DB::table('liters_tracking_periods')
+            ->whereRaw('LOWER(TRIM(status)) = ?', ['generated'])
+            ->whereNotNull('ended_at')
+            ->where('ended_at', '<=', Carbon::parse($period->started_at))
+            ->where('id', '!=', (int) $period->id)
+            ->orderByDesc('ended_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function saveInitialOpening(int $trackingPeriodId, array $openingCosts): array

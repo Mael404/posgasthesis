@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\FuelInventoryReportService;
 use App\Services\LitersMovementTrackingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,9 +26,22 @@ class LitersMovementController extends Controller
         ]);
     }
 
-    public function admin(LitersMovementTrackingService $tracking): View
+    public function admin(
+        LitersMovementTrackingService $tracking,
+        FuelInventoryReportService $inventoryReports
+    ): View
     {
-        $state = $tracking->state(null, 25, 'tracking_page', true);
+        $activePeriod = $tracking->activePeriod();
+        $currentStockLimits = $activePeriod && $tracking->activeLimitsAreGeneratedEndingCarryForward($activePeriod)
+            ? $inventoryReports->previousGeneratedCurrentStockTankLimits($activePeriod)
+            : [];
+        $state = $tracking->state(
+            null,
+            25,
+            'tracking_page',
+            true,
+            $currentStockLimits !== [] ? $currentStockLimits : null
+        );
 
         return view('pages.admin.litersmovement', [
             'title' => 'Liters Movement & Inventory',
@@ -123,8 +137,8 @@ class LitersMovementController extends Controller
     {
         $validated = $request->validate([
             'pump_number' => ['required', 'integer', 'in:1,2,3,4,5,6'],
-            'liters' => ['required', 'numeric', 'min:0.01', 'max:99999999'],
-            'amount' => ['required', 'numeric', 'min:0.01', 'max:999999999'],
+            'liters' => ['required', 'numeric', 'min:0', 'max:99999999'],
+            'amount' => ['required', 'numeric', 'min:0', 'max:999999999'],
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
 

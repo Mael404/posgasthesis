@@ -1344,6 +1344,18 @@ class BillingController extends Controller
                 continue;
             }
 
+            $linkedLedgerId = (int) ($reversal->reversal_of_ledger_id ?? 0);
+
+            if ($linkedLedgerId > 0) {
+                $skipIds[] = (int) $reversal->id;
+
+                if ($ledgerRows->contains(fn ($row) => (int) $row->id === $linkedLedgerId)) {
+                    $skipIds[] = $linkedLedgerId;
+                }
+
+                continue;
+            }
+
             $candidates = $ledgerRows->filter(function ($row) use ($reversal, $skipIds) {
                 return ! in_array((int) $row->id, $skipIds, true)
                     && $this->isBillableChargeRow($row)
@@ -1430,6 +1442,10 @@ class BillingController extends Controller
 
         if (preg_match('/^EDIT-\d+$/i', $referenceNo)) {
             $tokens[] = $referenceNo;
+        }
+
+        if (preg_match('/^VOID-(\d+)$/i', $referenceNo, $matches)) {
+            $tokens[] = 'EDIT-' . $matches[1];
         }
 
         foreach ([

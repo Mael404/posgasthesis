@@ -1898,12 +1898,12 @@
 
                     <div>
                         <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_liters">Liters to Deduct <span class="text-error-500">*</span></label>
-                        <input id="admin_deduction_liters" name="liters" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailable()" x-model="deduction.liters" x-on:input="syncDeductionAmount()" class="{{ $inputClass }}" required>
+                        <input id="admin_deduction_liters" name="liters" type="number" min="0" step="0.01" x-bind:max="selectedPumpAvailable()" x-model="deduction.liters" x-on:input="syncDeductionAmount()" class="{{ $inputClass }}" required>
                     </div>
 
                     <div>
                         <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-300" for="admin_deduction_amount">Amount to Deduct <span class="text-error-500">*</span></label>
-                        <input id="admin_deduction_amount" name="amount" type="number" min="0.01" step="0.01" x-bind:max="selectedPumpAvailableAmount()" x-model="deduction.amount" x-on:input="deduction.amountManual = true" class="{{ $inputClass }}" required>
+                        <input id="admin_deduction_amount" name="amount" type="number" min="0" step="0.01" x-bind:max="selectedPumpAvailableAmount()" x-model="deduction.amount" x-on:input="deduction.amountManual = true" class="{{ $inputClass }}" required>
                     </div>
 
                     <div>
@@ -2690,12 +2690,13 @@
                         return;
                     }
 
-                    const liters = Number(this.deduction.liters || 0);
+                    const hasLiters = this.deduction.liters !== '' && this.deduction.liters !== null;
+                    const liters = Number(this.deduction.liters);
                     const availableLiters = this.selectedPumpAvailable();
                     const availableAmount = this.selectedPumpAvailableAmount();
                     const price = this.selectedPumpAverageSalesPrice();
 
-                    this.deduction.amount = liters > 0 && price > 0
+                    this.deduction.amount = hasLiters && Number.isFinite(liters) && liters >= 0 && price > 0
                         ? this.roundCurrency(
                             Math.abs(liters - availableLiters) < 0.005
                                 ? availableAmount
@@ -2706,18 +2707,24 @@
                 roundCurrency(value) {
                     const number = Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
-                    return number > 0 ? number.toFixed(2) : '';
+                    return Number.isFinite(number) && number >= 0 ? number.toFixed(2) : '';
                 },
                 canSubmitDeduction() {
-                    const liters = Number(this.deduction.liters || 0);
-                    const amount = Number(this.deduction.amount || 0);
+                    const hasLiters = this.deduction.liters !== '' && this.deduction.liters !== null;
+                    const hasAmount = this.deduction.amount !== '' && this.deduction.amount !== null;
+                    const liters = Number(this.deduction.liters);
+                    const amount = Number(this.deduction.amount);
 
                     return this.canManageAdjustments
                         && Boolean(this.deduction.action)
                         && Boolean(this.deduction.pump)
-                        && liters > 0
+                        && hasLiters
+                        && Number.isFinite(liters)
+                        && liters >= 0
                         && liters <= this.selectedPumpAvailable()
-                        && amount > 0
+                        && hasAmount
+                        && Number.isFinite(amount)
+                        && amount >= 0
                         && amount <= this.selectedPumpAvailableAmount();
                 },
                 openHistoryDetails(recordId) {

@@ -326,7 +326,7 @@ test('initial stock saves tank-derived quantities and manually entered prices', 
         ->and($stored)->toBe($saved);
 });
 
-test('initial stock carries price per liter from current stock in the last generated period', function () {
+test('latest preview carries the saved ending stock from the last generated period', function () {
     DB::table('tanks')->insert([
         'id' => 1,
         'name' => 'Premium Tank',
@@ -377,8 +377,63 @@ test('initial stock carries price per liter from current stock in the last gener
 
     $opening = app(FuelInventoryReportService::class)->initialOpeningFromTrackingPeriod(3);
 
-    expect($opening['Premium']['liters'])->toBe(150.0)
-        ->and($opening['Premium']['unit_cost'])->toBe(65.0);
+    expect($opening['Premium']['liters'])->toBe(100.0)
+        ->and($opening['Premium']['unit_cost'])->toBe(60.0)
+        ->and($opening['Premium']['value'])->toBe(6000.0);
+});
+
+test('active liters movement limit uses current stock from the last generated period', function () {
+    DB::table('tanks')->insert([
+        'id' => 1,
+        'name' => 'Premium Tank',
+        'fuel_type' => 'Premium',
+        'current_volume' => 150,
+        'connected_pumps' => 'Pump 1, Pump 3',
+    ]);
+    DB::table('suppliers')->insert(['id' => 1, 'name' => 'Q & Q']);
+    DB::table('liters_tracking_periods')->insert([
+        [
+            'id' => 2,
+            'period_code' => 'LTM-PREVIOUS-CURRENT-STOCK',
+            'liters_limit' => 200,
+            'tank_limits' => json_encode(['tank:1' => 200]),
+            'opening_inventory' => json_encode([
+                'Premium' => ['liters' => 100, 'unit_cost' => 60, 'value' => 6000],
+            ]),
+            'status' => 'Generated',
+            'started_at' => '2026-08-03 08:00:00',
+            'ended_at' => '2026-08-04 08:00:00',
+        ],
+        [
+            'id' => 3,
+            'period_code' => 'LTM-CURRENT-LIMIT',
+            'liters_limit' => 150,
+            'tank_limits' => json_encode(['tank:1' => 150]),
+            'opening_inventory' => null,
+            'status' => 'Active',
+            'started_at' => '2026-08-04 08:00:00',
+            'ended_at' => null,
+        ],
+    ]);
+    DB::table('inventory_logs')->insert([
+        'id' => 1,
+        'delivery_code' => 'DLV-PREVIOUS-CURRENT-STOCK',
+        'tank_id' => 1,
+        'supplier_id' => 1,
+        'liters_delivered' => 100,
+        'total_cost' => 7000,
+        'delivery_date' => '2026-08-03',
+        'delivery_status' => 'Verified',
+    ]);
+    DB::table('tank_delivery_records')->insert([
+        'inventory_log_id' => 1,
+        'record_date' => '2026-08-03',
+        'record_time' => '10:00:00',
+    ]);
+
+    $limits = app(FuelInventoryReportService::class)->previousGeneratedCurrentStockTankLimits(3);
+
+    expect($limits)->toBe(['tank:1' => 200.0]);
 });
 
 test('workbook inventory formulas match current stock price guide tank progress and fuel profit', function () {

@@ -149,29 +149,10 @@ class StaffPumpController extends Controller
                     if ($newBalance > (float) $creditCustomer->credit_limit) {
                         throw new \RuntimeException('Transaction failed: credit limit exceeded.');
                     }
-
-                    DB::table('customers')->where('id', $creditCustomer->id)->update([
-                        'current_balance' => $newBalance,
-                        'updated_at' => now(),
-                    ]);
-
-                    $this->insertForExistingColumns('customer_ledgers', [
-                        'customer_id' => $creditCustomer->id,
-                        'transaction_date' => now(),
-                        'type' => 'Fuel Sale',
-                        'reference_no' => $referenceNo,
-                        'or_number' => $orNumber,
-                        'description' => $this->fuelSaleDescription($fuelType, $liters, $validated['pump_id'], $totalDiscount, $totalSurcharge),
-                        'debit' => $totalAmount,
-                        'credit' => 0,
-                        'discount' => $totalDiscount,
-                        'running_balance' => $newBalance,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
                 }
 
-                $this->insertForExistingColumns('sales', [
+                $createdAt = now();
+                $saleId = $this->insertGetIdForExistingColumns('sales', [
                     'or_number' => $orNumber,
                     'reference_no' => $referenceNo,
                     'pump_id' => (int) $validated['pump_id'],
@@ -187,9 +168,32 @@ class StaffPumpController extends Controller
                     'discount' => $autoDiscount,
                     'manual_discount' => $manualDiscount,
                     'surcharge' => $totalSurcharge,
-                    'created_at' => now(),
-                    'updated_at' => now(),
+                    'created_at' => $createdAt,
+                    'updated_at' => $createdAt,
                 ]);
+
+                if ($paymentType === 'credit') {
+                    DB::table('customers')->where('id', $creditCustomer->id)->update([
+                        'current_balance' => $newBalance,
+                        'updated_at' => now(),
+                    ]);
+
+                    $this->insertForExistingColumns('customer_ledgers', [
+                        'customer_id' => $creditCustomer->id,
+                        'source_sale_id' => $saleId,
+                        'transaction_date' => $createdAt,
+                        'type' => 'Fuel Sale',
+                        'reference_no' => $referenceNo,
+                        'or_number' => $orNumber,
+                        'description' => $this->fuelSaleDescription($fuelType, $liters, $validated['pump_id'], $totalDiscount, $totalSurcharge),
+                        'debit' => $totalAmount,
+                        'credit' => 0,
+                        'discount' => $totalDiscount,
+                        'running_balance' => $newBalance,
+                        'created_at' => $createdAt,
+                        'updated_at' => $createdAt,
+                    ]);
+                }
             });
 
             $message = $request->input('payment_type') === 'credit'
@@ -289,7 +293,8 @@ class StaffPumpController extends Controller
                         0,
                         0,
                         null,
-                        $previousInvoiceId
+                        $previousInvoiceId,
+                        $previousCreditLedger->id ?? null
                     );
                 }
 
@@ -341,7 +346,8 @@ class StaffPumpController extends Controller
                         $totalDiscount,
                         $totalSurcharge,
                         $orNumber,
-                        ((int) ($sale->customer_id ?? 0) === $newCustomerId) ? $previousInvoiceId : null
+                        ((int) ($sale->customer_id ?? 0) === $newCustomerId) ? $previousInvoiceId : null,
+                        null
                     );
                 }
 
@@ -635,6 +641,7 @@ class StaffPumpController extends Controller
                 }
 
                 if ($sale->payment_type === 'credit' && $sale->customer_id) {
+                    $chargeLedger = $this->findLatestCreditLedgerForSale($sale);
                     $customer = DB::table('customers')
                         ->where('id', $sale->customer_id)
                         ->lockForUpdate()
@@ -653,6 +660,8 @@ class StaffPumpController extends Controller
 
                         $this->insertForExistingColumns('customer_ledgers', [
                             'customer_id' => $customer->id,
+                            'source_sale_id' => $sale->id,
+                            'reversal_of_ledger_id' => $chargeLedger->id ?? null,
                             'transaction_date' => now(),
                             'type' => 'Void',
                             'reference_no' => 'VOID-' . $sale->id,
@@ -827,8 +836,13 @@ class StaffPumpController extends Controller
             ->where('customer_id', $sale->customer_id)
             ->where('debit', '>', 0)
             ->where('type', '!=', 'Payment')
-            ->where(function ($query) use ($referenceNo, $orNumber, $editReference) {
-                $query->where('reference_no', $editReference);
+            ->where(function ($query) use ($sale, $referenceNo, $orNumber, $editReference) {
+                if ($this->hasColumn('customer_ledgers', 'source_sale_id')) {
+                    $query->where('source_sale_id', $sale->id)
+                        ->orWhere('reference_no', $editReference);
+                } else {
+                    $query->where('reference_no', $editReference);
+                }
 
                 if ($referenceNo) {
                     $query->orWhere('reference_no', $referenceNo)
@@ -857,7 +871,8 @@ class StaffPumpController extends Controller
         float $discount = 0,
         float $surcharge = 0,
         ?string $orNumber = null,
-        $invoiceId = null
+        $invoiceId = null,
+        $reversalOfLedgerId = null
     ): void {
         if ($debit <= 0 && $credit <= 0) {
             return;
@@ -901,6 +916,8 @@ class StaffPumpController extends Controller
 
         $this->insertForExistingColumns('customer_ledgers', [
             'customer_id' => $customerId,
+            'source_sale_id' => $sale->id,
+            'reversal_of_ledger_id' => $reversalOfLedgerId,
             'transaction_date' => $sale->created_at,
             'type' => $type,
             'reference_no' => 'EDIT-' . $sale->id,
@@ -1028,6 +1045,11 @@ class StaffPumpController extends Controller
     private function insertForExistingColumns(string $table, array $values): void
     {
         DB::table($table)->insert($this->onlyExistingColumns($table, $values));
+    }
+
+    private function insertGetIdForExistingColumns(string $table, array $values): int
+    {
+        return (int) DB::table($table)->insertGetId($this->onlyExistingColumns($table, $values));
     }
 
     private function onlyExistingColumns(string $table, array $values): array
