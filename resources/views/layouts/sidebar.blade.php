@@ -89,6 +89,9 @@
                         <!-- Menu Items -->
                         <ul class="flex flex-col gap-1">
                             @foreach ($menuGroup['items'] as $itemIndex => $item)
+                                {{-- Temporarily hide these sidebar links while keeping their pages available. --}}
+                                @continue(auth()->user()?->role === 'vp_admin' && in_array($item['name'], ['Official Receipts', 'Printed Transactions'], true))
+                                @continue(auth()->user()?->role === 'staff' && in_array($item['name'], ['Liters Tracking', 'Printed Transactions', 'Official Receipts', 'Billing'], true))
                                 @php
                                     $itemIsActive = MenuHelper::isItemActive($item);
                                     $itemBadge = (int) ($item['badge'] ?? 0);
@@ -149,6 +152,7 @@
                                         <div x-show="isSubmenuOpen({{ $groupIndex }}, {{ $itemIndex }}) && ($store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen)">
                                             <ul class="mt-2 space-y-1 ml-9">
                                                 @foreach ($item['subItems'] as $subItem)
+                                                    @continue(auth()->user()?->role === 'vp_admin' && $subItem['name'] === 'Liters Movement & Inventory')
                                                     @php
                                                         $subItemIsActive = MenuHelper::isItemActive($subItem);
                                                         $subItemBadge = (int) ($subItem['badge'] ?? 0);

@@ -90,6 +90,43 @@
                                 <p class="mt-2 font-semibold text-gray-800 dark:text-white/90" x-text="specialPrice(selectedCustomer.sp_premium)"></p>
                             </article>
                         </div>
+
+                        <div class="mt-5 border-t border-gray-200 pt-4 dark:border-gray-800">
+                            <h4 class="text-theme-sm font-semibold text-gray-800 dark:text-white/90">Pricing History</h4>
+                            <p class="mt-1 {{ $captionClass }}">New special prices, updates, and returns to standard pricing. Most recent first.</p>
+
+                            <p x-show="pricingHistory.loading" role="status" class="py-4 {{ $captionClass }}">Loading pricing history...</p>
+                            <div x-show="pricingHistory.error" role="alert" class="mt-3 text-theme-sm text-error-600 dark:text-error-400">
+                                <p x-text="pricingHistory.error"></p>
+                                <button type="button" x-on:click="fetchPricingHistory(selectedCustomer.id)" class="mt-2 font-medium underline">Retry</button>
+                            </div>
+                            <p x-show="!pricingHistory.loading && !pricingHistory.error && pricingHistory.rows.length === 0" class="py-4 {{ $captionClass }}">No special price changes recorded yet.</p>
+
+                            <div x-show="!pricingHistory.loading && !pricingHistory.error && pricingHistory.rows.length > 0" class="mt-3 max-h-80 overflow-auto custom-scrollbar">
+                                <table class="w-full text-theme-sm">
+                                    <thead class="bg-gray-50 dark:bg-white/[0.03]">
+                                        <tr>
+                                            <th scope="col" class="px-3 py-2 text-left {{ $labelClass }}">Date & Time</th>
+                                            <th scope="col" class="px-3 py-2 text-left {{ $labelClass }}">Fuel</th>
+                                            <th scope="col" class="px-3 py-2 text-right {{ $labelClass }}">Previous Price</th>
+                                            <th scope="col" class="px-3 py-2 text-right {{ $labelClass }}">New Price</th>
+                                            <th scope="col" class="px-3 py-2 text-left {{ $labelClass }}">Changed By</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        <template x-for="entry in pricingHistory.rows" :key="entry.id">
+                                            <tr class="text-gray-700 dark:text-gray-300">
+                                                <td class="whitespace-nowrap px-3 py-3" x-text="entry.date_display"></td>
+                                                <td class="px-3 py-3" x-text="entry.fuel_type"></td>
+                                                <td class="whitespace-nowrap px-3 py-3 text-right tabular-nums" x-text="specialPrice(entry.previous_price)"></td>
+                                                <td class="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums" x-text="specialPrice(entry.new_price)"></td>
+                                                <td class="px-3 py-3" x-text="entry.changed_by_name"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -206,14 +243,10 @@
                     <input type="text" x-model="customerForm.business_name" class="mt-1.5 {{ $inputClass }}" required>
                 </label>
                 <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                    <span>Owner / Contact Name</span>
-                    <input type="text" x-model="customerForm.owner_name" class="mt-1.5 {{ $inputClass }}">
-                </label>
-                <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                     <span>Contact Number</span>
                     <input type="text" x-model="customerForm.contact_number" class="mt-1.5 {{ $inputClass }}">
                 </label>
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                         <span>Credit Limit</span>
                         <input type="number" min="0" step="0.01" x-model="customerForm.credit_limit" class="mt-1.5 {{ $inputClass }}" required>
@@ -229,6 +262,46 @@
                     </label>
                 </div>
             </div>
+
+            <fieldset class="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                <legend class="px-2 text-theme-sm font-semibold text-gray-800 dark:text-white/90">Owner / Contact Name</legend>
+                <div x-show="legacyCustomerName" class="mb-4 rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+                    <p class="{{ $labelClass }}">Saved Name</p>
+                    <p class="mt-1 text-theme-sm font-medium text-gray-800 dark:text-white/90" x-text="customerForm.owner_name || 'No owner / contact name saved.'"></p>
+                    <p class="mt-1 {{ $captionClass }}">Keep the saved name, or enter its parts to replace it.</p>
+                    <button type="button" x-on:click="useNameComponents = !useNameComponents" class="mt-2 text-theme-sm font-medium text-brand-600 underline dark:text-brand-400" x-text="useNameComponents ? 'Keep saved name' : 'Enter name parts'"></button>
+                </div>
+                <div x-show="useNameComponents" class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>First Name <span class="text-error-600" aria-hidden="true">*</span></span>
+                        <input type="text" name="first_name" autocomplete="given-name" x-model="customerForm.first_name" x-on:blur="customerForm.first_name = cleanCustomerName(customerForm.first_name)" :required="useNameComponents" :disabled="!useNameComponents" minlength="2" maxlength="60" class="mt-1.5 {{ $inputClass }}">
+                    </label>
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>Middle Name <span class="normal-case">(optional)</span></span>
+                        <input type="text" name="middle_name" autocomplete="additional-name" x-model="customerForm.middle_name" x-on:blur="customerForm.middle_name = cleanCustomerName(customerForm.middle_name)" :disabled="!useNameComponents" maxlength="60" class="mt-1.5 {{ $inputClass }}">
+                    </label>
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>Last Name <span class="text-error-600" aria-hidden="true">*</span></span>
+                        <input type="text" name="last_name" autocomplete="family-name" x-model="customerForm.last_name" x-on:blur="customerForm.last_name = cleanCustomerName(customerForm.last_name)" :required="useNameComponents" :disabled="!useNameComponents" minlength="2" maxlength="60" class="mt-1.5 {{ $inputClass }}">
+                    </label>
+                    <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                        <span>Suffix <span class="normal-case">(optional)</span></span>
+                        <select name="suffix" autocomplete="honorific-suffix" x-model="customerForm.suffix" :disabled="!useNameComponents" class="mt-1.5 {{ $selectClass }}">
+                            <option value="">None</option>
+                            <option value="Jr.">Jr.</option>
+                            <option value="Sr.">Sr.</option>
+                            <option value="II">II</option>
+                            <option value="III">III</option>
+                            <option value="IV">IV</option>
+                            <option value="V">V</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <p class="{{ $labelClass }}">Display Name</p>
+                    <p class="mt-1 text-theme-sm font-medium text-gray-800 dark:text-white/90" aria-live="polite" x-text="customerDisplayName() || 'Enter the owner / contact name above.'"></p>
+                </div>
+            </fieldset>
 
             <div class="mt-6 rounded-xl border border-l-4 border-gray-200 border-l-brand-500 bg-gray-50/60 p-4 dark:border-gray-800 dark:border-l-brand-400 dark:bg-white/[0.02]">
                 <div class="flex items-center gap-3">
@@ -419,7 +492,7 @@
                                 <tr x-show="customerMatches('{{ $customer->id }}', inactiveSearch)">
                                     <td class="{{ $tdPrimaryClass ?? 'px-5 py-4 align-middle text-theme-sm font-medium text-gray-800 dark:text-white/90' }}">{{ strtoupper($customer->business_name ?? 'N/A') }}</td>
                                     <td class="{{ $tdClass ?? 'px-5 py-4 align-middle text-theme-sm text-gray-700 dark:text-gray-300' }}">
-                                        <div>{{ $customer->owner_name ? ucwords(strtolower($customer->owner_name)) : 'N/A' }}</div>
+                                        <div>{{ $customer->owner_name ?: 'N/A' }}</div>
                                         <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $customer->contact_number ?: 'N/A' }}</div>
                                     </td>
                                     <td class="{{ $tdNumberClass ?? 'px-5 py-4 align-middle text-right text-theme-sm tabular-nums text-gray-700 dark:text-gray-300' }}">&#8369;{{ number_format((float) $customer->credit_limit, 2) }}</td>

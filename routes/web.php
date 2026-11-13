@@ -181,6 +181,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
         Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
         Route::post('/customers/update', [CustomerController::class, 'update'])->name('customers.update');
+        Route::get('/customers/{id}/pricing-history', [CustomerController::class, 'getPricingHistory'])->whereNumber('id')->name('customers.pricingHistory');
         Route::get('/customers/ledger/{id}', [CustomerController::class, 'getLedger'])->name('customers.ledger');
         Route::get('/customers/print-ledger/{id}', [CustomerController::class, 'printLedger'])->name('customers.printLedger');
         Route::get('/customers/soa', [CustomerController::class, 'generateSOA'])->name('customers.soa');

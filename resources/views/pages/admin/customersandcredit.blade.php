@@ -37,7 +37,7 @@
             $label = $hasBusinessName ? strtoupper($businessName) : '';
 
             if ($hasOwnerName && (! $hasBusinessName || strcasecmp($businessName, $ownerName) !== 0)) {
-                $ownerLabel = ucwords(strtolower($ownerName));
+                $ownerLabel = $ownerName;
                 $label = $label ? "{$label} - {$ownerLabel}" : $ownerLabel;
             }
 
@@ -81,6 +81,10 @@
                 'id' => (int) $customer->id,
                 'business_name' => $customer->business_name ?? '',
                 'owner_name' => $customer->owner_name ?? '',
+                'first_name' => $customer->first_name ?? '',
+                'middle_name' => $customer->middle_name ?? '',
+                'last_name' => $customer->last_name ?? '',
+                'suffix' => $customer->suffix ?? '',
                 'contact_number' => $customer->contact_number ?? '',
                 'credit_limit' => (float) ($customer->credit_limit ?? 0),
                 'current_balance' => (float) ($customer->current_balance ?? 0),
@@ -128,6 +132,7 @@
             payUrl: @js(route('customers.pay')),
             voidPaymentUrl: @js(route('customers.voidPayment')),
             toggleStatusUrl: @js(route('customers.toggleStatus')),
+            pricingHistoryBaseUrl: @js(url('/customers')),
             ledgerBaseUrl: @js(url('/customers/ledger')),
             printLedgerBaseUrl: @js(url('/customers/print-ledger')),
             unpaidBaseUrl: @js(url('/customers')),
@@ -254,7 +259,7 @@
                                 <tr>
                                     <td class="{{ $tdPrimaryClass }}">{{ strtoupper($customer->business_name ?? 'N/A') }}</td>
                                     <td class="{{ $tdClass }}">
-                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $customer->owner_name ? ucwords(strtolower($customer->owner_name)) : 'N/A' }}</div>
+                                        <div class="font-medium text-gray-800 dark:text-white/90">{{ $customer->owner_name ?: 'N/A' }}</div>
                                         <div class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $customer->contact_number ?: 'N/A' }}</div>
                                     </td>
                                     <td class="{{ $tdNumberClass }}">&#8369;{{ number_format((float) $customer->credit_limit, 2) }}</td>
@@ -478,7 +483,7 @@
                                 @forelse ($adminPayments as $payment)
                                     <tr>
                                         <td class="{{ $tdClass }}">{{ $payment->created_at ? \Carbon\Carbon::parse($payment->created_at)->format('M d, Y h:i A') : 'N/A' }}</td>
-                                        <td class="{{ $tdPrimaryClass }}">{{ $payment->business_name && strtoupper($payment->business_name) !== 'N/A' ? strtoupper($payment->business_name) : ucwords(strtolower($payment->owner_name ?? 'Customer')) }}</td>
+                                        <td class="{{ $tdPrimaryClass }}">{{ $payment->business_name && strtoupper($payment->business_name) !== 'N/A' ? strtoupper($payment->business_name) : ($payment->owner_name ?? 'Customer') }}</td>
                                         <td class="{{ $tdClass }}">{{ $payment->reference_no ?: '-' }}</td>
                                         <td class="{{ $tdClass }}">{{ $payment->description ?: '-' }}</td>
                                         <td class="{{ $tdNumberClass }} font-semibold text-success-600 dark:text-success-500">&#8369;{{ number_format((float) $payment->credit, 2) }}</td>
@@ -526,6 +531,8 @@
                 modal: null,
                 formMode: 'add',
                 selectedCustomer: null,
+                pricingHistory: { customerId: null, rows: [], loading: false, error: '' },
+                pricingHistoryRequestId: 0,
                 toast: { open: false, message: '', timer: null },
                 messageDialog: { open: false, type: 'error', title: '', message: '' },
                 confirmation: {
@@ -544,6 +551,8 @@
                 savingPayment: false,
                 ledger: { customerId: '', fromDate: '', toDate: '', rows: [], loading: false, error: '' },
                 customerForm: {},
+                legacyCustomerName: false,
+                useNameComponents: true,
                 paymentForm: {},
                 invoices: [],
                 invoiceLoading: false,
@@ -600,6 +609,33 @@
                         return;
                     }
                     this.modal = 'view';
+                    this.fetchPricingHistory(this.selectedCustomer.id);
+                },
+
+                async fetchPricingHistory(customerId) {
+                    const requestId = ++this.pricingHistoryRequestId;
+                    const history = { customerId, rows: [], loading: true, error: '' };
+                    this.pricingHistory = history;
+
+                    try {
+                        const response = await fetch(config.pricingHistoryBaseUrl + '/' + customerId + '/pricing-history', {
+                            headers: { 'Accept': 'application/json' }
+                        });
+                        const data = await response.json();
+
+                        if (!response.ok) {
+                            throw new Error(data.message || 'Unable to load pricing history.');
+                        }
+
+                        history.rows = data;
+                    } catch (error) {
+                        history.error = error.message || 'Unable to load pricing history.';
+                    } finally {
+                        history.loading = false;
+                        if (requestId === this.pricingHistoryRequestId) {
+                            this.pricingHistory = { ...history };
+                        }
+                    }
                 },
 
                 openInactive() {
@@ -615,10 +651,16 @@
                         const customer = this.customersById[String(id)];
                         if (!customer) return;
                         this.selectedCustomer = customer;
+                        this.legacyCustomerName = !customer.first_name && !customer.last_name;
+                        this.useNameComponents = !this.legacyCustomerName;
                         this.customerForm = {
                             id: customer.id,
                             business_name: customer.business_name || '',
                             owner_name: customer.owner_name || '',
+                            first_name: customer.first_name || '',
+                            middle_name: customer.middle_name || '',
+                            last_name: customer.last_name || '',
+                            suffix: customer.suffix || '',
                             contact_number: customer.contact_number || '',
                             credit_limit: Number(customer.credit_limit || 0).toFixed(2),
                             payment_terms: customer.payment_terms || '15 Days',
@@ -640,10 +682,16 @@
                 },
 
                 resetCustomerForm() {
+                    this.legacyCustomerName = false;
+                    this.useNameComponents = true;
                     this.customerForm = {
                         id: '',
                         business_name: '',
                         owner_name: '',
+                        first_name: '',
+                        middle_name: '',
+                        last_name: '',
+                        suffix: '',
                         contact_number: '',
                         credit_limit: '',
                         payment_terms: '15 Days',
@@ -651,6 +699,34 @@
                         sp_unleaded: '',
                         sp_premium: ''
                     };
+                },
+
+                cleanCustomerName(value) {
+                    return String(value || '').replace(/[\p{Z}\s]+/gu, ' ').trim();
+                },
+
+                customerDisplayName() {
+                    if (!this.useNameComponents) return this.customerForm.owner_name || '';
+                    return ['first_name', 'middle_name', 'last_name', 'suffix']
+                        .map(field => this.cleanCustomerName(this.customerForm[field]))
+                        .filter(Boolean).join(' ');
+                },
+
+                customerNameValidationError() {
+                    if (!this.useNameComponents) return '';
+                    const namePattern = /^(?=.*\p{L})[\p{L}\p{M}\p{Pd} .'\u2018\u2019\uFF07\u00B7\u30FB\u05F3\u05F4\u200C\u200D]+$/u;
+                    for (const [field, label, required] of [['first_name', 'First name', true], ['middle_name', 'Middle name', false], ['last_name', 'Last name', true]]) {
+                        const value = this.cleanCustomerName(this.customerForm[field]);
+                        this.customerForm[field] = value;
+                        const length = Array.from(value).length;
+                        if (required && length < 2) return label + ' must contain at least 2 characters.';
+                        if (length > 60) return label + ' must not exceed 60 characters.';
+                        if (value && !namePattern.test(value)) return label + ' must contain valid personal-name characters.';
+                    }
+                    if (!['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'].includes(this.customerForm.suffix)) {
+                        return 'Select a valid suffix.';
+                    }
+                    return '';
                 },
 
                 resetPaymentForm() {
@@ -674,6 +750,12 @@
                         return;
                     }
 
+                    const nameError = this.customerNameValidationError();
+                    if (nameError) {
+                        this.showNotice('error', nameError);
+                        return;
+                    }
+
                     const isEdit = this.formMode === 'edit';
                     const url = isEdit ? config.updateUrl : config.storeUrl;
                     const confirmed = await this.askConfirmation({
@@ -685,7 +767,12 @@
                     if (!confirmed) return;
 
                     this.savingCustomer = true;
-                    const data = await this.postJson(url, this.customerForm);
+                    const payload = { ...this.customerForm };
+                    delete payload.owner_name;
+                    if (!this.useNameComponents) {
+                        for (const field of ['first_name', 'middle_name', 'last_name', 'suffix']) delete payload[field];
+                    }
+                    const data = await this.postJson(url, payload);
                     this.savingCustomer = false;
 
                     if (!data.success) {
@@ -1069,7 +1156,7 @@
                 },
 
                 specialPrice(value) {
-                    return value ? this.formatMoney(value) : 'Standard';
+                    return Number(value) > 0 ? this.formatMoney(value) : 'Standard';
                 }
             };
         }

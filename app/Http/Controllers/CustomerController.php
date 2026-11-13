@@ -60,36 +60,31 @@ class CustomerController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'business_name' => 'required|string|max:255',
-            'owner_name' => 'nullable|string|max:255',
-            'contact_number' => 'nullable|string|max:50',
-            'credit_limit' => 'required|numeric|min:0',
-            'payment_terms' => 'nullable|string|max:50',
-            'sp_diesel' => 'nullable|numeric|min:0',
-            'sp_unleaded' => 'nullable|numeric|min:0',
-            'sp_premium' => 'nullable|numeric|min:0',
-        ]);
+        $validated = $this->validateCustomer($request);
 
         if (! $this->hasTable('customers')) {
             return $this->jsonError('Customers table is not available.');
         }
 
         try {
-            $this->insertForExistingColumns('customers', [
-                'business_name' => $validated['business_name'],
-                'owner_name' => $validated['owner_name'] ?? null,
-                'contact_number' => $validated['contact_number'] ?? null,
-                'credit_limit' => (float) $validated['credit_limit'],
-                'current_balance' => 0,
-                'payment_terms' => $validated['payment_terms'] ?? '15 Days',
-                'sp_diesel' => $validated['sp_diesel'] ?? null,
-                'sp_unleaded' => $validated['sp_unleaded'] ?? null,
-                'sp_premium' => $validated['sp_premium'] ?? null,
-                'status' => 'Active',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            DB::transaction(function () use ($validated) {
+                $customerId = DB::table('customers')->insertGetId($this->onlyExistingColumns('customers', [
+                    'business_name' => $validated['business_name'],
+                    ...$this->customerNameValues($validated),
+                    'contact_number' => $validated['contact_number'] ?? null,
+                    'credit_limit' => (float) $validated['credit_limit'],
+                    'current_balance' => 0,
+                    'payment_terms' => $validated['payment_terms'] ?? '15 Days',
+                    'sp_diesel' => $validated['sp_diesel'] ?? null,
+                    'sp_unleaded' => $validated['sp_unleaded'] ?? null,
+                    'sp_premium' => $validated['sp_premium'] ?? null,
+                    'status' => 'Active',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]));
+
+                $this->recordPriceChanges($customerId);
+            });
 
             return response()->json([
                 'success' => true,
@@ -102,30 +97,33 @@ class CustomerController extends Controller
 
     public function update(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'id' => 'required|exists:customers,id',
-            'business_name' => 'required|string|max:255',
-            'owner_name' => 'nullable|string|max:255',
-            'contact_number' => 'nullable|string|max:50',
-            'credit_limit' => 'required|numeric|min:0',
-            'payment_terms' => 'nullable|string|max:50',
-            'sp_diesel' => 'nullable|numeric|min:0',
-            'sp_unleaded' => 'nullable|numeric|min:0',
-            'sp_premium' => 'nullable|numeric|min:0',
-        ]);
+        $validated = $this->validateCustomer($request, updating: true);
 
         try {
-            $this->updateForExistingColumns('customers', $validated['id'], [
-                'business_name' => $validated['business_name'],
-                'owner_name' => $validated['owner_name'] ?? null,
-                'contact_number' => $validated['contact_number'] ?? null,
-                'credit_limit' => (float) $validated['credit_limit'],
-                'payment_terms' => $validated['payment_terms'] ?? null,
-                'sp_diesel' => $validated['sp_diesel'] ?? null,
-                'sp_unleaded' => $validated['sp_unleaded'] ?? null,
-                'sp_premium' => $validated['sp_premium'] ?? null,
-                'updated_at' => now(),
-            ]);
+            DB::transaction(function () use ($validated) {
+                $customer = DB::table('customers')
+                    ->where('id', $validated['id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $customer) {
+                    throw new \RuntimeException('Customer not found.');
+                }
+
+                $this->updateForExistingColumns('customers', $validated['id'], [
+                    'business_name' => $validated['business_name'],
+                    ...$this->customerNameValues($validated),
+                    'contact_number' => $validated['contact_number'] ?? null,
+                    'credit_limit' => (float) $validated['credit_limit'],
+                    'payment_terms' => $validated['payment_terms'] ?? null,
+                    'sp_diesel' => $validated['sp_diesel'] ?? null,
+                    'sp_unleaded' => $validated['sp_unleaded'] ?? null,
+                    'sp_premium' => $validated['sp_premium'] ?? null,
+                    'updated_at' => now(),
+                ]);
+
+                $this->recordPriceChanges((int) $customer->id, $customer);
+            });
 
             return response()->json([
                 'success' => true,
@@ -134,6 +132,33 @@ class CustomerController extends Controller
         } catch (\Throwable $e) {
             return $this->jsonError($e->getMessage());
         }
+    }
+
+    public function getPricingHistory(int $id): JsonResponse
+    {
+        abort_unless($this->hasTable('customers') && DB::table('customers')->where('id', $id)->exists(), 404);
+
+        if (! $this->hasTable('customer_price_histories')) {
+            return response()->json([
+                'message' => 'Pricing history is unavailable. Run the database migrations to enable it.',
+            ], 503);
+        }
+
+        $history = DB::table('customer_price_histories')
+            ->where('customer_id', $id)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn ($entry) => [
+                'id' => (int) $entry->id,
+                'fuel_type' => $entry->fuel_type,
+                'previous_price' => $entry->previous_price === null ? null : (float) $entry->previous_price,
+                'new_price' => $entry->new_price === null ? null : (float) $entry->new_price,
+                'changed_by_name' => $entry->changed_by_name ?: 'Unknown user',
+                'date_display' => Carbon::parse($entry->created_at)->format('M d, Y - h:i:s A'),
+            ]);
+
+        return response()->json($history);
     }
 
     public function getLedger(Request $request, int $id): JsonResponse
@@ -751,6 +776,103 @@ class CustomerController extends Controller
     private function moneyValue($value): float
     {
         return round((float) $value, 2);
+    }
+
+    private function validateCustomer(Request $request, bool $updating = false): array
+    {
+        $nameFields = ['first_name', 'middle_name', 'last_name', 'suffix'];
+        $usesNameComponents = ! $updating || $request->hasAny($nameFields);
+
+        foreach ($nameFields as $field) {
+            if (is_string($request->input($field))) {
+                $value = trim(preg_replace('/[\p{Z}\s]+/u', ' ', $request->input($field)) ?? $request->input($field));
+                $request->merge([$field => $value === '' ? null : $value]);
+            }
+        }
+
+        $rules = [
+            'business_name' => 'required|string|max:255',
+            'contact_number' => 'nullable|string|max:50',
+            'credit_limit' => 'required|numeric|min:0',
+            'payment_terms' => 'nullable|string|max:50',
+            'sp_diesel' => 'nullable|numeric|min:0',
+            'sp_unleaded' => 'nullable|numeric|min:0',
+            'sp_premium' => 'nullable|numeric|min:0',
+        ];
+
+        if ($updating) {
+            $rules['id'] = 'required|exists:customers,id';
+        }
+
+        if ($usesNameComponents) {
+            // Unicode letters/marks, spaces and punctuation used in personal names.
+            $namePattern = 'regex:/\A(?=.*\p{L})[\p{L}\p{M}\p{Pd} .\'\x{2018}\x{2019}\x{FF07}\x{00B7}\x{30FB}\x{05F3}\x{05F4}\x{200C}\x{200D}]+\z/u';
+            $rules['first_name'] = ['required', 'string', 'min:2', 'max:60', $namePattern];
+            $rules['middle_name'] = ['nullable', 'string', 'max:60', $namePattern];
+            $rules['last_name'] = ['required', 'string', 'min:2', 'max:60', $namePattern];
+            $rules['suffix'] = ['nullable', 'string', 'in:Jr.,Sr.,II,III,IV,V'];
+        }
+
+        $validated = $request->validate($rules, [
+            'first_name.regex' => 'First name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
+            'middle_name.regex' => 'Middle name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
+            'last_name.regex' => 'Last name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
+        ]);
+
+        if ($usesNameComponents) {
+            $validated['middle_name'] = $validated['middle_name'] ?? null;
+            $validated['suffix'] = $validated['suffix'] ?? null;
+            $validated['owner_name'] = implode(' ', array_filter(
+                array_map(fn ($field) => $validated[$field] ?? null, $nameFields),
+                fn ($value) => $value !== null && $value !== ''
+            ));
+        }
+
+        return $validated;
+    }
+
+    private function customerNameValues(array $validated): array
+    {
+        return array_intersect_key($validated, array_flip(['owner_name', 'first_name', 'middle_name', 'last_name', 'suffix']));
+    }
+
+    private function recordPriceChanges(int $customerId, ?object $previousCustomer = null): void
+    {
+        $customer = DB::table('customers')->where('id', $customerId)->first();
+        $user = auth()->user();
+        $changes = [];
+        $recordedAt = now();
+
+        foreach (['sp_diesel' => 'Diesel', 'sp_unleaded' => 'Unleaded', 'sp_premium' => 'Premium'] as $column => $fuelType) {
+            $previousPrice = $previousCustomer->{$column} ?? null;
+            $newPrice = $customer->{$column} ?? null;
+            $previousPrice = $previousPrice === null ? null : round((float) $previousPrice, 2);
+            $newPrice = $newPrice === null ? null : round((float) $newPrice, 2);
+
+            if ($previousPrice === $newPrice) {
+                continue;
+            }
+
+            $changes[] = [
+                'customer_id' => $customerId,
+                'fuel_type' => $fuelType,
+                'previous_price' => $previousPrice,
+                'new_price' => $newPrice,
+                'changed_by' => $user?->id,
+                'changed_by_name' => $user?->name,
+                'created_at' => $recordedAt,
+            ];
+        }
+
+        if ($changes === []) {
+            return;
+        }
+
+        if (! $this->hasTable('customer_price_histories')) {
+            throw new \RuntimeException('Pricing history is unavailable. Run the database migrations before changing special prices.');
+        }
+
+        DB::table('customer_price_histories')->insert($changes);
     }
 
     private function insertForExistingColumns(string $table, array $values): void
