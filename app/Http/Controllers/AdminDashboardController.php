@@ -14,15 +14,6 @@ use Symfony\Component\Process\Process;
 class AdminDashboardController extends Controller
 {
     private const PERIODS = ['today', 'weekly', 'monthly', 'custom'];
-    private const METRIC_DATE_FILTERS = [
-        'net-sales' => 'net_sales',
-        'net-sales-tank' => 'net_sales_tank',
-        'expected-credit' => 'expected_credit',
-        'credit-payments' => 'credit_payments',
-        'advance-receivables' => 'advance_receivables',
-        'total-excess' => 'total_excess',
-        'liters-movement' => 'liters_movement',
-    ];
 
     private $lockedSalesPresence = [];
     private array $tablePresence = [];
@@ -42,10 +33,11 @@ class AdminDashboardController extends Controller
         return response()->json($this->dashboardPayload($request));
     }
 
-    private function dashboardPayload(?Request $request = null): array
+    private function dashboardPayload(Request $request): array
     {
-        $ranges = $this->periodRanges();
-        $metricDateRanges = $this->metricDateRanges($request);
+        $filter = $this->dashboardFilter($request);
+        $start = Carbon::parse($filter['from'])->startOfDay();
+        $end = Carbon::parse($filter['to'])->endOfDay();
         $lastVerifiedShift = null;
 
         if ($this->hasTable('shift_readings')) {
@@ -55,192 +47,84 @@ class AdminDashboardController extends Controller
                 ->first();
         }
 
-        $lastVerifiedAt = $lastVerifiedShift
+        $lastVerifiedAt = isset($lastVerifiedShift->created_at)
             ? Carbon::parse($lastVerifiedShift->created_at)
             : null;
 
-        [$chartLabels, $chartData] = $this->salesTrend();
-        $creditSnapshot = $this->creditSnapshot();
+        [$chartLabels, $chartData] = $this->salesTrend([$start, $end]);
+        $stats = $this->statsForRange($start, $end, $this->creditSnapshot());
+        $inventory = $this->preparedTanks()->map(fn ($tank) => [
+            'id' => $tank['id'],
+            'name' => $tank['name'],
+            'fuel_type' => $tank['fuel_type'],
+            'current_volume' => $tank['current_volume'],
+            'capacity' => $tank['capacity'],
+            'percentage' => $tank['percentage'],
+        ])->values()->all();
 
         return [
-            'stats' => $this->statsForPeriods($ranges, $creditSnapshot),
-            'customMetricStats' => $this->customMetricStats($metricDateRanges, $creditSnapshot),
-            'tankMovements' => $this->tankMovementsForPeriods($ranges),
-            'pumpSales' => $this->pumpSalesForPeriods($ranges),
+            'filter' => $filter,
+            'stats' => $stats,
+            'inventory' => $inventory,
             'chartLabels' => $chartLabels,
             'chartData' => $chartData,
-            'periodLabels' => $this->periodLabels(),
-            'cardDefaultPeriods' => $this->cardDefaultPeriods($metricDateRanges),
-            'customPeriodLabels' => $this->customPeriodLabels($metricDateRanges),
-            'metricDateFilters' => $this->metricDateFilters($metricDateRanges),
-            'metricDateFilterNames' => self::METRIC_DATE_FILTERS,
+            'warnings' => [
+                'pending_readings' => $stats['shift_reading_pending_count'],
+                'negative_inventory' => array_values(array_filter($inventory, fn ($tank) => $tank['current_volume'] < 0)),
+            ],
             'lastVerifiedAt' => $lastVerifiedAt?->toDateTimeString(),
             'lastUpdatedAt' => Carbon::now()->toDateTimeString(),
         ];
     }
 
-    private function metricDateRanges(?Request $request): array
+    private function dashboardFilter(Request $request): array
     {
-        $ranges = [];
+        $values = $request->validate([
+            'period' => 'nullable|in:today,weekly,monthly,custom',
+            'from' => 'nullable|required_if:period,custom|date_format:Y-m-d',
+            'to' => 'nullable|required_if:period,custom|date_format:Y-m-d',
+        ]);
+        $period = $values['period'] ?? 'today';
+        $end = Carbon::today();
+        $start = match ($period) {
+            'weekly' => $end->copy()->startOfWeek(),
+            'monthly' => $end->copy()->startOfMonth(),
+            'custom' => Carbon::parse($values['from']),
+            default => $end->copy(),
+        };
 
-        if (! $request) {
-            return $ranges;
-        }
+        if ($period === 'custom') {
+            $end = Carbon::parse($values['to']);
 
-        foreach (self::METRIC_DATE_FILTERS as $target => $prefix) {
-            $range = $this->dateRangeFromValues(
-                $request->query($prefix . '_from'),
-                $request->query($prefix . '_to')
-            );
-
-            if ($range) {
-                $ranges[$target] = $range;
+            if ($end->lt($start)) {
+                [$start, $end] = [$end, $start];
             }
         }
 
-        return $ranges;
-    }
-
-    private function dateRangeFromValues($from, $to): ?array
-    {
-        if (! $from && ! $to) {
-            return null;
-        }
-
-        try {
-            $start = Carbon::parse($from ?: $to)->startOfDay();
-            $end = Carbon::parse($to ?: $from)->endOfDay();
-        } catch (\Exception $e) {
-            return null;
-        }
-
-        if ($end->lt($start)) {
-            [$start, $end] = [$end->copy()->startOfDay(), $start->copy()->endOfDay()];
-        }
-
-        return [$start, $end];
-    }
-
-    private function periodRanges(): array
-    {
         return [
-            'today' => [
-                Carbon::today()->startOfDay(),
-                Carbon::today()->endOfDay(),
-            ],
-            'weekly' => [
-                Carbon::now()->startOfWeek()->startOfDay(),
-                Carbon::today()->endOfDay(),
-            ],
-            'monthly' => [
-                Carbon::now()->startOfMonth()->startOfDay(),
-                Carbon::today()->endOfDay(),
-            ],
-            'custom' => [
-                Carbon::today()->startOfDay(),
-                Carbon::today()->endOfDay(),
-            ],
+            'period' => $period,
+            'from' => $start->toDateString(),
+            'to' => $end->toDateString(),
+            'label' => $start->isSameDay($end)
+                ? $start->format('M d, Y')
+                : $start->format('M d, Y') . ' – ' . $end->format('M d, Y'),
         ];
-    }
-
-    private function periodLabels(): array
-    {
-        return [
-            'today' => 'Today',
-            'weekly' => 'This Week',
-            'monthly' => 'This Month',
-            'custom' => 'Custom',
-        ];
-    }
-
-    private function customPeriodLabels(array $metricDateRanges): array
-    {
-        return collect($metricDateRanges)
-            ->map(fn ($range) => $range[0]->format('M d, Y') . ' - ' . $range[1]->format('M d, Y'))
-            ->all();
-    }
-
-    private function cardDefaultPeriods(array $metricDateRanges): array
-    {
-        return collect(self::METRIC_DATE_FILTERS)
-            ->mapWithKeys(fn ($prefix, $target) => [$target => isset($metricDateRanges[$target]) ? 'custom' : 'today'])
-            ->all();
-    }
-
-    private function metricDateFilters(array $metricDateRanges): array
-    {
-        $today = Carbon::today()->toDateString();
-
-        return collect(self::METRIC_DATE_FILTERS)
-            ->mapWithKeys(function ($prefix, $target) use ($metricDateRanges, $today) {
-                $range = $metricDateRanges[$target] ?? null;
-
-                return [
-                    $target => [
-                        'prefix' => $prefix,
-                        'from' => $range ? $range[0]->toDateString() : $today,
-                        'to' => $range ? $range[1]->toDateString() : $today,
-                    ],
-                ];
-            })
-            ->all();
-    }
-
-    private function statsForPeriods(array $ranges, array $creditSnapshot): array
-    {
-        $stats = [];
-
-        foreach (self::PERIODS as $period) {
-            [$start, $end] = $ranges[$period];
-            $stats[$period] = $this->statsForRange($start, $end, $creditSnapshot);
-        }
-
-        return $stats;
-    }
-
-    private function customMetricStats(array $metricDateRanges, array $creditSnapshot): array
-    {
-        return collect($metricDateRanges)
-            ->map(fn ($range) => $this->statsForRange($range[0], $range[1], $creditSnapshot))
-            ->all();
     }
 
     private function statsForRange(Carbon $start, Carbon $end, array $creditSnapshot): array
     {
-        $hasSales = $this->hasTable('sales');
-        $fuelSales = $hasSales ? $this->fuelSalesQuery($start, $end) : null;
         $pendingShiftReadingNetSales = $this->shiftReadingNetSales($start, $end, 'pending');
         $verifiedShiftReadingNetSales = $this->shiftReadingNetSales($start, $end, 'verified');
-        $pendingShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'pending');
-        $verifiedShiftReadingNetSalesByTank = $this->shiftReadingNetSalesByTank($start, $end, 'verified');
-        $allShiftReadingNetSalesByTank = $this->combineNetSalesByTank(
-            $pendingShiftReadingNetSalesByTank,
-            $verifiedShiftReadingNetSalesByTank
-        );
         $shiftReadingLitersMovement = $this->shiftReadingLitersMovement($start, $end);
 
         $paymentRows = $this->creditPaymentRows($start, $end);
 
         return [
-            'sales_table_net_sales_with_credit' => $hasSales ? $this->sumSalesTableNetSales(clone $fuelSales) : 0,
-            'sales_table_net_sales_without_credit' => $hasSales ? $this->sumSalesTableNetSales(
-                $this->walkinFuelSales(clone $fuelSales)
-            ) : 0,
-            'sales_table_net_sales_by_tank_with_credit' => $hasSales
-                ? $this->salesTableNetSalesByTank($start, $end)
-                : $this->emptyNetSalesTankRows(),
-            'sales_table_net_sales_by_tank_without_credit' => $hasSales
-                ? $this->salesTableNetSalesByTank($start, $end, true)
-                : $this->emptyNetSalesTankRows(),
             'shift_reading_pending_net_sales_with_credit' => $pendingShiftReadingNetSales['with_credit'],
             'shift_reading_pending_net_sales_without_credit' => $pendingShiftReadingNetSales['without_credit'],
-            'shift_reading_pending_net_sales_by_tank_with_credit' => $pendingShiftReadingNetSalesByTank['with_credit'],
-            'shift_reading_pending_net_sales_by_tank_without_credit' => $pendingShiftReadingNetSalesByTank['without_credit'],
             'shift_reading_pending_count' => $pendingShiftReadingNetSales['reading_count'],
             'shift_reading_verified_net_sales_with_credit' => $verifiedShiftReadingNetSales['with_credit'],
             'shift_reading_verified_net_sales_without_credit' => $verifiedShiftReadingNetSales['without_credit'],
-            'shift_reading_verified_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
-            'shift_reading_verified_net_sales_by_tank_without_credit' => $verifiedShiftReadingNetSalesByTank['without_credit'],
             'shift_reading_verified_count' => $verifiedShiftReadingNetSales['reading_count'],
             'shift_reading_all_net_sales_with_credit' => $this->money(
                 $pendingShiftReadingNetSales['with_credit'] + $verifiedShiftReadingNetSales['with_credit']
@@ -248,31 +132,15 @@ class AdminDashboardController extends Controller
             'shift_reading_all_net_sales_without_credit' => $this->money(
                 $pendingShiftReadingNetSales['without_credit'] + $verifiedShiftReadingNetSales['without_credit']
             ),
-            'shift_reading_all_net_sales_by_tank_with_credit' => $allShiftReadingNetSalesByTank['with_credit'],
-            'shift_reading_all_net_sales_by_tank_without_credit' => $allShiftReadingNetSalesByTank['without_credit'],
             'shift_reading_all_count' => $pendingShiftReadingNetSales['reading_count'] + $verifiedShiftReadingNetSales['reading_count'],
-            'shift_reading_net_sales_with_credit' => $verifiedShiftReadingNetSales['with_credit'],
-            'shift_reading_net_sales_without_credit' => $verifiedShiftReadingNetSales['without_credit'],
-            'shift_reading_net_sales_by_tank_with_credit' => $verifiedShiftReadingNetSalesByTank['with_credit'],
-            'shift_reading_net_sales_by_tank_without_credit' => $verifiedShiftReadingNetSalesByTank['without_credit'],
-            'shift_reading_count' => $verifiedShiftReadingNetSales['reading_count'],
             'expected_credit_sales' => $this->expectedCreditSales($start, $end),
             'expected_credit_receivables' => $creditSnapshot['receivables'],
             'credit_payments_received' => $this->money($paymentRows->sum('credit')),
             'credit_payment_count' => $paymentRows->count(),
-            'advance_receivables_received' => $this->advanceReceivedFromPayments($paymentRows),
-            'overall_advance_balance' => $creditSnapshot['advance_balance'],
-            'total_excess' => $hasSales && $this->hasColumn('sales', 'surcharge')
-                ? $this->money((clone $fuelSales)->sum('surcharge'))
-                : 0,
             'shift_reading_verified_liters' => $shiftReadingLitersMovement['verified_liters'],
             'shift_reading_verified_liters_count' => $shiftReadingLitersMovement['verified_count'],
             'shift_reading_unverified_liters' => $shiftReadingLitersMovement['unverified_liters'],
             'shift_reading_unverified_liters_count' => $shiftReadingLitersMovement['unverified_count'],
-            'shift_reading_verified_pumps' => $shiftReadingLitersMovement['verified_pumps'],
-            'shift_reading_verified_tanks' => $shiftReadingLitersMovement['verified_tanks'],
-            'shift_reading_unverified_pumps' => $shiftReadingLitersMovement['unverified_pumps'],
-            'shift_reading_unverified_tanks' => $shiftReadingLitersMovement['unverified_tanks'],
         ];
     }
 
@@ -516,40 +384,31 @@ class AdminDashboardController extends Controller
         })->all();
     }
 
-    private function salesTrend(?array $customDateRange = null): array
+    private function salesTrend(array $range): array
     {
         $labels = [];
         $data = [];
+        [$start, $end] = $range;
+        $totals = collect();
+        $undatedTotal = 0;
 
-        if ($customDateRange) {
-            [$start, $end] = $customDateRange;
-            $date = $start->copy()->startOfDay();
+        if ($this->hasTable('sales')) {
+            $query = $this->fuelSalesQuery($start, $end);
 
-            while ($date->lte($end)) {
-                $labels[] = $date->format('M d');
-                $data[] = $this->hasTable('sales')
-                    ? $this->money(
-                        $this->sumSalesTableNetSales(
-                            $this->fuelSalesQuery($date->copy()->startOfDay(), $date->copy()->endOfDay())
-                        )
-                    )
-                    : 0;
-                $date->addDay();
+            if ($this->hasColumn('sales', 'created_at')) {
+                $expression = $this->salesNetExpression();
+                $totals = $query
+                    ->selectRaw("DATE(created_at) as sale_date, COALESCE(SUM({$expression}), 0) as total")
+                    ->groupByRaw('DATE(created_at)')
+                    ->pluck('total', 'sale_date');
+            } else {
+                $undatedTotal = $this->sumSalesTableNetSales($query);
             }
-
-            return [$labels, $data];
         }
 
-        for ($i = 6; $i >= 0; $i--) {
-            $date = Carbon::today()->subDays($i);
-            $labels[] = $date->format('D, M d');
-            $data[] = $this->hasTable('sales')
-                ? $this->money(
-                    $this->sumSalesTableNetSales(
-                        $this->fuelSalesQuery($date->copy()->startOfDay(), $date->copy()->endOfDay())
-                    )
-                )
-                : 0;
+        for ($date = $start->copy()->startOfDay(); $date->lte($end); $date->addDay()) {
+            $labels[] = $date->toDateString();
+            $data[] = $this->money($totals[$date->toDateString()] ?? $undatedTotal);
         }
 
         return [$labels, $data];
