@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\PhilippineMobileNumber;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class CustomerController extends Controller
@@ -71,7 +73,7 @@ class CustomerController extends Controller
                 $customerId = DB::table('customers')->insertGetId($this->onlyExistingColumns('customers', [
                     'business_name' => $validated['business_name'],
                     ...$this->customerNameValues($validated),
-                    'contact_number' => $validated['contact_number'] ?? null,
+                    'contact_number' => $validated['contact_number'],
                     'credit_limit' => (float) $validated['credit_limit'],
                     'current_balance' => 0,
                     'payment_terms' => $validated['payment_terms'] ?? '15 Days',
@@ -113,7 +115,7 @@ class CustomerController extends Controller
                 $this->updateForExistingColumns('customers', $validated['id'], [
                     'business_name' => $validated['business_name'],
                     ...$this->customerNameValues($validated),
-                    'contact_number' => $validated['contact_number'] ?? null,
+                    'contact_number' => $validated['contact_number'],
                     'credit_limit' => (float) $validated['credit_limit'],
                     'payment_terms' => $validated['payment_terms'] ?? null,
                     'sp_diesel' => $validated['sp_diesel'] ?? null,
@@ -780,6 +782,10 @@ class CustomerController extends Controller
 
     private function validateCustomer(Request $request, bool $updating = false): array
     {
+        if (is_string($request->input('contact_number'))) {
+            $request->merge(['contact_number' => PhilippineMobileNumber::trim($request->input('contact_number'))]);
+        }
+
         $nameFields = ['first_name', 'middle_name', 'last_name', 'suffix'];
         $usesNameComponents = ! $updating || $request->hasAny($nameFields);
 
@@ -792,7 +798,7 @@ class CustomerController extends Controller
 
         $rules = [
             'business_name' => 'required|string|max:255',
-            'contact_number' => 'nullable|string|max:50',
+            'contact_number' => ['bail', 'required', 'string', 'regex:'.PhilippineMobileNumber::PATTERN],
             'credit_limit' => 'required|numeric|min:0',
             'payment_terms' => 'nullable|string|max:50',
             'sp_diesel' => 'nullable|numeric|min:0',
@@ -814,10 +820,24 @@ class CustomerController extends Controller
         }
 
         $validated = $request->validate($rules, [
+            'contact_number.required' => PhilippineMobileNumber::VALIDATION_MESSAGE,
+            'contact_number.string' => PhilippineMobileNumber::VALIDATION_MESSAGE,
+            'contact_number.regex' => PhilippineMobileNumber::VALIDATION_MESSAGE,
             'first_name.regex' => 'First name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
             'middle_name.regex' => 'Middle name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
             'last_name.regex' => 'Last name may contain letters, spaces, hyphens, apostrophes and other personal-name punctuation.',
         ]);
+
+        $validated['contact_number'] = PhilippineMobileNumber::normalize($validated['contact_number']);
+        $duplicateContact = $this->hasColumn('customers', 'contact_number') && DB::table('customers')
+            ->when($updating, fn ($query) => $query->where('id', '!=', $validated['id']))
+            ->where('contact_number', 'like', '%'.substr($validated['contact_number'], 1).'%')
+            ->pluck('contact_number')
+            ->contains(fn ($number) => PhilippineMobileNumber::normalize($number) === $validated['contact_number']);
+
+        if ($duplicateContact) {
+            throw ValidationException::withMessages(['contact_number' => PhilippineMobileNumber::DUPLICATE_MESSAGE]);
+        }
 
         if ($usesNameComponents) {
             $validated['middle_name'] = $validated['middle_name'] ?? null;

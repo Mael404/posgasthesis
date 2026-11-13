@@ -12,6 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Mobile-number validation trims whitespace without stripping invalid characters.
+        $middleware->trimStrings(except: ['contact_number']);
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
         ]);

@@ -40,6 +40,7 @@ beforeEach(function () {
     ]));
     $this->customerData = [
         'business_name' => 'Customer Business',
+        'contact_number' => '09171234567',
         'credit_limit' => 5000,
         'first_name' => 'Juan',
         'middle_name' => 'Santos',
@@ -123,6 +124,7 @@ test('first and last names accept exactly two through sixty unicode characters a
 test('a single owner name cannot bypass required name components for a new customer', function () {
     $this->postJson(route('customers.store'), [
         'business_name' => 'Legacy Request',
+        'contact_number' => '09171234567',
         'credit_limit' => 1000,
         'owner_name' => 'Juan Dela Cruz',
     ])->assertUnprocessable()->assertJsonValidationErrors(['first_name', 'last_name']);
@@ -134,6 +136,7 @@ test('editing other legacy customer details preserves the exact original name an
     $this->postJson(route('customers.update'), [
         'id' => $id,
         'business_name' => 'Updated Business',
+        'contact_number' => '09171234567',
         'credit_limit' => 6000,
         'owner_name' => 'This single field must not overwrite the saved name',
     ])->assertOk();
@@ -165,7 +168,7 @@ test('an admin can explicitly replace a legacy name using validated components',
 test('an incomplete name replacement cannot damage a legacy name', function () {
     $id = DB::table('customers')->insertGetId(['business_name' => 'Legacy Customer', 'owner_name' => 'Original, Complete Name']);
     $this->postJson(route('customers.update'), [
-        'id' => $id, 'business_name' => 'Customer', 'credit_limit' => 1000, 'first_name' => 'Juan',
+        'id' => $id, 'business_name' => 'Customer', 'credit_limit' => 1000, 'first_name' => 'Juan', 'contact_number' => '09171234567',
     ])->assertUnprocessable()->assertJsonValidationErrors('last_name');
     $this->assertDatabaseHas('customers', ['id' => $id, 'owner_name' => 'Original, Complete Name', 'first_name' => null]);
 });
@@ -176,7 +179,7 @@ test('editing a structured name regenerates the full name and omitted name field
     $this->postJson(route('customers.update'), array_replace($this->customerData, [
         'id' => $id, 'middle_name' => '', 'suffix' => '', 'last_name' => 'O’Neill',
     ]))->assertOk();
-    $this->postJson(route('customers.update'), ['id' => $id, 'business_name' => 'Renamed Business', 'credit_limit' => 5000])->assertOk();
+    $this->postJson(route('customers.update'), ['id' => $id, 'business_name' => 'Renamed Business', 'credit_limit' => 5000, 'contact_number' => '09171234567'])->assertOk();
     $this->assertDatabaseHas('customers', ['id' => $id, 'owner_name' => 'Juan O’Neill', 'middle_name' => null, 'last_name' => 'O’Neill', 'suffix' => null]);
 });
 

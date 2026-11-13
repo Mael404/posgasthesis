@@ -43,6 +43,7 @@ beforeEach(function () {
 
     $this->customerData = [
         'business_name' => 'Wholesale Customer',
+        'contact_number' => '09171234567',
         'first_name' => 'Juan',
         'last_name' => 'Dela Cruz',
         'credit_limit' => 5000,
@@ -127,7 +128,7 @@ test('history returns only the selected customer newest first and preserves the 
     $this->freezeTime();
     $this->actingAs($this->admin)->postJson(route('customers.store'), $this->customerData)->assertOk();
     $customerId = DB::table('customers')->value('id');
-    $this->postJson(route('customers.store'), array_replace($this->customerData, ['business_name' => 'Other Customer']))->assertOk();
+    $this->postJson(route('customers.store'), array_replace($this->customerData, ['business_name' => 'Other Customer', 'contact_number' => '09214028982']))->assertOk();
 
     $this->travel(1)->minute();
     $this->postJson(route('customers.update'), array_replace($this->customerData, [
@@ -165,7 +166,7 @@ test('a failed history write rolls back both new customers and price updates', f
     ]))->assertStatus(422)->assertJsonPath('success', false);
     $this->assertDatabaseHas('customers', ['id' => $customerId, 'sp_diesel' => 75]);
 
-    $this->postJson(route('customers.store'), $this->customerData)
+    $this->postJson(route('customers.store'), array_replace($this->customerData, ['contact_number' => '09214028982']))
         ->assertStatus(422)->assertJsonPath('success', false);
     $this->assertDatabaseCount('customers', 1);
     $this->getJson(route('customers.pricingHistory', $customerId))->assertStatus(503);

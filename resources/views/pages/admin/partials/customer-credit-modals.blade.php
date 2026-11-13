@@ -243,8 +243,25 @@
                     <input type="text" x-model="customerForm.business_name" class="mt-1.5 {{ $inputClass }}" required>
                 </label>
                 <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                    <span>Contact Number</span>
-                    <input type="text" x-model="customerForm.contact_number" class="mt-1.5 {{ $inputClass }}">
+                    <span>Contact Number <span class="text-error-600" aria-hidden="true">*</span></span>
+                    <input
+                        type="tel"
+                        name="contact_number"
+                        autocomplete="tel"
+                        inputmode="tel"
+                        x-model="customerForm.contact_number"
+                        x-on:input="contactNumberTouched = true; contactNumberServerError = ''; customerForm.contact_number = trimContactNumber($el.value)"
+                        x-on:blur="contactNumberTouched = true; customerForm.contact_number = trimContactNumber($el.value)"
+                        x-on:invalid="contactNumberTouched = true"
+                        x-effect="$el.setCustomValidity(contactNumberValidationError())"
+                        :aria-invalid="contactNumberTouched && !!contactNumberValidationError()"
+                        aria-describedby="customer-contact-number-help customer-contact-number-error"
+                        pattern="(?:09|\+639)[0-9]{9}"
+                        placeholder="09XXXXXXXXX or +639XXXXXXXXX"
+                        class="mt-1.5 {{ $inputClass }}"
+                        required>
+                    <span id="customer-contact-number-help" class="mt-1.5 block text-theme-xs normal-case text-gray-500 dark:text-gray-400">Use either format. Numbers are saved as 09XXXXXXXXX.</span>
+                    <span id="customer-contact-number-error" x-show="contactNumberTouched && contactNumberValidationError()" x-text="contactNumberValidationError()" role="alert" class="mt-1.5 block text-theme-xs normal-case text-error-600 dark:text-error-400"></span>
                 </label>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
                     <label class="block text-theme-xs font-medium uppercase text-gray-500 dark:text-gray-400">

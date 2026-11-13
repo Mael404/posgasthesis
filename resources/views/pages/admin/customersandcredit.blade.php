@@ -551,6 +551,8 @@
                 savingPayment: false,
                 ledger: { customerId: '', fromDate: '', toDate: '', rows: [], loading: false, error: '' },
                 customerForm: {},
+                contactNumberTouched: false,
+                contactNumberServerError: '',
                 legacyCustomerName: false,
                 useNameComponents: true,
                 paymentForm: {},
@@ -682,6 +684,8 @@
                 },
 
                 resetCustomerForm() {
+                    this.contactNumberTouched = false;
+                    this.contactNumberServerError = '';
                     this.legacyCustomerName = false;
                     this.useNameComponents = true;
                     this.customerForm = {
@@ -699,6 +703,28 @@
                         sp_unleaded: '',
                         sp_premium: ''
                     };
+                },
+
+                trimContactNumber(value) {
+                    return String(value ?? '').replace(/^[\s\p{Z}\u0085]+|[\s\p{Z}\u0085]+$/gu, '');
+                },
+
+                normalizeContactNumber(value) {
+                    const number = this.trimContactNumber(value);
+                    if (!/^(?:09|\+639)[0-9]{9}$/.test(number)) return null;
+                    return number.startsWith('+63') ? '0' + number.slice(3) : number;
+                },
+
+                contactNumberValidationError() {
+                    if (this.contactNumberServerError) return this.contactNumberServerError;
+                    const normalized = this.normalizeContactNumber(this.customerForm.contact_number);
+                    if (!normalized) return 'Please enter a valid Philippine mobile number (09XXXXXXXXX or +639XXXXXXXXX).';
+
+                    const duplicate = this.customers.some(customer =>
+                        String(customer.id) !== String(this.customerForm.id) &&
+                        this.normalizeContactNumber(customer.contact_number) === normalized
+                    );
+                    return duplicate ? 'This mobile number is already registered to another customer.' : '';
                 },
 
                 cleanCustomerName(value) {
@@ -745,6 +771,14 @@
                 },
 
                 async submitCustomer() {
+                    this.contactNumberTouched = true;
+                    this.customerForm.contact_number = this.trimContactNumber(this.customerForm.contact_number);
+                    const contactError = this.contactNumberValidationError();
+                    if (contactError) {
+                        this.showNotice('error', contactError);
+                        return;
+                    }
+
                     if (!this.customerForm.business_name || Number(this.customerForm.credit_limit) < 0 || this.customerForm.credit_limit === '') {
                         this.showNotice('error', 'Business name and credit limit are required.');
                         return;
@@ -768,6 +802,7 @@
 
                     this.savingCustomer = true;
                     const payload = { ...this.customerForm };
+                    payload.contact_number = this.normalizeContactNumber(payload.contact_number);
                     delete payload.owner_name;
                     if (!this.useNameComponents) {
                         for (const field of ['first_name', 'middle_name', 'last_name', 'suffix']) delete payload[field];
@@ -776,6 +811,9 @@
                     this.savingCustomer = false;
 
                     if (!data.success) {
+                        if (data.errors?.contact_number) {
+                            this.contactNumberServerError = data.errors.contact_number[0];
+                        }
                         this.showNotice('error', data.message || 'Unable to save customer.');
                         return;
                     }
@@ -1011,7 +1049,7 @@
                         }
 
                         const firstError = data.errors ? Object.values(data.errors).flat()[0] : null;
-                        return { success: false, message: data.message || firstError || 'Request failed.' };
+                        return { success: false, message: firstError || data.message || 'Request failed.', errors: data.errors || {} };
                     } catch (error) {
                         return { success: false, message: 'An unexpected error occurred.' };
                     }

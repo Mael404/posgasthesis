@@ -217,3 +217,51 @@ test('date filter returns each individual sale from matching eligible shifts', f
         ->and($data['transactions']->pluck('locked_by_shift_reading_id')->all())->toBe([1, 1])
         ->and($data['transactionTotals']['amount'])->toBe(1500.0);
 });
+
+test('transaction log pages preserve filters and totals across all matching transactions', function (int $requestedPage, int $currentPage, array $saleIds) {
+    DB::table('sales')->insert(array_fill(0, 13, [
+        'user_id' => 1,
+        'locked_by_shift_reading_id' => 2,
+        'pump_id' => 1,
+        'fuel_type' => 'Premium',
+        'amount' => 100,
+        'discount' => 2,
+        'manual_discount' => 3,
+        'created_at' => '2026-08-02 12:00:00',
+        'updated_at' => '2026-08-02 12:00:00',
+    ]));
+    $filters = [
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'reading_status' => 'approved',
+        'staff_id' => 1,
+        'tab' => 'sales',
+    ];
+    $view = (new AdminReportController)->index(Request::create('/admin/sales-monitoring', 'GET', [
+        ...$filters,
+        'transaction_page' => $requestedPage,
+    ]));
+    $data = $view->getData();
+    $transactions = $data['transactions'];
+    parse_str(parse_url($transactions->url(1), PHP_URL_QUERY), $pageQuery);
+
+    expect($transactions->currentPage())->toBe($currentPage)
+        ->and($transactions->perPage())->toBe(10)
+        ->and($transactions->lastPage())->toBe(2)
+        ->and($transactions->total())->toBe(14)
+        ->and($transactions->pluck('id')->all())->toBe($saleIds)
+        ->and($pageQuery)->toMatchArray(array_map('strval', $filters))
+        ->and($pageQuery['transaction_page'])->toBe('1')
+        ->and(parse_url($transactions->url(1), PHP_URL_FRAGMENT))->toBe('transaction-log')
+        ->and($data['transactionTotals'])->toBe([
+            'records' => 14,
+            'liters' => 0.0,
+            'discounts' => 165.0,
+            'amount' => 2300.0,
+        ]);
+})->with([
+    'first page' => [1, 1, range(16, 7)],
+    'last page' => [2, 2, [6, 5, 4, 2]],
+    'page beyond last' => [99, 2, [6, 5, 4, 2]],
+    'negative page' => [-1, 1, range(16, 7)],
+]);

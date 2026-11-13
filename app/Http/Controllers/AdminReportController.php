@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -49,6 +50,18 @@ class AdminReportController extends Controller
         $shiftReadings = $this->shiftReadingTransactions($rangeStart, $rangeEnd, $readingStatus, $staffId);
         $transactions = $this->individualSalesTransactions($shiftReadings, $rangeStart, $rangeEnd, $staffId);
         $transactionTotals = $this->individualTransactionTotals($transactions);
+        $perPage = 10;
+        $page = max(1, min(
+            $request->integer('transaction_page', 1),
+            (int) ceil($transactions->count() / $perPage)
+        ));
+        $transactions = (new LengthAwarePaginator(
+            $transactions->forPage($page, $perPage)->values(),
+            $transactions->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'pageName' => 'transaction_page']
+        ))->appends($request->query())->fragment('transaction-log');
         $reportData = $this->salesOverview($shiftReadings);
         $tanks = $this->tanksByFuelType();
         $salesOut = $this->salesOutByFuelType($reportData);

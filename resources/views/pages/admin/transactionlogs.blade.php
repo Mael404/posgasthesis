@@ -10,7 +10,7 @@
         $tanks = collect($tanks ?? []);
         $salesOut = collect($salesOut ?? []);
         $shiftReadings = collect($shiftReadings ?? []);
-        $transactions = collect($transactions ?? []);
+        $transactions = $transactions ?? new \Illuminate\Pagination\LengthAwarePaginator([], 0, 10);
         $transactionTotals = $transactionTotals ?? ['records' => 0, 'liters' => 0, 'discounts' => 0, 'amount' => 0];
         $staffOptions = collect($staffOptions ?? []);
         $staffId = isset($staffId) ? (int) $staffId : null;
@@ -209,11 +209,10 @@
                 </div>
             </section>
 
-            <section class="{{ $cardClass }}">
+            <section id="transaction-log" class="{{ $cardClass }}">
                 <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Transaction Log</h2>
-                        <p class="{{ $captionClass }}">Individual transactions from the selected pending and approved shifts. Voided and rejected shifts are excluded.</p>
                     </div>
                     <span class="inline-flex w-fit rounded-full bg-gray-100 px-3 py-1 text-theme-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
                         {{ number_format((int) $transactionTotals['records']) }} transaction{{ (int) $transactionTotals['records'] === 1 ? '' : 's' }}
@@ -336,6 +335,12 @@
                         </table>
                     </div>
                 </div>
+
+                @if ($transactions->hasPages())
+                    <div class="mt-5">
+                        {{ $transactions->onEachSide(1)->links() }}
+                    </div>
+                @endif
             </section>
         </div>
 
