@@ -4,9 +4,9 @@ namespace App\Support;
 
 final class PhilippineMobileNumber
 {
-    public const PATTERN = '/^(?:09|\+639)[0-9]{9}$/';
+    public const PATTERN = '/\A09[0-9]{9}\z/';
 
-    public const VALIDATION_MESSAGE = 'Please enter a valid Philippine mobile number (09XXXXXXXXX or +639XXXXXXXXX).';
+    public const VALIDATION_MESSAGE = 'Contact number must contain exactly 11 digits and start with 09 (e.g. 09214027871).';
 
     public const DUPLICATE_MESSAGE = 'This mobile number is already registered to another customer.';
 
@@ -19,7 +19,8 @@ final class PhilippineMobileNumber
     {
         $number = self::trim($number);
 
-        if (preg_match(self::PATTERN, $number) !== 1) {
+        // Recognize legacy international numbers when checking for duplicates.
+        if (preg_match('/\A(?:09|\+639)[0-9]{9}\z/', $number) !== 1) {
             return null;
         }
 

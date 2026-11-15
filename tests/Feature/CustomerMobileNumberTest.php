@@ -56,12 +56,11 @@ test('valid mobile numbers are trimmed and stored as local-format strings', func
     $this->assertSame($expected, DB::table('customers')->value('contact_number'));
 })->with([
     ['09214028982', '09214028982'],
+    ['09214027871', '09214027871'],
     ['09171234567', '09171234567'],
-    ['+639214028982', '09214028982'],
-    ['+639171234567', '09171234567'],
     ['  09214028982  ', '09214028982'],
-    ["\t +639171234567 \r\n", '09171234567'],
-    ["\u{00A0}+639171234567\u{00A0}", '09171234567'],
+    ["\t 09171234567 \r\n", '09171234567'],
+    ["\u{00A0}09171234567\u{00A0}", '09171234567'],
     ["\u{FEFF}09171234567\u{FEFF}", '09171234567'],
 ]);
 
@@ -78,6 +77,7 @@ test('invalid mobile input is rejected with the required clear message on creati
     $this->assertDatabaseHas('customers', ['id' => $id, 'contact_number' => '09171234567']);
 })->with([
     ['9214028982'], ['0921402898'], ['092140289821'], ['09214ABC982'],
+    ['+639214028982'], ['+639171234567'], ['+09214027871'], ['09214027871e0'],
     ['639214028982'], ['+6309214028982'], ['+63921402898'],
     ['+6391712345678'], ['08171234567'], ['++639171234567'],
     ['09 171234567'], ['0917-123-4567'], ['+63 9171234567'], ['0917123456.'],
@@ -104,12 +104,10 @@ test('equivalent local and international numbers cannot create duplicate custome
     $this->assertDatabaseHas('customers', ['id' => $id, 'contact_number' => $stored]);
 })->with([
     ['09171234567', '09171234567'],
-    ['09171234567', '+639171234567'],
     ['+639171234567', '09171234567'],
-    ['+639171234567', '+639171234567'],
     ['  +639171234567  ', ' 09171234567 '],
     ["\t+639171234567\r\n", '09171234567'],
-    ["\u{00A0}09171234567\u{00A0}", '+639171234567'],
+    ["\u{00A0}09171234567\u{00A0}", '09171234567'],
 ]);
 
 test('inactive customers also reserve their normalized mobile number', function () {
@@ -126,9 +124,8 @@ test('customers may keep their own equivalent number and it is normalized when s
     $this->assertDatabaseHas('customers', ['id' => $id, 'contact_number' => '09171234567']);
     $this->assertDatabaseCount('customers', 1);
 })->with([
-    ['09171234567', '+639171234567'],
+    ['09171234567', '09171234567'],
     ['+639171234567', '09171234567'],
-    ['+639171234567', '+639171234567'],
 ]);
 
 test('updates cannot use another customer number even when its stored format differs', function () {
@@ -146,8 +143,10 @@ test('legacy placeholders and shared numbers are not rewritten or removed when v
     }
     $before = DB::table('customers')->orderBy('id')->get(['id', 'contact_number'])->toJson();
     $this->get(route('customers.index'))->assertOk()->assertSee('type="tel"', false)
-        ->assertSee('customer-contact-number-error')->assertSee('Use either format. Numbers are saved as 09XXXXXXXXX.');
-    $this->postJson(route('customers.store'), array_replace($this->customerData, ['contact_number' => '+639214028982']))->assertOk();
+        ->assertSee('customer-contact-number-error')->assertSee('Enter 11 digits starting with 09 (e.g. 09214027871).')
+        ->assertSee('inputmode="numeric"', false)->assertSee('maxlength="11"', false)
+        ->assertSee('pattern="09[0-9]{9}"', false);
+    $this->postJson(route('customers.store'), array_replace($this->customerData, ['contact_number' => '09214028982']))->assertOk();
     $this->assertSame($before, DB::table('customers')->where('id', '<=', 4)->orderBy('id')->get(['id', 'contact_number'])->toJson());
     $this->assertDatabaseCount('customers', 5);
 });
@@ -157,6 +156,6 @@ test('a legacy placeholder requires correction before saving an edited customer'
     $this->postJson(route('customers.update'), array_replace($this->customerData, ['id' => $id, 'contact_number' => 'N/A']))
         ->assertUnprocessable()->assertJsonValidationErrors('contact_number');
     $this->assertDatabaseHas('customers', ['id' => $id, 'contact_number' => 'N/A']);
-    $this->postJson(route('customers.update'), array_replace($this->customerData, ['id' => $id, 'contact_number' => '+639171234567']))->assertOk();
+    $this->postJson(route('customers.update'), array_replace($this->customerData, ['id' => $id, 'contact_number' => '09171234567']))->assertOk();
     $this->assertDatabaseHas('customers', ['id' => $id, 'contact_number' => '09171234567']);
 });

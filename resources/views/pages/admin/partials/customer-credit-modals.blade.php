@@ -248,19 +248,20 @@
                         type="tel"
                         name="contact_number"
                         autocomplete="tel"
-                        inputmode="tel"
+                        inputmode="numeric"
+                        maxlength="11"
                         x-model="customerForm.contact_number"
-                        x-on:input="contactNumberTouched = true; contactNumberServerError = ''; customerForm.contact_number = trimContactNumber($el.value)"
+                        x-on:input="contactNumberTouched = true; contactNumberServerError = ''; $el.value = contactNumberDigits($el.value); customerForm.contact_number = $el.value"
                         x-on:blur="contactNumberTouched = true; customerForm.contact_number = trimContactNumber($el.value)"
                         x-on:invalid="contactNumberTouched = true"
                         x-effect="$el.setCustomValidity(contactNumberValidationError())"
                         :aria-invalid="contactNumberTouched && !!contactNumberValidationError()"
                         aria-describedby="customer-contact-number-help customer-contact-number-error"
-                        pattern="(?:09|\+639)[0-9]{9}"
-                        placeholder="09XXXXXXXXX or +639XXXXXXXXX"
+                        pattern="09[0-9]{9}"
+                        placeholder="09214027871"
                         class="mt-1.5 {{ $inputClass }}"
                         required>
-                    <span id="customer-contact-number-help" class="mt-1.5 block text-theme-xs normal-case text-gray-500 dark:text-gray-400">Use either format. Numbers are saved as 09XXXXXXXXX.</span>
+                    <span id="customer-contact-number-help" class="mt-1.5 block text-theme-xs normal-case text-gray-500 dark:text-gray-400">Enter 11 digits starting with 09 (e.g. 09214027871).</span>
                     <span id="customer-contact-number-error" x-show="contactNumberTouched && contactNumberValidationError()" x-text="contactNumberValidationError()" role="alert" class="mt-1.5 block text-theme-xs normal-case text-error-600 dark:text-error-400"></span>
                 </label>
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">

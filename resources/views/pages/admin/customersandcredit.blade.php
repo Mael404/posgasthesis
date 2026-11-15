@@ -663,7 +663,7 @@
                             middle_name: customer.middle_name || '',
                             last_name: customer.last_name || '',
                             suffix: customer.suffix || '',
-                            contact_number: customer.contact_number || '',
+                            contact_number: this.normalizeContactNumber(customer.contact_number) || customer.contact_number || '',
                             credit_limit: Number(customer.credit_limit || 0).toFixed(2),
                             payment_terms: customer.payment_terms || '15 Days',
                             sp_diesel: customer.sp_diesel || '',
@@ -709,6 +709,10 @@
                     return String(value ?? '').replace(/^[\s\p{Z}\u0085]+|[\s\p{Z}\u0085]+$/gu, '');
                 },
 
+                contactNumberDigits(value) {
+                    return String(value ?? '').replace(/[^0-9]/g, '').slice(0, 11);
+                },
+
                 normalizeContactNumber(value) {
                     const number = this.trimContactNumber(value);
                     if (!/^(?:09|\+639)[0-9]{9}$/.test(number)) return null;
@@ -717,8 +721,10 @@
 
                 contactNumberValidationError() {
                     if (this.contactNumberServerError) return this.contactNumberServerError;
-                    const normalized = this.normalizeContactNumber(this.customerForm.contact_number);
-                    if (!normalized) return 'Please enter a valid Philippine mobile number (09XXXXXXXXX or +639XXXXXXXXX).';
+                    const normalized = this.trimContactNumber(this.customerForm.contact_number);
+                    if (normalized.length !== 11 || !/^09[0-9]{9}$/.test(normalized)) {
+                        return 'Contact number must contain exactly 11 digits and start with 09 (e.g. 09214027871).';
+                    }
 
                     const duplicate = this.customers.some(customer =>
                         String(customer.id) !== String(this.customerForm.id) &&
